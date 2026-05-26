@@ -36,8 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
-# image-generator runtime data
-/data/
+# image-generator runtime data — 폴더 자체는 추적하지 않되, 코드 구성인 mcp.json 만 예외.
+# (폴더 전체 ignore 패턴 `/data/` 하에서는 negation 이 동작하지 않으므로 `/data/*` 사용.)
+/data/*
+!/data/mcp.json
 
 # claude code per-user state
 .claude/

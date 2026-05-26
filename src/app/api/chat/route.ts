@@ -1,27 +1,58 @@
 import { NextRequest } from "next/server";
+import fs from "node:fs";
+import path from "node:path";
 import { createSseStream, SSE_HEADERS } from "@/lib/sse/stream";
 import type { ChatEvent, ChatRequest } from "@/types/chat";
-import { createSession, getSession, touchSession, renameSession } from "@/lib/db/repo/sessions";
-import { createMessage } from "@/lib/db/repo/messages";
-import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
+import type { MessageBlock } from "@/types/db";
+import {
+  createSession,
+  getSession,
+  touchSession,
+  renameSession,
+} from "@/lib/db/repo/sessions";
+import { createMessage, lastClaudeSessionId } from "@/lib/db/repo/messages";
+import { getGeneration, linkGeneration } from "@/lib/db/repo/generations";
 import { createJob, updateJob } from "@/lib/db/repo/jobs";
-import { newGenerationId, newId, newJobId } from "@/lib/util/ids";
-import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
-import { DATA_DIR, toRelative } from "@/lib/util/paths";
-import path from "node:path";
+import { newJobId } from "@/lib/util/ids";
+import { spawnClaude } from "@/lib/cli/claude-cli";
 
 /**
- * POST /api/chat — SSE 스트림.
+ * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
  *
- * 이번 단계(M1·M2)는 Claude CLI 미도입 단순 경로:
- *   메시지 → 그대로 ImageBackend.execute 호출 → 결과 카드.
+ * 이전 단순 경로(직접 ImageBackend 호출) 는 폐기. 모든 메시지는 Claude CLI 가 받아
+ * orchestrator system prompt 에 따라 `generate_image` MCP 도구를 호출하고,
+ * 그 MCP 도구가 다시 `codex exec` 로 imagegen 스킬을 발동한다.
  *
- * Claude CLI orchestrator 도입(M3)은 이 라우트 안에서 ImageBackend 호출 자리를
- * Claude→MCP→ImageBackend 체인으로 바꿔 끼우는 형태.
+ * SSE 이벤트 매핑:
+ *  Claude stream-json   →  ChatEvent
+ *  ───────────────────     ──────────────────────────────
+ *  system/init          →  (Next 가 claude_session_id 만 저장)
+ *  assistant.text       →  assistant_text
+ *  assistant.tool_use   →  tool_call_started
+ *  user.tool_result     →  tool_call_finished
+ *  result               →  message_completed
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MCP_CONFIG_PATH = path.join(process.cwd(), "data", "mcp.json");
+const SYSTEM_PROMPT_PATH = path.join(
+  process.cwd(),
+  "src",
+  "lib",
+  "prompt",
+  "system-orchestrator.md",
+);
+const MCP_TOOL_NAME = "mcp__imggen__generate_image";
+
+let cachedSystemPrompt: string | null = null;
+function getSystemPrompt(): string {
+  if (cachedSystemPrompt == null) {
+    cachedSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8");
+  }
+  return cachedSystemPrompt;
+}
 
 export async function POST(req: NextRequest) {
   let body: ChatRequest;
@@ -36,7 +67,6 @@ export async function POST(req: NextRequest) {
 
   const { stream, send, close, signal } = createSseStream<ChatEvent>();
 
-  // 워커 루프는 비동기로 실행. await 하지 않음 (stream 을 즉시 반환).
   runChat(body, send, close, signal, req.signal).catch(err => {
     send({ type: "error", message: (err as Error).message });
     close();
@@ -55,16 +85,10 @@ async function runChat(
   // 1. 세션 확보
   let sessionId = body.sessionId;
   let isNewSession = false;
-  if (sessionId) {
-    const existing = getSession(sessionId);
-    if (!existing) {
-      sessionId = undefined;
-    }
-  }
+  if (sessionId && !getSession(sessionId)) sessionId = undefined;
   if (!sessionId) {
     const titleSeed = body.message.trim().slice(0, 40) || "새 세션";
-    const s = createSession(titleSeed);
-    sessionId = s.id;
+    sessionId = createSession(titleSeed).id;
     isNewSession = true;
   }
 
@@ -76,114 +100,227 @@ async function runChat(
   });
   send({ type: "session_started", sessionId, messageId: userMsg.id });
 
-  // 3. (이번 단계엔 Claude orchestration 없이) 바로 tool call 송출
-  const toolCallId = newId(10);
-  const generationId = newGenerationId();
+  // 3. orchestrator job 기록 (디버깅용)
   const jobId = newJobId();
-  const kind: ImageJob["kind"] = inferKind(body.message);
-
-  // 입력 이미지 첨부 (img2img/inpaint)
-  const inputImagePaths: string[] = [];
-  if (body.attachmentGenerationIds?.length) {
-    for (const gid of body.attachmentGenerationIds) {
-      const g = getGeneration(gid);
-      if (g) inputImagePaths.push(path.join(DATA_DIR, g.image_path));
-    }
-  }
-
-  send({
-    type: "tool_call_started",
-    toolCallId,
-    name: kind === "text2img" ? "generate_image" : kind,
-    args: { prompt: body.message, kind, attachmentCount: inputImagePaths.length },
-  });
-
   createJob({
     id: jobId,
     session_id: sessionId,
-    kind: "codex_image",
-    args: { prompt: body.message, kind, generationId },
-    work_dir: null,
+    kind: "claude_orchestrate",
+    args: { message: body.message },
   });
 
-  // 합쳐진 abort 핸들 (클라이언트가 SSE 를 끊거나 Next 가 요청을 abort 하면 둘 다 트리거)
+  // 4. abort 합치기
   const combinedAbort = new AbortController();
   const onAbort = () => combinedAbort.abort();
   sseSignal.addEventListener("abort", onAbort, { once: true });
   reqSignal.addEventListener("abort", onAbort, { once: true });
 
+  // 5. Claude spawn — resume 가능하면 이어붙임
+  const resumeId = lastClaudeSessionId(sessionId);
+  const handle = spawnClaude({
+    systemPrompt: getSystemPrompt(),
+    mcpConfigPath: MCP_CONFIG_PATH,
+    allowedTools: [MCP_TOOL_NAME],
+    resumeSessionId: resumeId,
+    userMessage: body.message,
+    logPrefix: `claude-${jobId}`,
+    signal: combinedAbort.signal,
+    cwd: process.cwd(),
+  });
+
+  // 6. 이벤트 소비. 종료 시점에 assistant 메시지를 한번에 저장.
+  const blocks: MessageBlock[] = [];
+  const accumulatedText: string[] = [];
+  const generationIds: string[] = [];
+  // imggen 외 도구(예: Claude CLI 의 내장 ToolSearch)는 SSE 로 forward 하지 않는다.
+  // 우리 UI 가 표시할 의미가 없고, false-alarm 에러 카드를 만들지 않기 위해서.
+  const imggenToolUseIds = new Set<string>();
+  let claudeSessionId: string | null = null;
+  send({ type: "assistant_thinking" });
+
   try {
-    const backend = await selectImageBackend();
-    const result = await backend.execute(
-      { id: jobId, generationId, kind, prompt: body.message, inputImagePaths },
-      (stage, detail) => {
-        send({ type: "tool_call_progress", toolCallId, stage, detail });
-      },
-      combinedAbort.signal,
-    );
+    for await (const ev of handle.events) {
+      switch (ev.kind) {
+        case "session_init":
+          claudeSessionId = ev.sessionId;
+          break;
 
-    // 4. generation 영구화
-    const gen = createGeneration({
-      id: generationId,
-      session_id: sessionId,
-      message_id: userMsg.id,
-      kind,
-      prompt: body.message,
-      input_image_ids: body.attachmentGenerationIds ?? [],
-      params: {},
-      image_path: toRelative(result.imagePath),
-      width: result.width,
-      height: result.height,
-      backend: "codex_exec",
-    });
-    updateJob(jobId, {
-      status: "succeeded",
-      result: { generationId: gen.id, elapsedMs: result.elapsedMs },
-      ended_at: Date.now(),
-    });
+        case "assistant_text": {
+          accumulatedText.push(ev.text);
+          blocks.push({ type: "text", text: ev.text });
+          send({ type: "assistant_text", text: ev.text });
+          break;
+        }
 
-    // 5. assistant 메시지 기록 (image_ref 블록)
+        case "tool_use": {
+          // imggen 도구만 UI 에 노출. 그 외(예: Claude CLI 내장 메타 도구) 는 무시.
+          if (!ev.name.startsWith("mcp__imggen__")) break;
+          imggenToolUseIds.add(ev.toolUseId);
+          blocks.push({
+            type: "tool_call",
+            id: ev.toolUseId,
+            name: ev.name,
+            args: ev.input,
+          });
+          send({
+            type: "tool_call_started",
+            toolCallId: ev.toolUseId,
+            name: ev.name,
+            args: ev.input,
+          });
+          break;
+        }
+
+        case "tool_result": {
+          // 우리 도구의 결과만 처리. 메타 도구는 silent drop.
+          if (!imggenToolUseIds.has(ev.toolUseId)) break;
+          const { generationId, errorText } = extractGenerationId(ev.content);
+          blocks.push({
+            type: "tool_result",
+            tool_call_id: ev.toolUseId,
+            result: ev.content,
+          });
+          if (generationId) {
+            generationIds.push(generationId);
+            blocks.push({ type: "image_ref", generation_id: generationId });
+            const g = getGeneration(generationId);
+            send({
+              type: "tool_call_finished",
+              toolCallId: ev.toolUseId,
+              result: {
+                generationId,
+                imageUrl: `/api/images/${generationId}`,
+                width: g?.width ?? 0,
+                height: g?.height ?? 0,
+              },
+            });
+          } else {
+            send({
+              type: "tool_call_finished",
+              toolCallId: ev.toolUseId,
+              result: { error: errorText ?? "no generationId in tool result" },
+            });
+          }
+          break;
+        }
+
+        case "result":
+          if (!claudeSessionId && ev.sessionId) claudeSessionId = ev.sessionId;
+          break;
+
+        case "raw":
+          // 디버그: 모르는 메시지는 로그 파일에 이미 기록됨. SSE 로는 전달 안 함.
+          break;
+      }
+    }
+
+    const exit = await handle.done;
+    if (exit !== 0) {
+      throw new Error(`claude exited with code ${exit} (see data/logs/claude-${jobId}-*.log)`);
+    }
+
+    // 7. assistant 메시지 영구화 + generation 들 ownership 채우기
     const assistantMsg = createMessage({
       session_id: sessionId,
       role: "assistant",
-      content: [
-        { type: "tool_call", id: toolCallId, name: kind, args: { prompt: body.message } },
-        { type: "tool_result", tool_call_id: toolCallId, result: { generationId: gen.id } },
-        { type: "image_ref", generation_id: gen.id },
-      ],
+      content: blocks,
+      claude_session_id: claudeSessionId,
+    });
+    for (const gid of generationIds) {
+      linkGeneration(gid, { session_id: sessionId, message_id: assistantMsg.id });
+    }
+
+    updateJob(jobId, {
+      status: "succeeded",
+      result: {
+        claudeSessionId,
+        assistantMessageId: assistantMsg.id,
+        generationIds,
+      },
+      ended_at: Date.now(),
     });
 
-    send({
-      type: "tool_call_finished",
-      toolCallId,
-      result: {
-        generationId: gen.id,
-        imageUrl: `/api/images/${gen.id}`,
-        width: gen.width ?? 0,
-        height: gen.height ?? 0,
-      },
-    });
     send({ type: "message_completed", messageId: assistantMsg.id });
 
-    // 새 세션이면 첫 메시지를 title 로 채택 (이미 createSession 에서 시드됐지만 명시)
     if (isNewSession) renameSession(sessionId, body.message.trim().slice(0, 40));
     touchSession(sessionId);
   } catch (err) {
     const msg = (err as Error).message;
     updateJob(jobId, { status: "failed", error: msg, ended_at: Date.now() });
-    send({ type: "tool_call_finished", toolCallId, result: { error: msg } });
     send({ type: "error", message: msg });
+    // partial blocks 라도 assistant 메시지로 저장해서 UI 가 빈 답이 안 되게.
+    if (blocks.length > 0) {
+      const assistantMsg = createMessage({
+        session_id: sessionId,
+        role: "assistant",
+        content: blocks,
+        claude_session_id: claudeSessionId,
+      });
+      for (const gid of generationIds) {
+        linkGeneration(gid, { session_id: sessionId, message_id: assistantMsg.id });
+      }
+    }
   } finally {
     sseSignal.removeEventListener("abort", onAbort);
     reqSignal.removeEventListener("abort", onAbort);
     close();
+    // assistant_text 의 합쳐진 본문이 너무 짧으면 무시. 단지 디버그용.
+    if (accumulatedText.length === 0) {
+      // 의도적 침묵: orchestrator 가 텍스트 없이 도구만 호출했을 가능성.
+    }
   }
 }
 
-/** 단순 휴리스틱: 메시지 내용 보고 kind 추정. M3 이후 Claude 가 결정하게 바뀜. */
-function inferKind(message: string): ImageJob["kind"] {
-  const m = message.toLowerCase();
-  if (m.includes("스프라이트") || m.includes("sprite") || m.includes("4x4") || m.includes("8x8"))
-    return "spritesheet";
-  return "text2img";
+/**
+ * MCP 도구의 tool_result content 에서 generationId 를 뽑는다.
+ *
+ * MCP 서버는 다음 형태로 응답:
+ *   content: [{ type: "text", text: "Generated image <id> (...). Show it with image ref id \"<id>\"." }]
+ *   structuredContent: { generationId, imagePath, width, height, elapsedMs }
+ *
+ * Claude 가 우리에게 user/tool_result 로 echo 할 때 content 는 보통 위 content 배열 그대로
+ * 또는 string 으로 들어온다. 두 경우 모두 처리.
+ */
+function extractGenerationId(content: unknown): {
+  generationId: string | null;
+  errorText: string | null;
+} {
+  // 1) string 그대로
+  if (typeof content === "string") {
+    return { generationId: findIdInString(content), errorText: null };
+  }
+  // 2) array of blocks
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (typeof block === "string") {
+        const id = findIdInString(block);
+        if (id) return { generationId: id, errorText: null };
+      } else if (block && typeof block === "object") {
+        const b = block as { type?: string; text?: string };
+        if (b.type === "text" && typeof b.text === "string") {
+          const id = findIdInString(b.text);
+          if (id) return { generationId: id, errorText: null };
+        }
+      }
+    }
+    // 에러 텍스트 회수
+    const errParts: string[] = [];
+    for (const block of content) {
+      if (block && typeof block === "object") {
+        const b = block as { text?: string };
+        if (typeof b.text === "string") errParts.push(b.text);
+      }
+    }
+    return { generationId: null, errorText: errParts.join(" ") || null };
+  }
+  return { generationId: null, errorText: null };
+}
+
+const GEN_ID_REGEX = /image ref id\s*"([a-z0-9]{16})"/i;
+const GEN_ID_FALLBACK = /\b([a-z0-9]{16})\b/;
+function findIdInString(s: string): string | null {
+  const m1 = s.match(GEN_ID_REGEX);
+  if (m1) return m1[1];
+  const m2 = s.match(GEN_ID_FALLBACK);
+  return m2 ? m2[1] : null;
 }

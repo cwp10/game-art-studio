@@ -52,6 +52,23 @@ export const initialState: ChatState = {
   generating: false,
 };
 
+/**
+ * tool_result 의 result 페이로드를 일반화. object 면 그대로, string 이면 JSON.parse 시도.
+ * MCP SDK 가 structuredContent 를 직렬화해 text 블록으로 흘리는 경우 string 으로 들어온다.
+ */
+function parseToolResult(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
+  if (typeof raw === "string") {
+    try {
+      const obj = JSON.parse(raw);
+      return obj && typeof obj === "object" ? (obj as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** 히스토리 메시지(DB) 를 화면 ChatItem 으로 변환. */
 function messagesToItems(messages: Message[]): ChatItem[] {
   const items: ChatItem[] = [];
@@ -80,14 +97,17 @@ function messagesToItems(messages: Message[]): ChatItem[] {
         } else if (b.type === "tool_result") {
           const tr = b as Extract<MessageBlock, { type: "tool_result" }>;
           const owner = currentAssistant.toolCalls.find(c => c.toolCallId === tr.tool_call_id);
-          if (owner && tr.result && typeof tr.result === "object") {
-            const r = tr.result as Record<string, unknown>;
-            if (typeof r.generationId === "string") {
+          if (owner) {
+            // tr.result 는 MCP 응답에 따라 (a) {generationId, width, height, ...} object
+            // 또는 (b) MCP SDK 가 structuredContent 를 직렬화한 JSON 문자열로 들어온다.
+            // 두 케이스 모두 동일하게 풀어 width/height 도 함께 회수.
+            const parsed = parseToolResult(tr.result);
+            if (parsed && typeof parsed.generationId === "string") {
               owner.result = {
-                generationId: r.generationId,
-                imageUrl: `/api/images/${r.generationId}`,
-                width: 0,
-                height: 0,
+                generationId: parsed.generationId,
+                imageUrl: `/api/images/${parsed.generationId}`,
+                width: typeof parsed.width === "number" ? parsed.width : 0,
+                height: typeof parsed.height === "number" ? parsed.height : 0,
               };
             }
           }
