@@ -325,7 +325,7 @@ export function MaskCanvas({
                 if (!hasStrokes || busy) return;
                 onSubmit({
                   maskDataUrl: exportMaskDataUrl(),
-                  prompt: "Remove the object in the masked area completely. Fill the empty space with a seamless continuation of the surrounding background — same colors, textures, and lighting. The result should look like the object was never there.",
+                  prompt: "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there",
                 });
               }}
               disabled={!hasStrokes || busy}
