@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { Download, Edit3, Film, Layers, Maximize2, RotateCw, Scissors, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { listGenerations } from "@/lib/api/client";
@@ -24,16 +24,32 @@ const KIND_CHIPS: Array<{ key: Filter; label: string }> = [
   { key: "spritesheet", label: "스프라이트" },
 ];
 
+/** 갤러리에서 호출하는 액션 — ChatLayout 의 handleAction 과 동일 type. */
+type GalleryAction =
+  | "duplicate"
+  | "remove_bg"
+  | "edit"
+  | "layer_split"
+  | "sprite_split"
+  | "reference"
+  | "resize";
+
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** 클릭한 액션을 부모(ChatLayout)에서 처리 — 갤러리는 자동 close. */
+  onAction?: (
+    action: GalleryAction,
+    payload: { prompt?: string; generationId: string; width: number; height: number; targetSize?: number },
+  ) => void;
 };
 
-export function GallerySheet({ open, onClose }: Props) {
+export function GallerySheet({ open, onClose, onAction }: Props) {
   const [items, setItems] = useState<Generation[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [err, setErr] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Generation | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
@@ -51,7 +67,23 @@ export function GallerySheet({ open, onClose }: Props) {
     setTimeout(() => searchRef.current?.focus(), 50);
   }, [open, refresh]);
 
-  useHotkeys("esc", () => { if (open) onClose(); }, { enableOnFormTags: true, preventDefault: true }, [open, onClose]);
+  useHotkeys("esc", () => {
+    if (!open) return;
+    if (selected) setSelected(null); else onClose();
+  }, { enableOnFormTags: true, preventDefault: true }, [open, onClose, selected]);
+
+  function pickAction(action: GalleryAction, opts?: { targetSize?: number }) {
+    if (!selected || !onAction) return;
+    onAction(action, {
+      prompt: selected.prompt ?? undefined,
+      generationId: selected.id,
+      width: selected.width ?? 0,
+      height: selected.height ?? 0,
+      targetSize: opts?.targetSize,
+    });
+    setSelected(null);
+    onClose();
+  }
 
   if (!open) return null;
   return (
@@ -111,12 +143,10 @@ export function GallerySheet({ open, onClose }: Props) {
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {items.map(g => (
-                <a
+                <button
                   key={g.id}
-                  href={`/api/images/${g.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group block overflow-hidden rounded-lg border border-border bg-bg-card transition-colors hover:border-[color:var(--accent)]/50"
+                  onClick={() => setSelected(g)}
+                  className="group block overflow-hidden rounded-lg border border-border bg-bg-card text-left transition-colors hover:border-[color:var(--accent)]/50"
                   title={g.prompt ?? ""}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -137,11 +167,78 @@ export function GallerySheet({ open, onClose }: Props) {
                       </span>
                     </div>
                   </div>
-                </a>
+                </button>
               ))}
             </div>
           )}
         </div>
+
+        {selected && (
+          <div className="absolute inset-0 z-10 flex flex-col bg-bg-panel">
+            <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
+              <button
+                onClick={() => setSelected(null)}
+                className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+                title="갤러리로 돌아가기"
+              >
+                ← 갤러리
+              </button>
+              <span className="text-xs text-text-muted/60">
+                {selected.kind} · {selected.width}×{selected.height}
+              </span>
+              <button
+                onClick={() => { setSelected(null); onClose(); }}
+                className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+                title="닫기"
+              >
+                <X size={14} />
+              </button>
+            </header>
+            <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/images/${selected.id}`}
+                alt={selected.prompt ?? "generation"}
+                className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full rounded-lg border border-border bg-black/10"
+              />
+              {selected.prompt && (
+                <p className="rounded-lg border border-border bg-bg-card px-3 py-2 font-mono text-xs leading-relaxed text-text-muted">
+                  {selected.prompt}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1 text-xs">
+                <button onClick={() => pickAction("edit")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <Edit3 size={12} /> 편집
+                </button>
+                <button onClick={() => pickAction("resize", { targetSize: 512 })} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <Maximize2 size={12} /> 512×512
+                </button>
+                <button onClick={() => pickAction("remove_bg")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <Scissors size={12} /> 배경 제거
+                </button>
+                <button onClick={() => pickAction("layer_split")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <Layers size={12} /> 레이어
+                </button>
+                <button onClick={() => pickAction("sprite_split")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <Film size={12} /> 스프라이트
+                </button>
+                <button onClick={() => pickAction("reference")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  참조로
+                </button>
+                <button onClick={() => pickAction("duplicate")} className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary">
+                  <RotateCw size={12} /> 복제
+                </button>
+                <a
+                  href={`/api/images/${selected.id}`}
+                  download={`${selected.id}.png`}
+                  className="flex h-8 items-center gap-1 rounded border border-border px-3 text-text-muted hover:text-text-primary"
+                >
+                  <Download size={12} /> 저장
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -522,7 +522,11 @@ export function ChatLayout() {
         onClose={() => setLibOpen(false)}
         onUse={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
       />
-      <GallerySheet open={galleryOpen} onClose={() => setGalleryOpen(false)} />
+      <GallerySheet
+        open={galleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        onAction={handleAction}
+      />
       <LogsPanel open={logsOpen} onClose={() => setLogsOpen(false)} />
     </div>
   );
