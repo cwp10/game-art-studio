@@ -171,23 +171,9 @@ export function Composer({
             </span>
           </div>
         ) : null}
-        <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
-          <StylePresetPicker value={presetId} onChange={setPresetId} />
-          {/* 캐릭터 방향 — submit 시 prompt 끝에 결합 + suggest 호출 시 반영. */}
-          <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
-            <User size={12} />
-            <select
-              value={direction}
-              onChange={e => setDirection(e.target.value)}
-              className="bg-transparent text-xs text-text-muted focus:outline-none"
-            >
-              {DIRECTIONS.map(d => (
-                <option key={d.key} value={d.key}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* 상단: textarea (전체 폭). 하단: 좌측 modifier (스타일/방향) + 우측 액션 (제안/전송).
+            가로 한 줄 배치 → 좁은 화면에서 textarea 가 비좁아지던 것 해소. */}
+        <div className="flex flex-col gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
           <textarea
             ref={ref}
             value={text}
@@ -195,25 +181,42 @@ export function Composer({
             placeholder={generating ? "" : "무엇을 만들고 싶으세요? (Cmd+Enter 전송 · Cmd+K 라이브러리)"}
             disabled={disabled}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-50"
+            className="w-full resize-none bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-50"
           />
-          <button
-            type="button"
-            onClick={askSuggestions}
-            disabled={disabled || !text.trim() || !onAskSuggestions}
-            className="flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
-            title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
-          >
-            <Sparkles size={12} /> 제안
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={disabled || !text.trim()}
-            className="flex h-9 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
-          >
-            <Send size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            <StylePresetPicker value={presetId} onChange={setPresetId} />
+            <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
+              <User size={12} />
+              <select
+                value={direction}
+                onChange={e => setDirection(e.target.value)}
+                className="bg-transparent text-xs text-text-muted focus:outline-none"
+              >
+                {DIRECTIONS.map(d => (
+                  <option key={d.key} value={d.key}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={askSuggestions}
+              disabled={disabled || !text.trim() || !onAskSuggestions}
+              className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
+              title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
+            >
+              <Sparkles size={12} /> 제안
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={disabled || !text.trim()}
+              className="flex h-7 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+            >
+              <Send size={12} />
+            </button>
+          </div>
         </div>
 
       </div>
