@@ -58,6 +58,9 @@ export function ChatLayout() {
   // 이미 items 를 채운 경우 (예: 업로드 흐름) race 로 items 가 빈 응답에 reset 되는 것 방지.
   const skipNextLoadRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
+  const dragCounter = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
 
   // 초기 세션 목록 로드
   useEffect(() => {
@@ -336,8 +339,44 @@ export function ChatLayout() {
         onSelect={handleSelect}
         onDelete={handleDelete}
       />
-      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지. */}
-      <div className={editing ? "flex w-[420px] shrink-0 flex-col" : "flex flex-1 flex-col"}>
+      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.
+          drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
+          중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
+      <div
+        className={`relative ${editing ? "flex w-[420px] shrink-0 flex-col" : "flex flex-1 flex-col"}`}
+        onDragEnter={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragCounter.current += 1;
+          if (dragCounter.current === 1) setDragOver(true);
+        }}
+        onDragOver={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={() => {
+          dragCounter.current = Math.max(0, dragCounter.current - 1);
+          if (dragCounter.current === 0) setDragOver(false);
+        }}
+        onDrop={e => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          dragCounter.current = 0;
+          setDragOver(false);
+          const f = [...e.dataTransfer.files].find(x => /^image\/(png|jpeg|webp)$/.test(x.type));
+          if (f) handleUploadImage(f);
+        }}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-bg-app/80 backdrop-blur-sm">
+            <div className="rounded-2xl border-2 border-dashed border-[color:var(--accent)] bg-bg-card px-8 py-6 text-center shadow-xl">
+              <div className="text-3xl">🖼</div>
+              <div className="mt-2 text-sm font-medium text-text-primary">여기에 이미지를 드롭</div>
+              <div className="text-xs text-text-muted">PNG · JPEG · WebP</div>
+            </div>
+          </div>
+        )}
         <header className="flex h-14 items-center border-b border-border px-4">
           <h1 className="font-mono text-sm text-text-muted">⌘ image-generator</h1>
           <span className="ml-auto text-xs text-text-muted">개인용 · Codex imagegen</span>
