@@ -34,6 +34,26 @@ const PROMPT_HEADER =
   "Save the result as a PNG file at the path ./output.png in your current working directory. " +
   "Do not create any other files. Do not write code. Do not explain. Just produce ./output.png.\n\n";
 
+/**
+ * Codex image_gen 은 정식 inpaint 가 아니라 image+prompt → 새 이미지 생성기.
+ * 따라서 prompt 에 객체 묘사가 있으면 그걸 마스크 영역에 그대로 그려버림.
+ * 지우기(erase) 의도가 잡히면 prompt 를 무시하고 객체 금지 템플릿으로 override 해야 한다.
+ *
+ * orchestrator 가 어떻게 refine 해도 잡히도록 keyword + 부정 패턴으로 보수적 매칭.
+ * 사용자가 "더 큰 검" 같은 일반 replace 를 의도했다면 erase 키워드가 안 등장하므로 안전.
+ */
+function isEraseIntent(prompt: string): boolean {
+  const p = prompt.toLowerCase();
+  // 강한 erase 신호: "remove"+"object", "erase", "as if ... never", "no objects"
+  if (/\b(erase|delete)\b/.test(p)) return true;
+  if (/as if (the |it |nothing )?(object|it|nothing) (was )?never/.test(p)) return true;
+  if (/no (new )?objects?/.test(p)) return true;
+  if (/\bremove (the )?(object|unwanted|item)/.test(p)) return true;
+  // 약한 신호 조합: background + (seamless | continuation | matching surrounding)
+  if (/seamless/.test(p) && /background|surrounding/.test(p)) return true;
+  return false;
+}
+
 function buildNaturalPrompt(job: ImageJob): string {
   switch (job.kind) {
     case "text2img":
@@ -48,6 +68,35 @@ function buildNaturalPrompt(job: ImageJob): string {
       // probe-codex-inpaint.mjs 에서 검증된 정확한 자연어 사용.
       const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
       if (hasMask) {
+        // 지우기(erase) 의도 감지 — Codex image_gen 은 정식 inpaint 가 아니어서
+        // prompt 에 객체명이 한 번이라도 등장하면 그걸 다시 그림. orchestrator 가
+        // "fluffy white clouds, wildflowers..." 같은 장면 묘사를 추가하면 모델이
+        // 그 객체들을 마스크 영역에 다시 그려넣어 "전혀 안 지워짐" 현상이 발생.
+        // 따라서 erase 의도가 잡히면 orchestrator 의 prompt 를 무시하고 강한
+        // 객체 금지 템플릿으로 override.
+        if (isEraseIntent(job.prompt)) {
+          return (
+            PROMPT_HEADER +
+            `OBJECT REMOVAL TASK. I am attaching TWO images: ` +
+            `(1) the original image, and (2) a mask where the RED region marks an ` +
+            `unwanted object that must be ERASED.\n\n` +
+            `Produce an output image where:\n` +
+            `- The unwanted object (red-marked region in image 2) is COMPLETELY REMOVED ` +
+            `from image 1.\n` +
+            `- The empty space is filled ONLY with the simplest, flattest continuation ` +
+            `of the immediately adjacent background pixels.\n` +
+            `- ABSOLUTELY NO new objects, clouds, trees, grass tufts, flowers, rocks, ` +
+            `animals, people, or any other features may appear in the previously-masked ` +
+            `area — even if similar objects exist nearby.\n` +
+            `- Example: if the masked area is in the sky and surrounding sky has clouds, ` +
+            `the masked area must be filled with PLAIN BLUE SKY ONLY (no clouds).\n` +
+            `- Example: if the masked area is on grass with nearby flowers, fill with ` +
+            `UNIFORM PLAIN GRASS ONLY (no flowers).\n` +
+            `- Everything OUTSIDE the red-marked region must be IDENTICAL to image 1.\n` +
+            `- The result must look natural, as if the unwanted object never existed.\n` +
+            `- Do not include the red color or the mask in the output.`
+          );
+        }
         return (
           PROMPT_HEADER +
           `I am attaching TWO images: (1) the original image, and ` +
