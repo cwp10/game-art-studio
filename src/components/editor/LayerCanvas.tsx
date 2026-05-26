@@ -19,14 +19,35 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  */
 
 type Tool = "brush" | "eraser";
-type ColorKey = "red" | "green" | "blue" | "yellow";
+type ColorKey =
+  | "red"
+  | "green"
+  | "blue"
+  | "yellow"
+  | "cyan"
+  | "magenta"
+  | "orange"
+  | "purple";
 const COLORS: Record<ColorKey, { hex: string; ko: string }> = {
   red: { hex: "#ef4444", ko: "빨강" },
   green: { hex: "#22c55e", ko: "초록" },
   blue: { hex: "#3b82f6", ko: "파랑" },
   yellow: { hex: "#eab308", ko: "노랑" },
+  cyan: { hex: "#06b6d4", ko: "청록" },
+  magenta: { hex: "#ec4899", ko: "자홍" },
+  orange: { hex: "#f97316", ko: "주황" },
+  purple: { hex: "#a855f7", ko: "보라" },
 };
-const COLOR_KEYS: ColorKey[] = ["red", "green", "blue", "yellow"];
+const COLOR_KEYS: ColorKey[] = [
+  "red",
+  "green",
+  "blue",
+  "yellow",
+  "cyan",
+  "magenta",
+  "orange",
+  "purple",
+];
 
 type Stroke = {
   tool: Tool;
