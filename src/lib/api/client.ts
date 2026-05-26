@@ -99,24 +99,26 @@ export async function uploadLayers(
   return out;
 }
 
+export type Suggestion = { label: string; body: string };
+
 /**
- * 짧은 의도 → 게임 에셋 prompt 후보. builtin/사용자 preset 중 랜덤 4개의
- * prompt_suffix 를 입력에 결합. 서버 호출 없이 즉시. 방향이 주어지면 함께 결합.
+ * 짧은 의도 → 게임 에셋 prompt 후보 3-4개. Claude 가 맥락 유추해서 라벨 + 본문
+ * 형태로 제안. 30~60초 + 구독 한도 소모.
  *
- * 예: input='멋진 마법사', direction='측면'
- *  → ['멋진 마법사, 측면, pixel art, 16-bit ...', '멋진 마법사, 측면, watercolor ...', ...]
+ * 본문은 스타일/방향/첨부 미포함 — 사용자가 카드 선택 후 별도 picker 로 결합.
  */
-export async function suggestPrompts(input: string, direction?: string | null): Promise<string[]> {
-  const presets = await listPresets();
-  if (presets.length === 0) return [];
-  const dir = direction?.trim() && direction !== "auto" ? `, ${direction.trim()}` : "";
-  // Fisher-Yates 셔플 후 앞 4개. preset 5개 미만이면 가용분만.
-  const shuffled = [...presets];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+export async function suggestPrompts(input: string, signal?: AbortSignal): Promise<Suggestion[]> {
+  const r = await fetch("/api/suggest", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ input }),
+    signal,
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(error ?? r.statusText);
   }
-  return shuffled.slice(0, Math.min(4, shuffled.length)).map(p => `${input.trim()}${dir}, ${p.prompt_suffix}`);
+  return ((await r.json()) as { suggestions: Suggestion[] }).suggestions;
 }
 
 // ── style presets ───────────────────────────────────────────────────────────

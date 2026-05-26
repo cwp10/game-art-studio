@@ -4,7 +4,7 @@ import { Paperclip, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
-import { listPresets, suggestPrompts } from "@/lib/api/client";
+import { listPresets } from "@/lib/api/client";
 
 const DIRECTIONS: Array<{ key: string; label: string }> = [
   { key: "auto", label: "자유" },
@@ -33,6 +33,8 @@ type Props = {
   /** 업로드/드롭/카드 액션 직후 부모가 자동으로 채움. 사용자가 직접 [X] 로 해제 가능.
    *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger. */
   attachment?: ComposerAttachment | null;
+  /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
+  onAskSuggestions?: (text: string) => void;
 };
 
 export function Composer({
@@ -43,6 +45,7 @@ export function Composer({
   prefill,
   onUploadImage,
   attachment,
+  onAskSuggestions,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -50,10 +53,6 @@ export function Composer({
   const [direction, setDirection] = useState<string>("auto");
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
-  // LLM 기반 prompt 후보 — [✨ 제안] 으로 trigger. 카드 클릭 시 textarea replace.
-  const [suggestions, setSuggestions] = useState<string[] | null>(null);
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestErr, setSuggestErr] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -94,20 +93,11 @@ export function Composer({
       .catch(() => setPresetName(null));
   }, [presetId]);
 
-  async function askSuggestions() {
+  function askSuggestions() {
     const t = text.trim();
-    if (!t || suggesting) return;
-    setSuggestErr(null);
-    setSuggesting(true);
-    setSuggestions(null);
-    try {
-      const items = await suggestPrompts(t, direction);
-      setSuggestions(items);
-    } catch (e) {
-      setSuggestErr((e as Error).message);
-    } finally {
-      setSuggesting(false);
-    }
+    if (!t || !onAskSuggestions) return;
+    onAskSuggestions(t);
+    setText("");
   }
 
   function submit() {
@@ -237,11 +227,11 @@ export function Composer({
           <button
             type="button"
             onClick={askSuggestions}
-            disabled={disabled || !text.trim() || suggesting}
+            disabled={disabled || !text.trim() || !onAskSuggestions}
             className="flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
-            title="prompt 후보 3-4개 자동 생성 (Claude 호출, ~30초~1분)"
+            title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
           >
-            <Sparkles size={12} /> {suggesting ? "..." : "제안"}
+            <Sparkles size={12} /> 제안
           </button>
           <button
             type="button"
@@ -253,39 +243,6 @@ export function Composer({
           </button>
         </div>
 
-        {(suggestions || suggestErr) && (
-          <div className="mt-2 rounded-xl border border-border bg-bg-card/50 p-2">
-            <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-text-muted">
-              <Sparkles size={10} />
-              <span>제안된 prompt — 카드 클릭 시 입력란에 적용</span>
-              <button
-                onClick={() => { setSuggestions(null); setSuggestErr(null); }}
-                className="ml-auto rounded p-0.5 text-text-muted hover:text-text-primary"
-                title="제안 닫기"
-              >
-                <X size={10} />
-              </button>
-            </div>
-            {suggestErr && <p className="px-1 text-[11px] text-[color:var(--danger)]">{suggestErr}</p>}
-            {suggestions && (
-              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                {suggestions.map((s, i) => (
-                  <button
-                    key={i}
-                    onClick={() => {
-                      setText(s);
-                      setSuggestions(null);
-                      setTimeout(() => ref.current?.focus(), 0);
-                    }}
-                    className="rounded-lg border border-border bg-bg-card px-3 py-2 text-left text-xs leading-relaxed text-text-muted transition-colors hover:border-[color:var(--accent)]/40 hover:text-text-primary"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

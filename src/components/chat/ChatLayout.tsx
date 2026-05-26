@@ -19,6 +19,7 @@ import {
   listPresets,
   listSessions,
   streamChat,
+  suggestPrompts,
   uploadImage,
   uploadLayers,
   uploadMask,
@@ -306,6 +307,43 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
+  // [✨ 제안] — 사용자 입력을 LLM 으로 다양화한 3-4개 컨셉을 chat 에 카드로 표시.
+  // active session 없으면 신규 생성. dispatch suggestions_requested → API 호출 →
+  // suggestions_received. 카드 클릭은 onPickSuggestion 으로 Composer prefill.
+  const handleAskSuggestions = useCallback(
+    async (text: string) => {
+      try {
+        let sid = state.activeSessionId;
+        if (!sid) {
+          const newSession = await createSession(text.slice(0, 40));
+          sid = newSession.id;
+          const next = await listSessions();
+          dispatch({ type: "set_sessions", sessions: next });
+          skipNextLoadRef.current = true;
+          dispatch({ type: "set_active", sessionId: sid });
+        }
+        const userTempId = "tmp-" + Math.random().toString(36).slice(2, 8);
+        const suggestId = "sug-" + Math.random().toString(36).slice(2, 8);
+        dispatch({ type: "suggestions_requested", userTempId, suggestId, text });
+        try {
+          const items = await suggestPrompts(text);
+          dispatch({ type: "suggestions_received", suggestId, items });
+        } catch (e) {
+          dispatch({ type: "suggestions_failed", suggestId, error: (e as Error).message });
+        }
+      } catch (e) {
+        console.error("[suggest]", e);
+        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+      }
+    },
+    [state.activeSessionId],
+  );
+
+  const handlePickSuggestion = useCallback((suggestId: string, body: string) => {
+    setComposerPrefill(prev => ({ text: body, seq: (prev?.seq ?? 0) + 1 }));
+    dispatch({ type: "suggestion_picked", suggestId, body });
+  }, []);
+
   // 사용자가 [📎 첨부] 또는 EmptyState 의 업로드 카드로 파일 선택 → base64 →
   // /api/upload (kind='image'). active session 없으면 신규 생성해서 결과를 그 세션에
   // 누적. dispatch external_upload 로 chat 에 결과 카드 표시.
@@ -425,7 +463,11 @@ export function ChatLayout() {
         </header>
         <main className="flex-1 overflow-y-auto">
           {hasItems ? (
-            <MessageList items={state.items} onAction={handleAction} />
+            <MessageList
+              items={state.items}
+              onAction={handleAction}
+              onPickSuggestion={handlePickSuggestion}
+            />
           ) : (
             <EmptyState
               onPick={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
@@ -441,6 +483,7 @@ export function ChatLayout() {
           prefill={composerPrefill}
           onUploadImage={handleUploadImage}
           attachment={composerAttachment}
+          onAskSuggestions={handleAskSuggestions}
         />
       </div>
       {editing?.mode === "inpaint" && (

@@ -26,9 +26,11 @@ type Props = {
       targetSize?: number;
     },
   ) => void;
+  /** suggestions 카드 클릭 → 부모가 Composer prefill + dispatch suggestion_picked. */
+  onPickSuggestion?: (suggestId: string, body: string) => void;
 };
 
-export function MessageList({ items, onAction }: Props) {
+export function MessageList({ items, onAction, onPickSuggestion }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -46,7 +48,53 @@ export function MessageList({ items, onAction }: Props) {
             </div>
           );
         }
+        if (it.kind === "suggestions") {
+          return (
+            <div key={`${it.id}-${i}`} className="space-y-2">
+              <div className="text-xs text-text-muted">
+                ✨ 제안된 prompt — 카드를 클릭하면 입력란에 적용돼요. 스타일·방향·첨부는 별도로 골라 전송.
+              </div>
+              {it.pending && (
+                <div className="rounded-xl border border-border bg-bg-card px-4 py-3 text-xs text-text-muted">
+                  <span className="shimmer">Claude 가 후보를 생각 중… (~30~60초)</span>
+                </div>
+              )}
+              {it.error && (
+                <div className="rounded-xl border border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 px-4 py-3 text-xs text-[color:var(--danger)]">
+                  {it.error}
+                </div>
+              )}
+              {!it.pending && !it.error && (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {it.items.map((s, j) => {
+                    const picked = it.pickedBody === s.body;
+                    return (
+                      <button
+                        key={j}
+                        onClick={() => onPickSuggestion?.(it.id, s.body)}
+                        className={`rounded-xl border p-3 text-left transition-colors ${
+                          picked
+                            ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15"
+                            : "border-border bg-bg-card hover:border-[color:var(--accent)]/40"
+                        }`}
+                      >
+                        <div className="text-sm font-medium text-text-primary">
+                          {picked && "✓ "}
+                          {s.label}
+                        </div>
+                        <p className="mt-1 line-clamp-3 text-[11px] leading-relaxed text-text-muted">
+                          {s.body}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        }
         // assistant
+        if (it.kind !== "assistant") return null;
         const lastTool = it.toolCalls[it.toolCalls.length - 1];
         const userPromptForCard = findUserPromptForAssistant(items, i);
 
