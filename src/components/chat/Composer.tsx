@@ -1,6 +1,6 @@
 "use client";
 
-import { Paperclip, Send, Sparkles, User, X } from "lucide-react";
+import { Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -28,10 +28,9 @@ type Props = {
   /** 부모에서 prefill 요청 — 라이브러리 시트의 [▶ 사용] 등. seq 카운터로 같은 text
    *  여러 번 prefill 시에도 항상 trigger. */
   prefill?: { text: string; seq: number } | null;
-  /** 사용자가 [📎] 로 선택한 이미지 — 부모가 base64 변환 + 업로드 처리. */
-  onUploadImage?: (file: File) => void;
   /** 업로드/드롭/카드 액션 직후 부모가 자동으로 채움. 사용자가 직접 [X] 로 해제 가능.
-   *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger. */
+   *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger.
+   *  업로드 entry 는 EmptyState 카드 + drag-drop 으로만 제공 — Composer 의 [📎] 제거. */
   attachment?: ComposerAttachment | null;
   /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
   onAskSuggestions?: (text: string) => void;
@@ -43,7 +42,6 @@ export function Composer({
   onCancel,
   generating,
   prefill,
-  onUploadImage,
   attachment,
   onAskSuggestions,
 }: Props) {
@@ -54,7 +52,6 @@ export function Composer({
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   // textarea 자동 높이
   useEffect(() => {
@@ -174,47 +171,9 @@ export function Composer({
             </span>
           </div>
         ) : null}
-        <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
-          <StylePresetPicker value={presetId} onChange={setPresetId} />
-          {/* 캐릭터 방향 — submit 시 prompt 끝에 결합 + suggest 호출 시 반영. */}
-          <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
-            <User size={12} />
-            <select
-              value={direction}
-              onChange={e => setDirection(e.target.value)}
-              className="bg-transparent text-xs text-text-muted focus:outline-none"
-            >
-              {DIRECTIONS.map(d => (
-                <option key={d.key} value={d.key}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {onUploadImage && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (f) onUploadImage(f);
-                  if (e.target) e.target.value = ""; // 같은 파일 재선택 허용
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={disabled}
-                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary disabled:opacity-40"
-                title="이미지 업로드 (PNG/JPEG/WebP)"
-              >
-                <Paperclip size={12} /> 첨부
-              </button>
-            </>
-          )}
+        {/* 상단: textarea (전체 폭). 하단: 좌측 modifier (스타일/방향) + 우측 액션 (제안/전송).
+            가로 한 줄 배치 → 좁은 화면에서 textarea 가 비좁아지던 것 해소. */}
+        <div className="flex flex-col gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
           <textarea
             ref={ref}
             value={text}
@@ -222,25 +181,42 @@ export function Composer({
             placeholder={generating ? "" : "무엇을 만들고 싶으세요? (Cmd+Enter 전송 · Cmd+K 라이브러리)"}
             disabled={disabled}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-50"
+            className="w-full resize-none bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none disabled:opacity-50"
           />
-          <button
-            type="button"
-            onClick={askSuggestions}
-            disabled={disabled || !text.trim() || !onAskSuggestions}
-            className="flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
-            title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
-          >
-            <Sparkles size={12} /> 제안
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={disabled || !text.trim()}
-            className="flex h-9 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
-          >
-            <Send size={14} />
-          </button>
+          <div className="flex items-center gap-2">
+            <StylePresetPicker value={presetId} onChange={setPresetId} />
+            <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
+              <User size={12} />
+              <select
+                value={direction}
+                onChange={e => setDirection(e.target.value)}
+                className="bg-transparent text-xs text-text-muted focus:outline-none"
+              >
+                {DIRECTIONS.map(d => (
+                  <option key={d.key} value={d.key}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={askSuggestions}
+              disabled={disabled || !text.trim() || !onAskSuggestions}
+              className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
+              title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
+            >
+              <Sparkles size={12} /> 제안
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={disabled || !text.trim()}
+              className="flex h-7 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+            >
+              <Send size={12} />
+            </button>
+          </div>
         </div>
 
       </div>

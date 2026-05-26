@@ -481,7 +481,6 @@ export function ChatLayout() {
           onSend={handleSend}
           onCancel={handleCancel}
           prefill={composerPrefill}
-          onUploadImage={handleUploadImage}
           attachment={composerAttachment}
           onAskSuggestions={handleAskSuggestions}
         />
