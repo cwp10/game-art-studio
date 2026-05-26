@@ -77,8 +77,10 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
   }
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-border bg-bg-card">
-      <a href={imageUrl} target="_blank" rel="noreferrer" className="block">
+    // overflow-hidden 을 figure 에서 빼야 [리사이즈 v] 드롭다운이 figcaption 밖으로
+    // 펼쳐질 수 있음. img 자체에 rounded-t-xl 로 corner 깎임 처리.
+    <figure className="rounded-xl border border-border bg-bg-card">
+      <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-t-xl">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
