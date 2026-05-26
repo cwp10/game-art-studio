@@ -8,8 +8,8 @@ import { ImageResultCard } from "./ImageResultCard";
 type Props = {
   items: ChatItem[];
   onAction?: (
-    action: "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg",
-    payload: { prompt?: string; generationId?: string },
+    action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg",
+    payload: { prompt?: string; generationId?: string; targetSize?: number },
   ) => void;
 };
 
@@ -47,10 +47,11 @@ export function MessageList({ items, onAction }: Props) {
                 width={lastTool.result.width}
                 height={lastTool.result.height}
                 prompt={userPromptForCard}
-                onAction={a =>
+                onAction={(a, opts) =>
                   onAction?.(a, {
                     prompt: userPromptForCard,
                     generationId: lastTool.result!.generationId,
+                    targetSize: opts?.targetSize,
                   })
                 }
               />

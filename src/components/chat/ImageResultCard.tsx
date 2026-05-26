@@ -1,9 +1,9 @@
 "use client";
 
-import { Copy, Download, Maximize2, RotateCw, Scissors } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, Copy, Download, Maximize2, RotateCw, Scissors } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
-type Action = "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg";
+type Action = "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg";
 
 type Props = {
   generationId: string;
@@ -11,11 +11,28 @@ type Props = {
   width: number;
   height: number;
   prompt?: string;
-  onAction?: (action: Action) => void;
+  onAction?: (action: Action, opts?: { targetSize?: number }) => void;
 };
+
+/** plan §S3 의 [업스케일] 단일 버튼을 명시적 픽셀 크기 6개 드롭다운으로 확장. */
+const RESIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048] as const;
 
 export function ImageResultCard({ generationId, imageUrl, width, height, prompt, onAction }: Props) {
   const [copied, setCopied] = useState(false);
+  const [resizeOpen, setResizeOpen] = useState(false);
+  const resizeRef = useRef<HTMLDivElement>(null);
+
+  // 드롭다운: 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!resizeOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (resizeRef.current && !resizeRef.current.contains(e.target as Node)) {
+        setResizeOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [resizeOpen]);
 
   function copyPrompt() {
     if (!prompt) return;
@@ -32,6 +49,11 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
     a.download = `${generationId}.png`;
     a.click();
     onAction?.("download");
+  }
+
+  function pickResize(targetSize: number) {
+    setResizeOpen(false);
+    onAction?.("resize", { targetSize });
   }
 
   return (
@@ -66,13 +88,40 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             {width}×{height}
           </span>
           <div className="ml-auto flex gap-1">
-            <button
-              onClick={() => onAction?.("upscale")}
-              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="이 이미지를 업스케일 (codex 가 ~2배 해상도로 다시 그림)"
-            >
-              <Maximize2 size={12} /> 업스케일
-            </button>
+            <div ref={resizeRef} className="relative">
+              <button
+                onClick={() => setResizeOpen(o => !o)}
+                className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="명시적 픽셀 크기로 리사이즈 (sharp lanczos, 1초 이내, 결정적)"
+                aria-haspopup="menu"
+                aria-expanded={resizeOpen}
+              >
+                <Maximize2 size={12} /> 리사이즈 <ChevronDown size={10} />
+              </button>
+              {resizeOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-10 mt-1 flex min-w-[120px] flex-col gap-0.5 rounded-lg border border-border bg-bg-panel p-1 shadow-lg"
+                >
+                  {RESIZE_OPTIONS.map(n => {
+                    const dir = width && n > width ? "↑" : width && n < width ? "↓" : "·";
+                    return (
+                      <button
+                        key={n}
+                        onClick={() => pickResize(n)}
+                        role="menuitem"
+                        className="flex items-center justify-between rounded px-2 py-1.5 text-left text-xs text-text-muted hover:bg-bg-card hover:text-text-primary"
+                      >
+                        <span>
+                          {n}×{n}
+                        </span>
+                        <span className="ml-3 text-text-muted/40">{dir}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <button
               onClick={() => onAction?.("remove_bg")}
               className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"

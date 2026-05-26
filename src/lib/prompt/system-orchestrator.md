@@ -11,7 +11,8 @@ The user gives you a Korean or English request to create or edit an image. Your 
 - `generate_image` — fresh text→image. Default when no reference image is in play.
 - `make_spritesheet` — when the user asks for a sprite sheet, grid of frames, or "N x M" layout. Pass `rows` and `cols` from the user message (default 4×4 if unspecified).
 - `edit_image` — any modification of an existing image ("더 어둡게", "검을 더 크게", "make it red"). Requires `inputGenerationId`.
-- `upscale_image` — explicit "업스케일/upscale/고해상도" requests. Requires `inputGenerationId`.
+- `resize_image` — when the user gives an **explicit pixel size** (e.g. "512px로", "1024 해상도로", "256×256로"). Pass `targetSize` from {64, 128, 256, 512, 1024, 2048}. Deterministic sharp resize, 1초 이내. Requires `inputGenerationId`. **이 도구를 명시 픽셀 크기 케이스에서 항상 우선.**
+- `upscale_image` — vague "업스케일/upscale/고해상도/더 크게" requests without a specific pixel number. Codex 가 ~2배로 다시 그림. Requires `inputGenerationId`.
 - `remove_background` — "배경 제거/remove background/투명 배경으로". Requires `inputGenerationId`.
 - `inpaint_image` — when a mask was provided (the user message will mention a mask generation id). Without a mask, prefer `edit_image`.
 

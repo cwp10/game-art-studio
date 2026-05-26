@@ -6,7 +6,8 @@
  *  - generate_image(prompt)              text→image (기본)
  *  - make_spritesheet(prompt, rows, cols) text→image, 그리드 스프라이트 시트
  *  - edit_image(prompt, inputGenerationId)         img2img 자유 편집
- *  - upscale_image(inputGenerationId)              해상도 업스케일
+ *  - upscale_image(inputGenerationId)              codex 기반 해상도 업스케일 (자연어 "업스케일" fallback)
+ *  - resize_image(inputGenerationId, targetSize)   sharp lanczos 결정적 리사이즈, 1초 이내 (드롭다운 버튼)
  *  - remove_background(inputGenerationId)          배경 제거 (chroma key → sharp 후처리)
  *  - inpaint_image(prompt, inputGenerationId, maskGenerationId?) 부분 편집 (마스크 옵션은 M4-UI)
  *
@@ -29,6 +30,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 // tsx 가 tsconfig paths 를 해석하지 않으므로 상대 경로 import.
 // 이 파일은 stdio 진입점이라 별도 빌드 없이 `node --import tsx` 로 실행된다.
 import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
@@ -37,12 +39,16 @@ import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
 import {
   DATA_DIR,
+  IMAGES_DIR,
   LOGS_DIR,
   ensureDataDirs,
+  imagePath as imagePathFor,
   jobDir as jobDirFor,
   toRelative,
 } from "../util/paths.js";
 import type { GenerationKind } from "../../types/db.js";
+
+const RESIZE_TARGET_SIZES = [64, 128, 256, 512, 1024, 2048] as const;
 
 ensureDataDirs();
 const logPath = path.join(LOGS_DIR, "mcp-server.log");
@@ -101,6 +107,20 @@ const SCHEMAS = {
     properties: { ...INPUT_GEN_PROP, ...SESSION_PROP },
     required: ["inputGenerationId"],
   },
+  resize_image: {
+    type: "object" as const,
+    properties: {
+      ...INPUT_GEN_PROP,
+      targetSize: {
+        type: "integer",
+        enum: [...RESIZE_TARGET_SIZES],
+        description:
+          "결과 PNG 의 가로·세로 픽셀 (정사각). 원본보다 작으면 다운스케일, 크면 업스케일.",
+      },
+      ...SESSION_PROP,
+    },
+    required: ["inputGenerationId", "targetSize"],
+  },
   remove_background: {
     type: "object" as const,
     properties: { ...INPUT_GEN_PROP, ...SESSION_PROP },
@@ -147,8 +167,18 @@ const TOOLS = [
   },
   {
     name: "upscale_image",
-    description: "기존 이미지를 더 높은 해상도로 재생성 (~2배).",
+    description:
+      "기존 이미지를 codex 의 image-to-image 로 더 높은 해상도로 재생성 (~2배). " +
+      "60–120초. 명시적 픽셀 크기(예: 512px) 가 지정된 경우엔 resize_image 를 우선.",
     inputSchema: SCHEMAS.upscale_image,
+  },
+  {
+    name: "resize_image",
+    description:
+      "기존 이미지를 명시적 픽셀 해상도로 리사이즈 (정사각). sharp lanczos 보간법. " +
+      "codex 호출 X, 1초 이내, 결정적. 사용자가 64/128/256/512/1024/2048 같은 숫자를 " +
+      "직접 지정했거나 [리사이즈 N×N] 버튼을 누른 경우.",
+    inputSchema: SCHEMAS.resize_image,
   },
   {
     name: "remove_background",
@@ -169,7 +199,7 @@ const TOOLS = [
 // ─── server bootstrap ────────────────────────────────────────────────────────
 
 const server = new Server(
-  { name: "image-generator-mcp", version: "0.2.0" },
+  { name: "image-generator-mcp", version: "0.3.0" },
   { capabilities: { tools: {} } },
 );
 
@@ -183,6 +213,7 @@ type CallArgs = {
   maskGenerationId?: string;
   rows?: number;
   cols?: number;
+  targetSize?: number;
   sessionId?: string;
 };
 
@@ -236,6 +267,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           inputGenerationIds: [requireString(args.inputGenerationId, "inputGenerationId")],
           sessionId,
         });
+
+      case "resize_image": {
+        const inputId = requireString(args.inputGenerationId, "inputGenerationId");
+        const targetSize = requireInt(args.targetSize, "targetSize");
+        if (!(RESIZE_TARGET_SIZES as readonly number[]).includes(targetSize)) {
+          throw new Error(
+            `targetSize must be one of ${RESIZE_TARGET_SIZES.join(", ")} (got ${targetSize})`,
+          );
+        }
+        return await runResizeTool({ inputGenerationId: inputId, targetSize, sessionId });
+      }
 
       case "remove_background":
         return await runImageTool({
@@ -362,6 +404,90 @@ async function runImageTool(spec: {
       width: result.width,
       height: result.height,
       elapsedMs: result.elapsedMs,
+    },
+  };
+}
+
+/**
+ * sharp lanczos 기반 결정적 리사이즈 — codex 호출 X. ImageBackend 우회.
+ * 정사각 fit=fill. 알파 보존. backend='direct' 로 generation 행 작성.
+ */
+async function runResizeTool(spec: {
+  inputGenerationId: string;
+  targetSize: number;
+  sessionId: string | null;
+}) {
+  const inputGen = getGeneration(spec.inputGenerationId);
+  if (!inputGen) throw new Error(`generation not found: ${spec.inputGenerationId}`);
+  const inputPath = path.join(DATA_DIR, inputGen.image_path);
+
+  const generationId = newGenerationId();
+  const jobId = newJobId();
+  const destPath = imagePathFor(generationId);
+
+  log(
+    `resize_image start job=${jobId} gen=${generationId} ` +
+      `input=${spec.inputGenerationId} target=${spec.targetSize} session=${spec.sessionId}`,
+  );
+  createJob({
+    id: jobId,
+    session_id: spec.sessionId,
+    kind: "codex_image", // 스키마 CHECK 제약상 codex_image 그대로 (의미: image-producing job)
+    args: {
+      tool: "resize_image",
+      inputGenerationId: spec.inputGenerationId,
+      targetSize: spec.targetSize,
+      generationId,
+      viaMcp: true,
+    },
+  });
+
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  const startedAt = performance.now();
+  await sharp(inputPath)
+    .resize(spec.targetSize, spec.targetSize, { kernel: "lanczos3", fit: "fill" })
+    .png()
+    .toFile(destPath);
+  const elapsedMs = Math.round(performance.now() - startedAt);
+
+  // generations.kind CHECK 제약: text2img|img2img|upscale|remove_bg|inpaint|spritesheet.
+  // resize 는 'upscale' 의미가 가장 가까워 그대로 재활용 (의미가 약간 늘어남: 원본보다 작아도
+  // 같은 kind 로 분류 — kind enum 확장은 별도 마이그레이션 필요).
+  const gen = createGeneration({
+    id: generationId,
+    session_id: spec.sessionId,
+    message_id: null,
+    kind: "upscale",
+    prompt: `Resize to ${spec.targetSize}×${spec.targetSize}`,
+    input_image_ids: [spec.inputGenerationId],
+    image_path: toRelative(destPath),
+    width: spec.targetSize,
+    height: spec.targetSize,
+    backend: "direct",
+  });
+  updateJob(jobId, {
+    status: "succeeded",
+    result: { generationId: gen.id, elapsedMs },
+    ended_at: Date.now(),
+  });
+
+  log(`resize_image done job=${jobId} gen=${gen.id} ${spec.targetSize}x${spec.targetSize} ${elapsedMs}ms`);
+
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Resized image ${gen.id} (${spec.targetSize}×${spec.targetSize}, ${elapsedMs}ms). ` +
+          `Show it with image ref id "${gen.id}".`,
+      },
+    ],
+    structuredContent: {
+      generationId: gen.id,
+      imagePath: `/api/images/${gen.id}`,
+      width: spec.targetSize,
+      height: spec.targetSize,
+      elapsedMs,
     },
   };
 }

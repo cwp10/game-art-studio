@@ -105,17 +105,17 @@ export function ChatLayout() {
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
-  // upscale / remove_bg 는 generationId 를 attach 해서 Claude 가 그것을 inputGenerationId
-  // 로 사용하도록 한다.
+  // resize / remove_bg 는 generationId 를 attach 해서 Claude 가 inputGenerationId 로
+  // 사용하도록 한다.
   const handleAction = useCallback(
     (
-      action: "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg",
-      payload: { prompt?: string; generationId?: string },
+      action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg",
+      payload: { prompt?: string; generationId?: string; targetSize?: number },
     ) => {
       if (action === "duplicate" && payload.prompt) {
         handleSend(payload.prompt);
-      } else if (action === "upscale" && payload.generationId) {
-        handleSend("이 이미지를 업스케일 해줘.", {
+      } else if (action === "resize" && payload.generationId && payload.targetSize) {
+        handleSend(`이 이미지를 ${payload.targetSize}×${payload.targetSize} 로 리사이즈해줘.`, {
           attachmentGenerationIds: [payload.generationId],
         });
       } else if (action === "remove_bg" && payload.generationId) {
