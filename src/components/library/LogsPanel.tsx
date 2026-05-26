@@ -37,39 +37,52 @@ export function LogsPanel({ open, onClose }: Props) {
     }
   }, [selected]);
 
-  const refreshBody = useCallback(async () => {
-    if (!selected) return;
-    try {
-      const r = await fetch(`/api/logs?file=${encodeURIComponent(selected)}&lines=300`);
-      if (!r.ok) {
-        setErr(`로드 실패: ${r.statusText}`);
-        return;
-      }
-      const text = await r.text();
-      setBody(text);
-      // 마지막 줄 자동 스크롤.
-      setTimeout(() => {
-        if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-      }, 0);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  }, [selected]);
-
   useEffect(() => {
     if (!open) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshFiles();
   }, [open, refreshFiles]);
 
+  // SSE streaming — init 이벤트로 초기 tail + append 로 새 줄. autoRefresh off 면 SSE
+  // 안 띄우고 1회 GET 만.
   useEffect(() => {
     if (!open || !selected) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    refreshBody();
-    if (!autoRefresh) return;
-    const t = setInterval(refreshBody, 2000);
-    return () => clearInterval(t);
-  }, [open, selected, autoRefresh, refreshBody]);
+    let cancelled = false;
+    const scrollBottom = () => {
+      if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    };
+    const decode = (s: string) => s.replace(/\\n/g, "\n");
+
+    if (!autoRefresh) {
+      // 1회 fetch.
+      fetch(`/api/logs?file=${encodeURIComponent(selected)}&lines=300`)
+        .then(r => r.ok ? r.text() : Promise.reject(new Error(r.statusText)))
+        .then(text => { if (!cancelled) { setBody(text); setTimeout(scrollBottom, 0); } })
+        .catch(e => { if (!cancelled) setErr((e as Error).message); });
+      return () => { cancelled = true; };
+    }
+
+    const url = `/api/logs?file=${encodeURIComponent(selected)}&stream=1`;
+    const es = new EventSource(url);
+    es.addEventListener("init", (ev: MessageEvent) => {
+      if (cancelled) return;
+      setBody(decode(ev.data));
+      setTimeout(scrollBottom, 0);
+    });
+    es.addEventListener("append", (ev: MessageEvent) => {
+      if (cancelled) return;
+      setBody(prev => prev + decode(ev.data));
+      setTimeout(scrollBottom, 0);
+    });
+    es.addEventListener("error", () => {
+      // EventSource 가 자동 재연결 시도. 사용자 메시지만.
+      if (!cancelled) setErr("스트림 연결 오류 — 자동 재시도");
+    });
+    return () => {
+      cancelled = true;
+      es.close();
+    };
+  }, [open, selected, autoRefresh]);
 
   useHotkeys("esc", () => { if (open) onClose(); }, { enableOnFormTags: true, preventDefault: true }, [open, onClose]);
 

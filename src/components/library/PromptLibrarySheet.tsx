@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Search, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import {
@@ -8,6 +8,7 @@ import {
   createPrompt,
   deletePrompt,
   listPrompts,
+  updatePrompt,
 } from "@/lib/api/client";
 import type { PromptLibraryItem } from "@/types/db";
 
@@ -38,6 +39,11 @@ export function PromptLibrarySheet({ open, onClose, onUse }: Props) {
   const [newTags, setNewTags] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [focusIdx, setFocusIdx] = useState(0);
+  // 인라인 편집 중인 prompt id + draft.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{ title: string; body: string; tags: string }>({
+    title: "", body: "", tags: "",
+  });
   const searchRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
@@ -104,6 +110,27 @@ export function PromptLibrarySheet({ open, onClose, onUse }: Props) {
   async function remove(id: string) {
     try {
       await deletePrompt(id);
+      refresh();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  function startEdit(it: PromptLibraryItem) {
+    setEditingId(it.id);
+    setEditDraft({ title: it.title, body: it.body, tags: it.tags.join(", ") });
+  }
+  async function saveEdit() {
+    if (!editingId) return;
+    setErr(null);
+    try {
+      const tags = editDraft.tags.split(",").map(t => t.trim().replace(/^#/, "")).filter(Boolean);
+      await updatePrompt(editingId, {
+        title: editDraft.title.trim(),
+        body: editDraft.body.trim(),
+        tags,
+      });
+      setEditingId(null);
       refresh();
     } catch (e) {
       setErr((e as Error).message);
@@ -224,54 +251,97 @@ export function PromptLibrarySheet({ open, onClose, onUse }: Props) {
           ) : (
             items.map((it, idx) => {
               const active = idx === focusIdx;
+              const editing = editingId === it.id;
               return (
                 <div
                   key={it.id}
                   onMouseEnter={() => setFocusIdx(idx)}
                   className={`group rounded-lg border p-3 ${
-                    active ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10" : "border-border bg-bg-card"
+                    active && !editing ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10" : "border-border bg-bg-card"
                   }`}
                 >
-                  <div className="flex items-start gap-2">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-text-primary">{it.title}</span>
-                        {it.use_count > 0 && (
-                          <span className="text-[10px] text-text-muted/60">{it.use_count}회 사용</span>
+                  {editing ? (
+                    <div className="space-y-2 text-xs">
+                      <input
+                        value={editDraft.title}
+                        onChange={e => setEditDraft(d => ({ ...d, title: e.target.value }))}
+                        placeholder="제목"
+                        className="h-8 w-full rounded border border-border bg-bg-app px-2 text-sm text-text-primary"
+                      />
+                      <textarea
+                        value={editDraft.body}
+                        onChange={e => setEditDraft(d => ({ ...d, body: e.target.value }))}
+                        placeholder="본문"
+                        rows={3}
+                        className="block w-full resize-none rounded border border-border bg-bg-app px-2 py-1 text-sm text-text-primary"
+                      />
+                      <input
+                        value={editDraft.tags}
+                        onChange={e => setEditDraft(d => ({ ...d, tags: e.target.value }))}
+                        placeholder="태그 (쉼표 구분)"
+                        className="h-8 w-full rounded border border-border bg-bg-app px-2 text-sm text-text-primary"
+                      />
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="h-7 rounded border border-border px-2 text-text-muted hover:text-text-primary"
+                        >
+                          취소
+                        </button>
+                        <button
+                          onClick={saveEdit}
+                          className="h-7 rounded bg-[color:var(--accent)] px-3 font-medium text-white"
+                        >
+                          저장
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-text-primary">{it.title}</span>
+                          {it.use_count > 0 && (
+                            <span className="text-[10px] text-text-muted/60">{it.use_count}회 사용</span>
+                          )}
+                        </div>
+                        <p className="mt-1 line-clamp-2 font-mono text-[11px] text-text-muted">{it.body}</p>
+                        {it.tags.length > 0 && (
+                          <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted/70">
+                            {it.tags.map(t => <span key={t}>#{t}</span>)}
+                          </div>
                         )}
                       </div>
-                      <p className="mt-1 line-clamp-2 font-mono text-[11px] text-text-muted">{it.body}</p>
-                      {it.tags.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1 text-[10px] text-text-muted/70">
-                          {it.tags.map(t => <span key={t}>#{t}</span>)}
-                        </div>
-                      )}
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          onClick={() => handleUse(it)}
+                          className="h-7 rounded border border-border bg-[color:var(--accent)] px-3 text-xs font-medium text-white hover:opacity-90"
+                        >
+                          ▶ 사용
+                        </button>
+                        <button
+                          onClick={() => startEdit(it)}
+                          className="rounded p-1 text-text-muted opacity-0 hover:text-text-primary group-hover:opacity-100"
+                          title="편집"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => remove(it.id)}
+                          className="rounded p-1 text-text-muted opacity-0 hover:text-[color:var(--danger)] group-hover:opacity-100"
+                          title="삭제"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        onClick={() => handleUse(it)}
-                        className="h-7 rounded border border-border bg-[color:var(--accent)] px-3 text-xs font-medium text-white hover:opacity-90"
-                      >
-                        ▶ 사용
-                      </button>
-                      <button
-                        onClick={() => remove(it.id)}
-                        className="rounded p-1 text-text-muted opacity-0 hover:text-[color:var(--danger)] group-hover:opacity-100"
-                        title="삭제"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  </div>
+                  )}
                 </div>
               );
             })
           )}
         </div>
 
-        <footer className="border-t border-border px-3 py-2 text-[11px] text-text-muted/60">
-          편집은 v1.1 — 현재는 삭제 후 재생성으로 대체
-        </footer>
       </div>
     </div>
   );

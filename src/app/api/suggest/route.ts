@@ -7,38 +7,29 @@ export const maxDuration = 120;
 /**
  * POST /api/suggest { input } → { suggestions: [{label, body}, ...] }
  *
- * 사용자가 입력한 짧은 의도 ("코스튬 그려줘") 의 맥락을 유추해 서로 다른 3-4개 컨셉을
- * 제안. 각 컨셉은 짧은 한국어 라벨 + 풍부한 한국어 본문 (한 줄 prompt).
+ * 짧은 입력의 맥락을 유추해 서로 다른 3-4개 컨셉 (label + body) 제안. 본문에는
+ * 스타일/방향/첨부 포함 X — 사용자가 picker 로 별도 결합.
  *
- * 본문은 그 자체로 이미지 생성에 쓰일 수 있도록 구체적이고 풍부. 스타일/방향/첨부는
- * 사용자가 카드 선택 후 Composer 의 picker 들로 별도 결합 — 본문에는 포함하지 않음.
+ * 캐싱: in-memory Map (input trim → suggestions). TTL 24h. 같은 input 반복 시 즉시
+ * 응답. dev HMR 시 globalThis 로 cache 유지.
  */
 
-const SYSTEM_PROMPT = `You generate Korean game asset image prompt suggestions.
+// 단축 system prompt — 1차 ~1KB → ~250자. 응답 토큰 절감 + 빠름.
+const SYSTEM_PROMPT = `한국어 게임 에셋 prompt 제안. JSON 배열만 출력.
+[{"label":"<8-15자 한글 제목>","body":"<60-120자 한글 prompt — 주제/주요 시각요소/색감/배경 포함, 스타일·방향·참조는 제외>"}, ...]
+3-4개. 각 컨셉은 mood·theme 다르게. 예 캐릭터 코스튬:
+[{"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 빛나는 룬, 보라·금색, 흰 배경"},{"label":"모험가 여행 코스튬","body":"의상 모험가 여행 코스튬, 가벼운 재킷과 바지, 주머니·벨트, 낡은 천, 올리브·베이지, 흰 배경"}]`;
 
-The user gives a short Korean intent (often vague). Infer the context and propose
-3-4 distinct concept directions. Respond with ONLY a JSON array of objects, each:
-  { "label": "<짧은 한국어 제목, 8-15자>", "body": "<풍부한 한국어 본문 prompt, 60-120자>" }
+type Suggestion = { label: string; body: string };
 
-Guidelines for body:
-- Concrete and self-contained, single line.
-- Include: subject specifics, signature visual elements, color palette, background.
-- DO NOT include style (pixel art / watercolor / cel shading 등) — user picks separately.
-- DO NOT include camera direction (정면/측면 등) — user picks separately.
-- DO NOT include attachment / reference notes — user attaches separately.
-
-Each suggestion should explore a DIFFERENT angle / mood / theme.
-
-Example for input "캐릭터 코스튬 그려줘":
-[
-  {"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 목걸이와 팔찌에 빛나는 룬 장식, 보라색과 금색, 흰 배경"},
-  {"label":"모험가 여행 코스튬","body":"의상 일반 모험가 여행 코스튬, 움직이기 편한 가벼운 재킷과 바지로 구성된 실용적인 복장, 주머니와 벨트가 많고 낡은 천 질감, 올리브색과 베이지색, 흰 배경"}
-]
-
-Output ONLY the JSON array — no prose, no markdown fences.`;
+// dev HMR 시 모듈 재평가되어도 cache 유지.
+declare global {
+  var __suggest_cache: Map<string, { ts: number; suggestions: Suggestion[] }> | undefined;
+}
+const cache = (globalThis.__suggest_cache ??= new Map());
+const TTL_MS = 24 * 60 * 60 * 1000;
 
 type Body = { input?: string };
-type Suggestion = { label: string; body: string };
 
 export async function POST(req: NextRequest) {
   let body: Body;
@@ -49,6 +40,12 @@ export async function POST(req: NextRequest) {
   }
   const input = body.input?.trim();
   if (!input) return Response.json({ error: "input required" }, { status: 400 });
+
+  // 캐시 적중 — 같은 input + TTL 내 → 즉시 응답.
+  const cached = cache.get(input);
+  if (cached && Date.now() - cached.ts < TTL_MS) {
+    return Response.json({ suggestions: cached.suggestions, cached: true });
+  }
 
   try {
     const raw = await claudeRunSimple({
@@ -69,6 +66,7 @@ export async function POST(req: NextRequest) {
     if (cleaned.length === 0) {
       return Response.json({ error: "no valid suggestions", raw: raw.slice(0, 400) }, { status: 502 });
     }
+    cache.set(input, { ts: Date.now(), suggestions: cleaned });
     return Response.json({ suggestions: cleaned });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 502 });
