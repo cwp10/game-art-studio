@@ -95,6 +95,9 @@ export function MaskCanvas({
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   useEffect(() => {
+    // 의도적: 새 imageUrl 로 교체될 때 이전 loaded=true 상태가 새 onload 전까지 visible 하면
+    // 두 번째 redraw effect 가 stale img 로 발화 → race. 의도적 reset 이므로 lint disable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setImgLoaded(false);
     const img = new Image();
     img.crossOrigin = "anonymous";

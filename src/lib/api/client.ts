@@ -48,6 +48,29 @@ export async function uploadMask(parentGenerationId: string, dataUrl: string): P
   return generationId;
 }
 
+/**
+ * LayerCanvas 가 만든 N(=4)개의 색별 PNG 를 한 번에 generation 행들로 저장.
+ * 각 PNG 는 (원본 × 색별 binary mask) 합성 결과.
+ */
+export async function uploadLayers(
+  parentGenerationId: string,
+  layers: Array<{ colorLabel: string; dataUrl: string }>,
+): Promise<Array<{ generationId: string; colorLabel: string; width: number; height: number }>> {
+  const r = await fetch("/api/layers", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ parentGenerationId, layers }),
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(`uploadLayers failed: ${error ?? r.statusText}`);
+  }
+  const { layers: out } = (await r.json()) as {
+    layers: Array<{ generationId: string; colorLabel: string; width: number; height: number }>;
+  };
+  return out;
+}
+
 export async function listGenerations(sessionId?: string): Promise<Generation[]> {
   const url = sessionId ? `/api/generations?sessionId=${encodeURIComponent(sessionId)}` : "/api/generations";
   const r = await fetch(url);

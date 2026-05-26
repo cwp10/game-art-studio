@@ -6,6 +6,7 @@ import { chatReducer, initialState } from "./chat-state";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
+import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import {
   createSession,
@@ -13,6 +14,7 @@ import {
   listMessages,
   listSessions,
   streamChat,
+  uploadLayers,
   uploadMask,
 } from "@/lib/api/client";
 
@@ -21,12 +23,13 @@ import {
  *
  * 단일 useReducer 로 SSE 이벤트와 사용자 입력을 모두 받아 ChatItem 배열을 시간 순으로 누적.
  */
-type Editing = {
+type EditTarget = {
   generationId: string;
   imageUrl: string;
   width: number;
   height: number;
-} | null;
+};
+type Editing = ({ mode: "inpaint" } & EditTarget) | ({ mode: "layer" } & EditTarget) | null;
 
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
@@ -124,7 +127,14 @@ export function ChatLayout() {
   // 사용하도록 한다. edit (인페인트) 는 우측 패널 열어 MaskCanvas 띄움.
   const handleAction = useCallback(
     (
-      action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg" | "edit",
+      action:
+        | "duplicate"
+        | "download"
+        | "copy_prompt"
+        | "resize"
+        | "remove_bg"
+        | "edit"
+        | "layer_split",
       payload: {
         prompt?: string;
         generationId?: string;
@@ -143,8 +153,14 @@ export function ChatLayout() {
         handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
           attachmentGenerationIds: [payload.generationId],
         });
-      } else if (action === "edit" && payload.generationId && payload.width && payload.height) {
+      } else if (
+        (action === "edit" || action === "layer_split") &&
+        payload.generationId &&
+        payload.width &&
+        payload.height
+      ) {
         setEditing({
+          mode: action === "edit" ? "inpaint" : "layer",
           generationId: payload.generationId,
           imageUrl: `/api/images/${payload.generationId}`,
           width: payload.width,
@@ -158,7 +174,7 @@ export function ChatLayout() {
   // MaskCanvas 가 submit 한 마스크 PNG → /api/upload → /api/chat 으로 inpaint 호출.
   const handleInpaint = useCallback(
     async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
-      if (!editing) return;
+      if (!editing || editing.mode !== "inpaint") return;
       try {
         const maskId = await uploadMask(editing.generationId, maskDataUrl);
         setEditing(null);
@@ -175,6 +191,17 @@ export function ChatLayout() {
       }
     },
     [editing, handleSend],
+  );
+
+  // LayerCanvas 가 submit 한 N개의 색별 PNG → /api/layers → N개 generation 행.
+  // 결과 list 를 LayerCanvas 가 result view 로 표시하도록 그대로 돌려준다 (chat 흐름은 그대로).
+  const handleLayerSplit = useCallback(
+    async ({ layers }: { layers: Array<{ colorLabel: string; dataUrl: string }> }) => {
+      if (!editing || editing.mode !== "layer") return [];
+      const res = await uploadLayers(editing.generationId, layers);
+      return res;
+    },
+    [editing],
   );
 
   useHotkeys("mod+n", e => {
@@ -213,7 +240,7 @@ export function ChatLayout() {
           onCancel={handleCancel}
         />
       </div>
-      {editing && (
+      {editing?.mode === "inpaint" && (
         <MaskCanvas
           parentGenerationId={editing.generationId}
           imageUrl={editing.imageUrl}
@@ -221,6 +248,17 @@ export function ChatLayout() {
           imageHeight={editing.height}
           busy={state.generating}
           onSubmit={handleInpaint}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+      {editing?.mode === "layer" && (
+        <LayerCanvas
+          parentGenerationId={editing.generationId}
+          imageUrl={editing.imageUrl}
+          imageWidth={editing.width}
+          imageHeight={editing.height}
+          busy={state.generating}
+          onSubmit={handleLayerSplit}
           onCancel={() => setEditing(null)}
         />
       )}
