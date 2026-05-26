@@ -91,14 +91,17 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             </p>
           </div>
         )}
-        <div className="flex items-center gap-2 border-t border-border pt-2">
-          <span className="text-text-muted/60">
+        {/* dimensions 와 액션 버튼을 두 줄로 분리 — 좁은 영역(편집 패널 열린 메인 420px)에서
+            한 줄에 다 안 들어가 글자가 wrap 되던 문제 해결. 버튼들에 `whitespace-nowrap` +
+            컨테이너 `flex-wrap` 으로 부족하면 다음 줄로. */}
+        <div className="space-y-2 border-t border-border pt-2">
+          <div className="text-text-muted/60">
             {width}×{height}
-          </span>
-          <div className="ml-auto flex gap-1">
+          </div>
+          <div className="flex flex-wrap gap-1">
             <button
               onClick={() => onAction?.("edit")}
-              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
               title="인페인트 — 영역을 brush 로 칠해서 부분 편집"
             >
               <Edit3 size={12} /> 편집
@@ -106,7 +109,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             <div ref={resizeRef} className="relative">
               <button
                 onClick={() => setResizeOpen(o => !o)}
-                className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                 title="명시적 픽셀 크기로 리사이즈 (sharp lanczos, 1초 이내, 결정적)"
                 aria-haspopup="menu"
                 aria-expanded={resizeOpen}
@@ -139,21 +142,21 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             </div>
             <button
               onClick={() => onAction?.("remove_bg")}
-              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
               title="배경 제거 (chroma key + 후처리로 투명 PNG)"
             >
               <Scissors size={12} /> 배경 제거
             </button>
             <button
               onClick={() => onAction?.("duplicate")}
-              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
               title="같은 프롬프트로 한 번 더 (variation 효과)"
             >
               <RotateCw size={12} /> 복제
             </button>
             <button
               onClick={download}
-              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
               title="PNG 다운로드"
             >
               <Download size={12} /> 저장
