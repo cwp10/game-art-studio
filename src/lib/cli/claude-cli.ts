@@ -88,7 +88,9 @@ export function spawnClaude(opts: ClaudeSpawnOptions): ClaudeRunHandle {
     "bypassPermissions",
     "--model",
     opts.model ?? "sonnet",
-    "--no-session-persistence",
+    // `--no-session-persistence` 는 의도적으로 사용하지 않는다 — 그 플래그를 켜면
+    // session_id 가 디스크에 저장되지 않아 후속 turn 의 `--resume` 이 실패한다.
+    // 로컬 개인용 도구라 disk 잔존은 무해.
   ];
   if (opts.resumeSessionId) {
     args.push("--resume", opts.resumeSessionId, "--fork-session");
