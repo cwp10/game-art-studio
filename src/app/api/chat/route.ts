@@ -107,12 +107,16 @@ async function runChat(
 
   // 2. user 메시지 기록.
   //    첨부 generation 이 있으면 메시지 본문에 marker 를 prefix 해서 Claude 가
-  //    inputGenerationId 로 사용할 수 있게 한다. DB 에 저장되는 본문도 동일 — 후속
-  //    리로드 시 채팅창에 그대로 보이지만 marker 는 사용자에게도 정직한 표기.
+  //    inputGenerationId / maskGenerationId 로 사용할 수 있게 한다. DB 에 저장되는
+  //    본문도 동일 — 후속 리로드 시 채팅창에 그대로 보이지만 marker 는 사용자에게도
+  //    정직한 표기.
   const attachIds = (body.attachmentGenerationIds ?? []).filter(id => !!getGeneration(id));
-  const messageText = attachIds.length
-    ? attachIds.map(id => `[reference: ${id}]`).join(" ") + "\n" + body.message
-    : body.message;
+  const maskId =
+    body.maskGenerationId && getGeneration(body.maskGenerationId) ? body.maskGenerationId : null;
+  const markers: string[] = [];
+  for (const id of attachIds) markers.push(`[reference: ${id}]`);
+  if (maskId) markers.push(`[mask: ${maskId}]`);
+  const messageText = markers.length ? markers.join(" ") + "\n" + body.message : body.message;
   const userMsg = createMessage({
     session_id: sessionId,
     role: "user",
@@ -126,7 +130,7 @@ async function runChat(
     id: jobId,
     session_id: sessionId,
     kind: "claude_orchestrate",
-    args: { message: messageText, attachIds },
+    args: { message: messageText, attachIds, maskId },
   });
 
   // 4. abort 합치기

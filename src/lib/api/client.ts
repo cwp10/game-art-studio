@@ -30,6 +30,24 @@ export async function listMessages(sessionId: string): Promise<Message[]> {
   return messages;
 }
 
+/**
+ * 캔버스에서 만든 마스크 PNG 를 generation 행으로 저장. PR-B 의 MaskCanvas 가 사용.
+ * dataUrl 은 `canvas.toDataURL("image/png")` 결과 그대로.
+ */
+export async function uploadMask(parentGenerationId: string, dataUrl: string): Promise<string> {
+  const r = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "mask", parentGenerationId, dataUrl }),
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(`uploadMask failed: ${error ?? r.statusText}`);
+  }
+  const { generationId } = (await r.json()) as { generationId: string };
+  return generationId;
+}
+
 export async function listGenerations(sessionId?: string): Promise<Generation[]> {
   const url = sessionId ? `/api/generations?sessionId=${encodeURIComponent(sessionId)}` : "/api/generations";
   const r = await fetch(url);

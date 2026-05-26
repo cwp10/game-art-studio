@@ -23,4 +23,7 @@ export type ChatRequest = {
   message: string;
   /** 첨부 이미지 generationId 목록 (img2img/inpaint 등). */
   attachmentGenerationIds?: string[];
+  /** 인페인트 마스크 PNG 의 generationId. 있으면 라우트가 본문에 [mask: <id>] marker 를 prefix
+   *  → Claude orchestrator 가 inpaint_image 의 maskGenerationId 로 사용. */
+  maskGenerationId?: string;
 };

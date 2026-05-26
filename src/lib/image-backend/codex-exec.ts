@@ -43,11 +43,25 @@ function buildNaturalPrompt(job: ImageJob): string {
         PROMPT_HEADER +
         `Use the attached image as a reference. Generate a new image: ${job.prompt}`
       );
-    case "inpaint":
+    case "inpaint": {
+      // 2개 첨부: [원본, 마스크]. 1개: 마스크 없는 전역 inpaint (edit_image 와 사실상 동등).
+      // probe-codex-inpaint.mjs 에서 검증된 정확한 자연어 사용.
+      const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
+      if (hasMask) {
+        return (
+          PROMPT_HEADER +
+          `I am attaching TWO images: (1) the original image, and ` +
+          `(2) a mask where the RED region marks the area to be replaced. ` +
+          `Replace ONLY the red region with: ${job.prompt}. ` +
+          `Preserve everything outside the red region exactly as in the original. ` +
+          `Do not include the red color or the mask itself in the output.`
+        );
+      }
       return (
         PROMPT_HEADER +
         `Edit the attached image: ${job.prompt}. Preserve everything outside the requested change.`
       );
+    }
     case "upscale":
       return (
         PROMPT_HEADER +
