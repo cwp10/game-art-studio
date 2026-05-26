@@ -60,9 +60,10 @@ export function ChatLayout() {
     [state.activeSessionId],
   );
 
-  // 메시지 전송
+  // 메시지 전송. attachmentGenerationIds 가 있으면 라우트가 user 메시지 본문에
+  // [reference: <id>] marker 로 prefix → Claude 가 inputGenerationId 로 사용.
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: { attachmentGenerationIds?: string[] }) => {
       if (state.generating) return;
       const tempId = "tmp-" + Math.random().toString(36).slice(2, 8);
       dispatch({ type: "user_send", tempId, text });
@@ -71,7 +72,11 @@ export function ChatLayout() {
       abortRef.current = abort;
       try {
         await streamChat(
-          { sessionId: state.activeSessionId ?? undefined, message: text },
+          {
+            sessionId: state.activeSessionId ?? undefined,
+            message: text,
+            attachmentGenerationIds: opts?.attachmentGenerationIds,
+          },
           event => dispatch({ type: "sse", event }),
           abort.signal,
         );
@@ -98,11 +103,25 @@ export function ChatLayout() {
     abortRef.current?.abort();
   }, []);
 
-  // 결과 카드의 액션 (복제 등)
+  // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
+  // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
+  // upscale / remove_bg 는 generationId 를 attach 해서 Claude 가 그것을 inputGenerationId
+  // 로 사용하도록 한다.
   const handleAction = useCallback(
-    (action: "duplicate" | "download" | "copy_prompt", payload: { prompt?: string }) => {
+    (
+      action: "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg",
+      payload: { prompt?: string; generationId?: string },
+    ) => {
       if (action === "duplicate" && payload.prompt) {
         handleSend(payload.prompt);
+      } else if (action === "upscale" && payload.generationId) {
+        handleSend("이 이미지를 업스케일 해줘.", {
+          attachmentGenerationIds: [payload.generationId],
+        });
+      } else if (action === "remove_bg" && payload.generationId) {
+        handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
+          attachmentGenerationIds: [payload.generationId],
+        });
       }
     },
     [handleSend],

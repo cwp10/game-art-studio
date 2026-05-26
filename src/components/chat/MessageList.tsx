@@ -7,7 +7,10 @@ import { ImageResultCard } from "./ImageResultCard";
 
 type Props = {
   items: ChatItem[];
-  onAction?: (action: "duplicate" | "download" | "copy_prompt", payload: { prompt?: string }) => void;
+  onAction?: (
+    action: "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg",
+    payload: { prompt?: string; generationId?: string },
+  ) => void;
 };
 
 export function MessageList({ items, onAction }: Props) {
@@ -44,7 +47,12 @@ export function MessageList({ items, onAction }: Props) {
                 width={lastTool.result.width}
                 height={lastTool.result.height}
                 prompt={userPromptForCard}
-                onAction={a => onAction?.(a, { prompt: userPromptForCard })}
+                onAction={a =>
+                  onAction?.(a, {
+                    prompt: userPromptForCard,
+                    generationId: lastTool.result!.generationId,
+                  })
+                }
               />
             )}
             {it.text && <p className="text-sm text-text-primary">{it.text}</p>}
