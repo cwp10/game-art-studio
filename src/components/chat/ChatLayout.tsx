@@ -193,7 +193,8 @@ export function ChatLayout() {
         onSelect={handleSelect}
         onDelete={handleDelete}
       />
-      <div className="flex flex-1 flex-col">
+      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지. */}
+      <div className={editing ? "flex w-[420px] shrink-0 flex-col" : "flex flex-1 flex-col"}>
         <header className="flex h-14 items-center border-b border-border px-4">
           <h1 className="font-mono text-sm text-text-muted">⌘ image-generator</h1>
           <span className="ml-auto text-xs text-text-muted">개인용 · Codex imagegen</span>
