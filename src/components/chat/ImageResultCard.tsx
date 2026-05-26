@@ -1,7 +1,9 @@
 "use client";
 
-import { Copy, Download, RotateCw } from "lucide-react";
+import { Copy, Download, Maximize2, RotateCw, Scissors } from "lucide-react";
 import { useState } from "react";
+
+type Action = "duplicate" | "download" | "copy_prompt" | "upscale" | "remove_bg";
 
 type Props = {
   generationId: string;
@@ -9,7 +11,7 @@ type Props = {
   width: number;
   height: number;
   prompt?: string;
-  onAction?: (action: "duplicate" | "download" | "copy_prompt") => void;
+  onAction?: (action: Action) => void;
 };
 
 export function ImageResultCard({ generationId, imageUrl, width, height, prompt, onAction }: Props) {
@@ -65,16 +67,30 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
           </span>
           <div className="ml-auto flex gap-1">
             <button
+              onClick={() => onAction?.("upscale")}
+              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="이 이미지를 업스케일 (codex 가 ~2배 해상도로 다시 그림)"
+            >
+              <Maximize2 size={12} /> 업스케일
+            </button>
+            <button
+              onClick={() => onAction?.("remove_bg")}
+              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="배경 제거 (chroma key + 후처리로 투명 PNG)"
+            >
+              <Scissors size={12} /> 배경 제거
+            </button>
+            <button
               onClick={() => onAction?.("duplicate")}
               className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="같은 프롬프트로 복제"
+              title="같은 프롬프트로 한 번 더 (variation 효과)"
             >
               <RotateCw size={12} /> 복제
             </button>
             <button
               onClick={download}
               className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="저장"
+              title="PNG 다운로드"
             >
               <Download size={12} /> 저장
             </button>
