@@ -8,6 +8,7 @@ import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
+import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import {
   createSession,
   deleteSession,
@@ -35,7 +36,11 @@ type EditTarget = {
   width: number;
   height: number;
 };
-type Editing = ({ mode: "inpaint" } & EditTarget) | ({ mode: "layer" } & EditTarget) | null;
+type Editing =
+  | ({ mode: "inpaint" } & EditTarget)
+  | ({ mode: "layer" } & EditTarget)
+  | ({ mode: "sprite" } & EditTarget)
+  | null;
 
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
@@ -140,7 +145,8 @@ export function ChatLayout() {
         | "resize"
         | "remove_bg"
         | "edit"
-        | "layer_split",
+        | "layer_split"
+        | "sprite_split",
       payload: {
         prompt?: string;
         generationId?: string;
@@ -160,13 +166,15 @@ export function ChatLayout() {
           attachmentGenerationIds: [payload.generationId],
         });
       } else if (
-        (action === "edit" || action === "layer_split") &&
+        (action === "edit" || action === "layer_split" || action === "sprite_split") &&
         payload.generationId &&
         payload.width &&
         payload.height
       ) {
+        const mode =
+          action === "edit" ? "inpaint" : action === "layer_split" ? "layer" : "sprite";
         setEditing({
-          mode: action === "edit" ? "inpaint" : "layer",
+          mode,
           generationId: payload.generationId,
           imageUrl: `/api/images/${payload.generationId}`,
           width: payload.width,
@@ -294,6 +302,15 @@ export function ChatLayout() {
           imageHeight={editing.height}
           busy={state.generating}
           onSubmit={handleLayerSplit}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+      {editing?.mode === "sprite" && (
+        <SpriteCanvas
+          parentGenerationId={editing.generationId}
+          imageUrl={editing.imageUrl}
+          imageWidth={editing.width}
+          imageHeight={editing.height}
           onCancel={() => setEditing(null)}
         />
       )}

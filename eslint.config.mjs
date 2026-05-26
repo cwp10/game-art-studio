@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/gif.worker.js", // gif.js vendor bundle (postinstall 로 복사)
   ]),
 ]);
 
