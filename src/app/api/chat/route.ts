@@ -44,7 +44,18 @@ const SYSTEM_PROMPT_PATH = path.join(
   "prompt",
   "system-orchestrator.md",
 );
-const MCP_TOOL_NAME = "mcp__imggen__generate_image";
+/**
+ * Claude 에게 노출할 imggen MCP 도구들. Claude CLI 의 --allowedTools 는 정확한 이름을
+ * 필요로 하므로 도구 추가 시 여기 함께 등록해야 한다 (그러지 않으면 도구 호출이 거부됨).
+ */
+const MCP_TOOL_NAMES = [
+  "mcp__imggen__generate_image",
+  "mcp__imggen__make_spritesheet",
+  "mcp__imggen__edit_image",
+  "mcp__imggen__upscale_image",
+  "mcp__imggen__remove_background",
+  "mcp__imggen__inpaint_image",
+];
 
 let cachedSystemPrompt: string | null = null;
 function getSystemPrompt(): string {
@@ -92,11 +103,18 @@ async function runChat(
     isNewSession = true;
   }
 
-  // 2. user 메시지 기록
+  // 2. user 메시지 기록.
+  //    첨부 generation 이 있으면 메시지 본문에 marker 를 prefix 해서 Claude 가
+  //    inputGenerationId 로 사용할 수 있게 한다. DB 에 저장되는 본문도 동일 — 후속
+  //    리로드 시 채팅창에 그대로 보이지만 marker 는 사용자에게도 정직한 표기.
+  const attachIds = (body.attachmentGenerationIds ?? []).filter(id => !!getGeneration(id));
+  const messageText = attachIds.length
+    ? attachIds.map(id => `[reference: ${id}]`).join(" ") + "\n" + body.message
+    : body.message;
   const userMsg = createMessage({
     session_id: sessionId,
     role: "user",
-    content: [{ type: "text", text: body.message }],
+    content: [{ type: "text", text: messageText }],
   });
   send({ type: "session_started", sessionId, messageId: userMsg.id });
 
@@ -106,7 +124,7 @@ async function runChat(
     id: jobId,
     session_id: sessionId,
     kind: "claude_orchestrate",
-    args: { message: body.message },
+    args: { message: messageText, attachIds },
   });
 
   // 4. abort 합치기
@@ -120,9 +138,9 @@ async function runChat(
   const handle = spawnClaude({
     systemPrompt: getSystemPrompt(),
     mcpConfigPath: MCP_CONFIG_PATH,
-    allowedTools: [MCP_TOOL_NAME],
+    allowedTools: MCP_TOOL_NAMES,
     resumeSessionId: resumeId,
-    userMessage: body.message,
+    userMessage: messageText,
     logPrefix: `claude-${jobId}`,
     signal: combinedAbort.signal,
     cwd: process.cwd(),
