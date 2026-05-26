@@ -58,14 +58,23 @@ type Stroke = {
 
 type LayerResult = { generationId: string; colorLabel: string; width: number; height: number };
 
+type SubmitMode = "crop" | "inpaint";
+type SubmitArgs = {
+  mode: SubmitMode;
+  /** crop: 원본 × binary mask 합성 PNG (alpha 보존).
+   *  inpaint: codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존). */
+  layers: Array<{ colorLabel: ColorKey; dataUrl: string }>;
+};
+
 type Props = {
   parentGenerationId: string;
   imageUrl: string;
   imageWidth: number;
   imageHeight: number;
   maxDisplayPx?: number;
-  /** 색별 dataUrl 을 부모에 넘김 — 업로드/저장은 부모(ChatLayout)가 처리. */
-  onSubmit: (args: { layers: Array<{ colorLabel: ColorKey; dataUrl: string }> }) => Promise<LayerResult[]>;
+  /** crop 모드는 결과 list 반환 (result phase 표시).
+   *  inpaint 모드는 직렬 chat 호출이라 결과 카드가 chat 에 누적 — 빈 list 반환 후 즉시 닫힘. */
+  onSubmit: (args: SubmitArgs) => Promise<LayerResult[]>;
   onCancel: () => void;
   /** 외부 generating 상태. */
   busy?: boolean;
@@ -90,6 +99,7 @@ export function LayerCanvas({
   const [color, setColor] = useState<ColorKey>("red");
   const [brushSize, setBrushSize] = useState(40);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [mode, setMode] = useState<SubmitMode>("crop");
   const [phase, setPhase] = useState<"draw" | "result">("draw");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,36 +204,40 @@ export function LayerCanvas({
   }
 
   // ── export ────────────────────────────────────────────────────────────────
-  // 색별로: 원본 해상도 binary mask → globalCompositeOperation 으로 원본 이미지를
-  // 그 영역만 잘라낸 PNG (그 외 transparent) 를 생성. 색이 한 번도 안 칠해졌으면 skip.
-  function exportLayers(): Array<{ colorLabel: ColorKey; dataUrl: string }> {
+  // 색별 binary mask (원본 해상도, white=영역, transparent=그 외). 색 stroke 가 없거나
+  // eraser 로 모두 지워졌으면 null.
+  function buildColorMask(colorKey: ColorKey): HTMLCanvasElement | null {
+    const colorStrokes = strokes.filter(s => s.color === colorKey);
+    if (colorStrokes.length === 0) return null;
+    const inv = 1 / scale;
+    const maskC = document.createElement("canvas");
+    maskC.width = imageWidth;
+    maskC.height = imageHeight;
+    const mctx = maskC.getContext("2d");
+    if (!mctx) return null;
+    mctx.lineCap = "round";
+    mctx.lineJoin = "round";
+    mctx.strokeStyle = "#ffffff";
+    for (const s of colorStrokes) {
+      mctx.globalCompositeOperation = s.tool === "eraser" ? "destination-out" : "source-over";
+      mctx.lineWidth = s.size * inv;
+      mctx.beginPath();
+      mctx.moveTo(s.points[0].x * inv, s.points[0].y * inv);
+      for (let i = 1; i < s.points.length; i++) mctx.lineTo(s.points[i].x * inv, s.points[i].y * inv);
+      mctx.stroke();
+    }
+    if (!hasAnyPixel(mctx, imageWidth, imageHeight)) return null;
+    return maskC;
+  }
+
+  // crop 모드: 색별로 원본 × binary mask 합성 PNG (alpha 보존).
+  function exportCropLayers(): Array<{ colorLabel: ColorKey; dataUrl: string }> {
     const img = imgRef.current;
     if (!img) return [];
-    const inv = 1 / scale;
     const out: Array<{ colorLabel: ColorKey; dataUrl: string }> = [];
     for (const colorKey of COLOR_KEYS) {
-      const colorStrokes = strokes.filter(s => s.color === colorKey);
-      if (colorStrokes.length === 0) continue;
-      // 1. binary mask
-      const maskC = document.createElement("canvas");
-      maskC.width = imageWidth;
-      maskC.height = imageHeight;
-      const mctx = maskC.getContext("2d");
-      if (!mctx) continue;
-      mctx.lineCap = "round";
-      mctx.lineJoin = "round";
-      mctx.strokeStyle = "#ffffff";
-      for (const s of colorStrokes) {
-        mctx.globalCompositeOperation = s.tool === "eraser" ? "destination-out" : "source-over";
-        mctx.lineWidth = s.size * inv;
-        mctx.beginPath();
-        mctx.moveTo(s.points[0].x * inv, s.points[0].y * inv);
-        for (let i = 1; i < s.points.length; i++) mctx.lineTo(s.points[i].x * inv, s.points[i].y * inv);
-        mctx.stroke();
-      }
-      // mask 가 비어 있으면 (eraser 만 했거나 stroke 0점) skip
-      if (!hasAnyPixel(mctx, imageWidth, imageHeight)) continue;
-      // 2. 원본 이미지를 mask 영역만큼만 잘라낸 PNG (mask 가 alpha 역할)
+      const maskC = buildColorMask(colorKey);
+      if (!maskC) continue;
       const outC = document.createElement("canvas");
       outC.width = imageWidth;
       outC.height = imageHeight;
@@ -237,6 +251,54 @@ export function LayerCanvas({
     return out;
   }
 
+  // inpaint 모드: 색별로 codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존).
+  // 복원 영역 = "다른 색으로 칠해진 모든 곳" (= 그 부위를 가리는 다른 부위). 안 칠한 영역은
+  // 검정 (보존) — 원본 그대로. 따라서 사용자가 모든 픽셀을 칠하지 않아도 부분 복원 가능.
+  function exportInpaintMasks(): Array<{ colorLabel: ColorKey; dataUrl: string }> {
+    const out: Array<{ colorLabel: ColorKey; dataUrl: string }> = [];
+    for (const colorKey of COLOR_KEYS) {
+      const selfMask = buildColorMask(colorKey);
+      if (!selfMask) continue;
+      // others = union of all other colors' masks
+      const othersC = document.createElement("canvas");
+      othersC.width = imageWidth;
+      othersC.height = imageHeight;
+      const octx = othersC.getContext("2d");
+      if (!octx) continue;
+      for (const other of COLOR_KEYS) {
+        if (other === colorKey) continue;
+        const m = buildColorMask(other);
+        if (m) octx.drawImage(m, 0, 0);
+      }
+      if (!hasAnyPixel(octx, imageWidth, imageHeight)) continue; // 다른 색이 없으면 inpaint 불필요
+      // final: red where others & not self, black elsewhere. 검정 base 위에 others = red 칠하고,
+      // self 영역은 다시 검정으로 덮어씀 (겹친 영역은 보존이 우선).
+      const finalC = document.createElement("canvas");
+      finalC.width = imageWidth;
+      finalC.height = imageHeight;
+      const fctx = finalC.getContext("2d");
+      if (!fctx) continue;
+      fctx.fillStyle = "#000000";
+      fctx.fillRect(0, 0, imageWidth, imageHeight);
+      // others = red
+      const redC = document.createElement("canvas");
+      redC.width = imageWidth;
+      redC.height = imageHeight;
+      const rctx = redC.getContext("2d");
+      if (!rctx) continue;
+      rctx.fillStyle = "#ff0000";
+      rctx.fillRect(0, 0, imageWidth, imageHeight);
+      rctx.globalCompositeOperation = "destination-in";
+      rctx.drawImage(othersC, 0, 0);
+      // self 영역은 빼기
+      rctx.globalCompositeOperation = "destination-out";
+      rctx.drawImage(selfMask, 0, 0);
+      fctx.drawImage(redC, 0, 0);
+      out.push({ colorLabel: colorKey, dataUrl: finalC.toDataURL("image/png") });
+    }
+    return out;
+  }
+
   const hasStrokes = strokes.length > 0;
 
   async function submit() {
@@ -244,14 +306,21 @@ export function LayerCanvas({
     setError(null);
     setSubmitting(true);
     try {
-      const layers = exportLayers();
+      const layers = mode === "crop" ? exportCropLayers() : exportInpaintMasks();
       if (layers.length === 0) {
-        setError("칠해진 영역이 없습니다.");
+        setError(
+          mode === "crop"
+            ? "칠해진 영역이 없습니다."
+            : "AI 복원은 두 색 이상 칠해야 합니다 (가릴 다른 부위가 필요).",
+        );
         return;
       }
-      const res = await onSubmit({ layers });
-      setResults(res);
-      setPhase("result");
+      const res = await onSubmit({ mode, layers });
+      // inpaint 모드는 chat 으로 결과 흐름 — result phase 진입 안 함.
+      if (mode === "crop") {
+        setResults(res);
+        setPhase("result");
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -395,6 +464,20 @@ export function LayerCanvas({
                   <Trash2 size={12} /> 모두 지우기
                 </button>
               </div>
+              <div className="border-t border-border pt-2">
+                <label className="flex items-start gap-2 text-text-muted">
+                  <input
+                    type="checkbox"
+                    checked={mode === "inpaint"}
+                    onChange={e => setMode(e.target.checked ? "inpaint" : "crop")}
+                    className="mt-0.5 size-3.5 accent-[color:var(--accent)]"
+                  />
+                  <span className="flex-1 leading-tight">
+                    <span className="text-text-primary">⚡ AI 복원</span> — 가려진 영역을
+                    codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
+                  </span>
+                </label>
+              </div>
               {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
             </div>
           </>
@@ -454,7 +537,11 @@ export function LayerCanvas({
               disabled={!hasStrokes || submitting || busy}
               className="h-9 flex-[2] rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
             >
-              {submitting ? "분리 중..." : `✓ 레이어 분리 (${new Set(strokes.map(s => s.color)).size}색)`}
+              {submitting
+                ? mode === "inpaint"
+                  ? "AI 복원 요청 중..."
+                  : "분리 중..."
+                : `✓ ${mode === "inpaint" ? "AI 복원" : "레이어 분리"} (${new Set(strokes.map(s => s.color)).size}색)`}
             </button>
           </>
         ) : (
