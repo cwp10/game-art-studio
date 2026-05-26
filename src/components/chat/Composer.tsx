@@ -1,10 +1,12 @@
 "use client";
 
-import { Send, Sparkles, User, X } from "lucide-react";
+import { LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
+
+const FRAME_COUNTS = [4, 9, 16, 25] as const;
 
 const DIRECTIONS: Array<{ key: string; label: string }> = [
   { key: "auto", label: "자유" },
@@ -49,6 +51,7 @@ export function Composer({
   const [presetId, setPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState<string | null>(null);
   const [direction, setDirection] = useState<string>("auto");
+  const [frames, setFrames] = useState<number | null>(null);
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -106,34 +109,29 @@ export function Composer({
     const opts: { presetId?: string; attachmentGenerationIds?: string[] } = {};
     if (presetId) opts.presetId = presetId;
     if (attached) opts.attachmentGenerationIds = [attached.id];
-    onSend(withDir, Object.keys(opts).length ? opts : undefined);
+    // attached 있고 frames 선택 시 sprite sheet suffix 결합.
+    const withFrames =
+      attached && frames !== null
+        ? `${withDir}, ${frames}프레임 sprite sheet, 1×${frames} grid`
+        : withDir;
+    onSend(withFrames, Object.keys(opts).length ? opts : undefined);
     setText("");
     // attachment 는 일회용 — submit 후 자동 해제. 다시 reference 하고 싶으면 사용자가 카드의
     // [reference] 또는 새 업로드 필요.
     setAttached(null);
+    setFrames(null);
   }
 
   useHotkeys(
     "mod+enter",
     () => submit(),
     { enableOnFormTags: ["TEXTAREA", "INPUT"], preventDefault: true },
-    [text, disabled, presetId, attached],
+    [text, disabled, presetId, attached, frames],
   );
 
   return (
     <div className="border-t border-border bg-bg-panel/40 px-4 py-3">
       <div className="mx-auto max-w-[880px]">
-        {generating && (
-          <div className="mb-2 flex items-center justify-between rounded-lg border border-border bg-bg-card px-3 py-2 text-xs">
-            <span className="shimmer text-text-muted">생성 중…</span>
-            <button
-              onClick={onCancel}
-              className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-text-muted hover:text-text-primary"
-            >
-              <X size={12} /> 취소
-            </button>
-          </div>
-        )}
         {(presetId && presetName) || attached ? (
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {presetId && presetName && (
@@ -199,23 +197,48 @@ export function Composer({
                 ))}
               </select>
             </label>
+            {attached && (
+              <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="sprite sheet 프레임 수">
+                <LayoutGrid size={12} />
+                <select
+                  value={frames ?? ""}
+                  onChange={e => setFrames(e.target.value === "" ? null : Number(e.target.value))}
+                  className="bg-transparent text-xs text-text-muted focus:outline-none"
+                >
+                  <option value="">없음</option>
+                  {FRAME_COUNTS.map(n => (
+                    <option key={n} value={n}>{n}프레임</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               type="button"
               onClick={askSuggestions}
               disabled={disabled || !text.trim() || !onAskSuggestions}
-              className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
+              className="ml-auto flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs leading-none text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
               title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
             >
               <Sparkles size={12} /> 제안
             </button>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={disabled || !text.trim()}
-              className="flex h-7 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
-            >
-              <Send size={12} />
-            </button>
+            {generating ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="flex h-7 items-center gap-1 rounded-md border border-border px-3 text-xs text-text-muted hover:text-text-primary"
+              >
+                <X size={12} /> 취소
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={disabled || !text.trim()}
+                className="flex h-7 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+              >
+                <Send size={12} />
+              </button>
+            )}
           </div>
         </div>
 

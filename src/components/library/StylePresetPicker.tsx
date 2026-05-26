@@ -75,7 +75,7 @@ export function StylePresetPicker({ value, onChange }: Props) {
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
+        className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs leading-none ${
           value
             ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
             : "border-border text-text-muted hover:text-text-primary"

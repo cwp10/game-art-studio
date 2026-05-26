@@ -237,17 +237,52 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const rows = requireInt(args.rows, "rows");
         const cols = requireInt(args.cols, "cols");
         const userPrompt = requireString(args.prompt, "prompt");
-        // grid 구조를 prompt 에 명시적으로 박아줘서 codex 가 분할 가능한 그리드를 생성하게 한다.
+        // cellHeight: 2048 기준 정사각형. rows=1(가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
+        const cellH = rows === 1
+          ? 768
+          : Math.min(512, Math.floor(2048 / Math.max(rows, cols)));
+        const cellW = rows === 1
+          ? Math.min(Math.round(cellH * 2), Math.floor(6144 / cols))
+          : cellH;
+        const canvasW = cols * cellW;
+        const canvasH = rows * cellH;
         const decorated =
-          `${userPrompt}. Single image containing a ${rows}x${cols} grid (${rows * cols} cells), ` +
-          `uniform cell size, evenly spaced, transparent background.`;
-        return await runImageTool({
+          `${userPrompt}. ` +
+          `Single PNG, exactly ${canvasW}×${canvasH} pixels, ` +
+          `${rows}×${cols} animation sprite sheet grid, each cell exactly ${cellW}×${cellH} pixels. ` +
+          `CRITICAL pivot rules: ` +
+          `(1) character's hip/waist is ALWAYS anchored at the exact horizontal and vertical center of every cell — X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
+          `(2) feet always on the same ground line across all frames; ` +
+          `(3) same character scale and height in every frame — no shrinking or growing; ` +
+          `(4) zero positional drift between frames — only limbs and body parts move, not the whole character; ` +
+          `(5) each character fully contained within its cell with 5% margin on all sides. ` +
+          `White background.`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mcpResult = await runImageTool({
           name,
           kind: "spritesheet",
           prompt: decorated,
           inputGenerationIds: [],
           sessionId,
-        });
+        }) as any;
+        // 생성 후 정확한 배수 크기로 강제 리사이즈 — 셀 경계 보장.
+        const genId: string | undefined = mcpResult?.structuredContent?.generationId;
+        if (genId) {
+          const filePath = imagePathFor(genId);
+          const tmpPath = `${filePath}.tmp`;
+          try {
+            await sharp(filePath)
+              .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
+              .png()
+              .toFile(tmpPath);
+            fs.renameSync(tmpPath, filePath);
+            log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
+          } catch (e) {
+            log(`make_spritesheet resize fail: ${(e as Error).message}`);
+            try { fs.unlinkSync(tmpPath); } catch { /* noop */ }
+          }
+        }
+        return mcpResult;
       }
 
       case "edit_image":

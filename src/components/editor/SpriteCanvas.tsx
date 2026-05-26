@@ -1,17 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, FileArchive, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-
-/**
- * SpriteCanvas — 스프라이트 시트를 N×M 그리드로 분할 + GIF 미리보기 + zip/GIF 다운로드.
- *
- * 모든 동작은 클라이언트 사이드 (canvas + gif.js + jszip 동적 import). 백엔드 호출 X,
- * DB 저장 X — 단순 다운로드 도구. 분할 결과를 generation 으로 남기는 건 v1 결정상 제외.
- *
- * GIF 워커: `gif.js` 가 worker 스크립트를 별도로 요구. `package.json` 의 postinstall 이
- * `public/gif.worker.js` 로 복사 — 빌드 산출물에 포함됨.
- */
 
 type Order = "row" | "col";
 
@@ -43,13 +33,20 @@ export function SpriteCanvas({
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
+  const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
+  const [dragging, setDragging] = useState<{
+    idx: number;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+  } | null>(null);
 
-  // 캔버스 표시 크기 — 부모 sizer 폭 안에 맞춤. 한 번 측정.
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
     if (!sizer) return;
     const w = Math.max(200, sizer.clientWidth - 24);
-    const h = Math.max(200, sizer.clientHeight - 320); // toolbar/preview 자리 확보
+    const h = Math.max(200, sizer.clientHeight - 320);
     setAvail({ w, h });
   }, []);
 
@@ -58,7 +55,6 @@ export function SpriteCanvas({
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
-  // 1. 원본 이미지 load
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [imgLoaded, setImgLoaded] = useState(false);
   useEffect(() => {
@@ -73,7 +69,6 @@ export function SpriteCanvas({
     img.src = imageUrl;
   }, [imageUrl]);
 
-  // 2. base 캔버스 redraw
   useEffect(() => {
     const c = baseRef.current;
     const img = imgRef.current;
@@ -86,14 +81,10 @@ export function SpriteCanvas({
     ctx.drawImage(img, 0, 0, displayW, displayH);
   }, [imgLoaded, displayW, displayH]);
 
-  // 셀 크기 (원본 해상도 기준)
   const cellW = Math.floor(imageWidth / cols);
   const cellH = Math.floor(imageHeight / rows);
   const frameCount = rows * cols;
 
-  // ── 분할 프레임 생성 ────────────────────────────────────────────────────────
-  // imgRef + rows/cols/order 가 바뀔 때마다 재계산 → state. 캔버스 N개를 만들어 thumbnail
-  // / GIF 빌드에 그대로 사용. 한 cell ~256×256 × 16 = 1MB level — 메모리 OK.
   const [frames, setFrames] = useState<HTMLCanvasElement[]>([]);
   useEffect(() => {
     const img = imgRef.current;
@@ -117,22 +108,88 @@ export function SpriteCanvas({
       for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) push(c, r);
     }
     setFrames(out);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
   }, [imgLoaded, rows, cols, order, cellW, cellH]);
 
-  // thumbnail dataUrl 캐시 — frames 변경 시만 재계산.
-  const thumbs = useMemo(() => frames.map(f => f.toDataURL("image/png")), [frames]);
+  // offset 적용된 프레임 — GIF·zip·썸네일 공통 사용
+  const adjustedFrames = useMemo(() => {
+    if (frames.length === 0 || offsets.length !== frames.length) return frames;
+    return frames.map((frame, i) => {
+      const off = offsets[i] ?? { x: 0, y: 0 };
+      if (off.x === 0 && off.y === 0) return frame;
+      const c = document.createElement("canvas");
+      c.width = cellW;
+      c.height = cellH;
+      const ctx = c.getContext("2d");
+      if (!ctx) return frame;
+      ctx.drawImage(frame, off.x, off.y);
+      return c;
+    });
+  }, [frames, offsets, cellW, cellH]);
 
-  // ── GIF 빌드 ────────────────────────────────────────────────────────────────
-  // frames / fps 가 변하면 자동 rebuild (debounce 300ms). 이전 url 은 revoke.
+  const thumbs = useMemo(
+    () => adjustedFrames.map(f => f.toDataURL("image/png")),
+    [adjustedFrames],
+  );
+
+  // 드래그 — window 이벤트로 썸네일 밖에서도 추적
   useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent) => {
+      const dx = e.clientX - dragging.startX;
+      const dy = e.clientY - dragging.startY;
+      setOffsets(prev =>
+        prev.map((o, i) =>
+          i === dragging.idx ? { x: dragging.origX + dx, y: dragging.origY + dy } : o,
+        ),
+      );
+    };
+    const onUp = () => setDragging(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging]);
+
+  // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
+  function autoAlign() {
     if (frames.length === 0) return;
+    const boxes = frames.map(frame => {
+      const ctx = frame.getContext("2d");
+      if (!ctx) return { maxY: frame.height };
+      const { data, width, height } = ctx.getImageData(0, 0, frame.width, frame.height);
+      let maxY = 0;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          const r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3];
+          const isBg = a < 10 || (r > 240 && g > 240 && b > 240);
+          if (!isBg && y > maxY) maxY = y;
+        }
+      }
+      return { maxY };
+    });
+
+    const maxBottom = Math.max(...boxes.map(b => b.maxY));
+    setOffsets(boxes.map(box => ({ x: 0, y: maxBottom - box.maxY })));
+  }
+
+  function resetOffsets() {
+    setOffsets(Array.from({ length: frames.length }, () => ({ x: 0, y: 0 })));
+  }
+
+  // GIF 빌드
+  useEffect(() => {
+    if (adjustedFrames.length === 0) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       setGifBusy(true);
       setGifError(null);
       try {
         const GIF = (await import("gif.js")).default;
-        // 첫 프레임 크기 기준 — 모든 셀 동일 크기 보장.
         const gif = new GIF({
           workers: 2,
           workerScript: "/gif.worker.js",
@@ -142,7 +199,7 @@ export function SpriteCanvas({
           transparent: 0x000000,
         });
         const delay = Math.max(20, Math.round(1000 / fps));
-        for (const f of frames) gif.addFrame(f, { delay });
+        for (const f of adjustedFrames) gif.addFrame(f, { delay });
         const blob: Blob = await new Promise((resolve, reject) => {
           gif.on("finished", (b: Blob) => resolve(b));
           gif.on("abort", () => reject(new Error("aborted")));
@@ -163,23 +220,25 @@ export function SpriteCanvas({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [frames, fps, cellW, cellH]);
+  }, [adjustedFrames, fps, cellW, cellH]);
 
-  // 언마운트 시 마지막 url cleanup
   useEffect(() => () => { if (gifUrl) URL.revokeObjectURL(gifUrl); }, [gifUrl]);
 
-  // ── downloads ─────────────────────────────────────────────────────────────
   async function downloadZip() {
-    if (frames.length === 0 || downloading) return;
+    if (adjustedFrames.length === 0 || downloading) return;
     setDownloading("zip");
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      const pad = String(frames.length - 1).length;
-      frames.forEach((c, i) => {
+      const pad = String(adjustedFrames.length - 1).length;
+      adjustedFrames.forEach((c, i) => {
         const dataUrl = c.toDataURL("image/png");
         const base64 = dataUrl.slice("data:image/png;base64,".length);
-        zip.file(`${parentGenerationId}-${String(i).padStart(pad, "0")}.png`, base64, { base64: true });
+        zip.file(
+          `${parentGenerationId}-${String(i).padStart(pad, "0")}.png`,
+          base64,
+          { base64: true },
+        );
       });
       const blob = await zip.generateAsync({ type: "blob" });
       triggerDownload(blob, `${parentGenerationId}-frames.zip`);
@@ -200,7 +259,6 @@ export function SpriteCanvas({
     }
   }
 
-  // ── render ─────────────────────────────────────────────────────────────────
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
@@ -222,30 +280,20 @@ export function SpriteCanvas({
           행·열을 지정해서 시트를 N×M 프레임으로 분할합니다. 클라이언트 처리 — DB 저장 없음.
         </p>
 
-        {/* 원본 + 그리드 overlay */}
         <div
           className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
           style={{ width: displayW, height: displayH }}
         >
-          <canvas
-            ref={baseRef}
-            className="absolute inset-0"
-            width={displayW}
-            height={displayH}
-          />
+          <canvas ref={baseRef} className="absolute inset-0" width={displayW} height={displayH} />
           <GridOverlay rows={rows} cols={cols} w={displayW} h={displayH} />
         </div>
 
-        {/* 분할 설정 */}
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-1">
               <span className="w-6 text-text-muted">행</span>
               <input
-                type="number"
-                min={1}
-                max={16}
-                value={rows}
+                type="number" min={1} max={16} value={rows}
                 onChange={e => setRows(clamp(Number(e.target.value), 1, 16))}
                 className="h-7 w-14 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
               />
@@ -253,17 +301,12 @@ export function SpriteCanvas({
             <label className="flex items-center gap-1">
               <span className="w-6 text-text-muted">열</span>
               <input
-                type="number"
-                min={1}
-                max={16}
-                value={cols}
+                type="number" min={1} max={16} value={cols}
                 onChange={e => setCols(clamp(Number(e.target.value), 1, 16))}
                 className="h-7 w-14 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
               />
             </label>
-            <span className="text-text-muted/70">
-              셀 {cellW}×{cellH} · {frameCount}프레임
-            </span>
+            <span className="text-text-muted/70">셀 {cellW}×{cellH} · {frameCount}프레임</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="w-12 text-text-muted">순서</span>
@@ -274,7 +317,6 @@ export function SpriteCanvas({
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
                   : "border-border text-text-muted hover:text-text-primary"
               }`}
-              title="가로 → 세로 (행 우선)"
             >
               <ArrowRight size={12} /> 가로
             </button>
@@ -285,7 +327,6 @@ export function SpriteCanvas({
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
                   : "border-border text-text-muted hover:text-text-primary"
               }`}
-              title="세로 → 가로 (열 우선)"
             >
               <ArrowDown size={12} /> 세로
             </button>
@@ -293,10 +334,7 @@ export function SpriteCanvas({
           <div className="flex items-center gap-2">
             <span className="w-12 text-text-muted">FPS</span>
             <input
-              type="range"
-              min={1}
-              max={30}
-              value={fps}
+              type="range" min={1} max={30} value={fps}
               onChange={e => setFps(Number(e.target.value))}
               className="flex-1 accent-[color:var(--accent)]"
             />
@@ -304,19 +342,78 @@ export function SpriteCanvas({
           </div>
         </div>
 
-        {/* 분할 프레임 + GIF 미리보기 */}
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
-          <div className="text-text-muted">분할 결과 ({thumbs.length}프레임)</div>
-          <div className="grid grid-cols-4 gap-1">
-            {thumbs.map((src, i) => (
-              <div
-                key={i}
-                className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]"
+          <div className="flex items-center justify-between">
+            <span className="text-text-muted">분할 결과 ({thumbs.length}프레임)</span>
+            <div className="flex gap-1">
+              <button
+                onClick={autoAlign}
+                disabled={frames.length === 0}
+                className="flex h-6 items-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
+                title="발(bottom) 기준으로 자동 정렬"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt={`frame ${i}`} className="block aspect-square w-full" />
-              </div>
-            ))}
+                <RefreshCw size={10} /> 자동 정렬
+              </button>
+              <button
+                onClick={resetOffsets}
+                disabled={frames.length === 0}
+                className="h-6 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
+                title="위치 초기화"
+              >
+                초기화
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-text-muted/60">
+            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 십자선 기준으로 맞추면 프레임 간 정렬이 됩니다.
+          </p>
+          <div className="grid grid-cols-4 gap-1">
+            {thumbs.map((src, i) => {
+              const off = offsets[i] ?? { x: 0, y: 0 };
+              return (
+                <div
+                  key={i}
+                  className={`relative overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                    dragging?.idx === i ? "cursor-grabbing ring-1 ring-[color:var(--accent)]" : "cursor-grab"
+                  }`}
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`frame ${i}`}
+                    className="block aspect-square w-full"
+                    draggable={false}
+                  />
+                  {/* 십자 점선 — 중앙 기준선 */}
+                  <svg
+                    className="pointer-events-none absolute inset-0 h-full w-full"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                  >
+                    <line
+                      x1="50" y1="0" x2="50" y2="100"
+                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.8"
+                      strokeDasharray="3 2" vectorEffect="non-scaling-stroke"
+                    />
+                    <line
+                      x1="0" y1="50" x2="100" y2="50"
+                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.8"
+                      strokeDasharray="3 2" vectorEffect="non-scaling-stroke"
+                    />
+                  </svg>
+                  {/* offset 수치 표시 */}
+                  {(off.x !== 0 || off.y !== 0) && (
+                    <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-black/70 px-0.5 text-[9px] tabular-nums text-white/90">
+                      {off.x > 0 ? "+" : ""}{off.x},{off.y > 0 ? "+" : ""}{off.y}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <div className="flex items-center gap-2 pt-1">
             <span className="text-text-muted">GIF</span>
@@ -345,7 +442,7 @@ export function SpriteCanvas({
         </button>
         <button
           onClick={downloadZip}
-          disabled={frames.length === 0 || !!downloading}
+          disabled={adjustedFrames.length === 0 || !!downloading}
           className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
         >
           <FileArchive size={14} /> {downloading === "zip" ? "..." : "프레임 zip"}
@@ -362,7 +459,6 @@ export function SpriteCanvas({
   );
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -376,11 +472,9 @@ function triggerDownload(blob: Blob, name: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // 즉시 revoke 시 일부 브라우저가 download 취소 — 1초 후 revoke.
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// 그리드 overlay — pointer 통과, 시각적 셀 경계만.
 function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: number; h: number }) {
   const vLines = Array.from({ length: cols - 1 }, (_, i) => ((i + 1) * w) / cols);
   const hLines = Array.from({ length: rows - 1 }, (_, i) => ((i + 1) * h) / rows);
@@ -392,28 +486,12 @@ function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: numb
       viewBox={`0 0 ${w} ${h}`}
     >
       {vLines.map((x, i) => (
-        <line
-          key={`v${i}`}
-          x1={x}
-          y1={0}
-          x2={x}
-          y2={h}
-          stroke="rgba(168, 85, 247, 0.7)"
-          strokeWidth={1}
-          strokeDasharray="4 4"
-        />
+        <line key={`v${i}`} x1={x} y1={0} x2={x} y2={h}
+          stroke="rgba(168, 85, 247, 0.7)" strokeWidth={1} strokeDasharray="4 4" />
       ))}
       {hLines.map((y, i) => (
-        <line
-          key={`h${i}`}
-          x1={0}
-          y1={y}
-          x2={w}
-          y2={y}
-          stroke="rgba(168, 85, 247, 0.7)"
-          strokeWidth={1}
-          strokeDasharray="4 4"
-        />
+        <line key={`h${i}`} x1={0} y1={y} x2={w} y2={y}
+          stroke="rgba(168, 85, 247, 0.7)" strokeWidth={1} strokeDasharray="4 4" />
       ))}
     </svg>
   );
