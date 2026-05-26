@@ -249,13 +249,14 @@ export function ChatLayout() {
   const handleInpaint = useCallback(
     async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
       if (!editing || editing.mode !== "inpaint") return;
+      const { generationId } = editing;
       try {
-        const maskId = await uploadMask(editing.generationId, maskDataUrl);
-        setEditing(null);
+        const maskId = await uploadMask(generationId, maskDataUrl);
         await handleSend(prompt, {
-          attachmentGenerationIds: [editing.generationId],
+          attachmentGenerationIds: [generationId],
           maskGenerationId: maskId,
         });
+        setEditing(null);
       } catch (e) {
         console.error("[inpaint]", e);
         dispatch({
