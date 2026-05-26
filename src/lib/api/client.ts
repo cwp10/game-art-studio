@@ -49,6 +49,32 @@ export async function uploadMask(parentGenerationId: string, dataUrl: string): P
 }
 
 /**
+ * 외부 이미지 파일(사용자 업로드) 을 generation 행으로 저장. dataUrl 은 FileReader 로
+ * 변환한 base64. backend='external', kind='text2img' + params.kindHint='external'.
+ */
+export async function uploadImage(args: {
+  dataUrl: string;
+  sessionId?: string | null;
+  filename?: string;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "image",
+      dataUrl: args.dataUrl,
+      sessionId: args.sessionId ?? undefined,
+      filename: args.filename,
+    }),
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(`uploadImage failed: ${error ?? r.statusText}`);
+  }
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
+/**
  * LayerCanvas 가 만든 N(=4)개의 색별 PNG 를 한 번에 generation 행들로 저장.
  * 각 PNG 는 (원본 × 색별 binary mask) 합성 결과.
  */
