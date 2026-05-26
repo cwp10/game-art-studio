@@ -8,11 +8,14 @@
     "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "db:init": "tsx scripts/init-db.ts",
-    "probe": "node scripts/probe-codex-imagegen.mjs"
+    "probe": "node scripts/probe-codex-imagegen.mjs",
+    "postinstall": "cp -f node_modules/gif.js/dist/gif.worker.js public/gif.worker.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.5.0",
+    "gif.js": "^0.2.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.469.0",
     "nanoid": "^5.0.9",
     "next": "16.2.6",
@@ -24,6 +27,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.12",
+    "@types/gif.js": "^0.2.5",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

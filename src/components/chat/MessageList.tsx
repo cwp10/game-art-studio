@@ -15,7 +15,8 @@ type Props = {
       | "resize"
       | "remove_bg"
       | "edit"
-      | "layer_split",
+      | "layer_split"
+      | "sprite_split",
     payload: {
       prompt?: string;
       generationId?: string;
