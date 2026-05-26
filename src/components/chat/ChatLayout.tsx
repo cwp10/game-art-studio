@@ -23,6 +23,12 @@ import {
  *
  * 단일 useReducer 로 SSE 이벤트와 사용자 입력을 모두 받아 ChatItem 배열을 시간 순으로 누적.
  */
+const COLOR_KO: Record<string, string> = {
+  red: "빨강", green: "초록", blue: "파랑", yellow: "노랑",
+  cyan: "청록", magenta: "자홍", orange: "주황", purple: "보라",
+};
+function colorKo(k: string): string { return COLOR_KO[k] ?? k; }
+
 type EditTarget = {
   generationId: string;
   imageUrl: string;
@@ -193,15 +199,44 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
-  // LayerCanvas 가 submit 한 N개의 색별 PNG → /api/layers → N개 generation 행.
-  // 결과 list 를 LayerCanvas 가 result view 로 표시하도록 그대로 돌려준다 (chat 흐름은 그대로).
+  // LayerCanvas 가 submit 한 결과 처리.
+  //  - mode='crop': N개 색별 PNG → /api/layers → N개 generation 행. result list 를 그대로
+  //    돌려주면 LayerCanvas 가 result view 로 표시.
+  //  - mode='inpaint': N개 색별 binary mask PNG → 색별 1회씩 /api/upload + /api/chat 직렬
+  //    호출 (codex inpaint_image 가 가려진 영역을 자연스럽게 복원). LayerCanvas 즉시 닫히고
+  //    결과 카드는 chat 에 순차 누적.
   const handleLayerSplit = useCallback(
-    async ({ layers }: { layers: Array<{ colorLabel: string; dataUrl: string }> }) => {
+    async ({
+      mode,
+      layers,
+    }: {
+      mode: "crop" | "inpaint";
+      layers: Array<{ colorLabel: string; dataUrl: string }>;
+    }) => {
       if (!editing || editing.mode !== "layer") return [];
-      const res = await uploadLayers(editing.generationId, layers);
-      return res;
+      if (mode === "crop") {
+        return uploadLayers(editing.generationId, layers);
+      }
+      const parentId = editing.generationId;
+      setEditing(null); // 패널 닫고 chat 으로 시선 이동
+      for (const layer of layers) {
+        try {
+          const maskId = await uploadMask(parentId, layer.dataUrl);
+          await handleSend(
+            `${colorKo(layer.colorLabel)} 영역만 남기고 빨간색으로 표시된 다른 부위 영역을 원본의 자연스러운 연속(같은 색·질감)으로 복원해줘.`,
+            { attachmentGenerationIds: [parentId], maskGenerationId: maskId },
+          );
+        } catch (e) {
+          console.error("[layer-inpaint]", layer.colorLabel, e);
+          dispatch({
+            type: "sse",
+            event: { type: "error", message: `${layer.colorLabel}: ${(e as Error).message}` },
+          });
+        }
+      }
+      return [];
     },
-    [editing],
+    [editing, handleSend],
   );
 
   useHotkeys("mod+n", e => {
