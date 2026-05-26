@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH, ensureDataDirs } from "@/lib/util/paths";
+import { seedBuiltinPresets } from "./seed-presets";
 
 /**
  * better-sqlite3 싱글톤.
@@ -32,6 +33,9 @@ function init(): DbInstance {
   // 스키마는 IF NOT EXISTS 라 매번 안전하게 실행 가능.
   const schemaSql = fs.readFileSync(SCHEMA_PATH, "utf8");
   db.exec(schemaSql);
+  // builtin style preset seed — name UNIQUE + INSERT OR IGNORE 라 멱등.
+  // 사용자가 builtin 의 prompt_suffix 를 수정하면 보존됨.
+  seedBuiltinPresets(db);
   return db;
 }
 

@@ -2,7 +2,7 @@
  * 클라이언트 측 fetch 래퍼. 클라이언트 컴포넌트에서만 사용.
  */
 import type { ChatEvent, ChatRequest } from "@/types/chat";
-import type { Generation, Message, Session } from "@/types/db";
+import type { Generation, Message, PromptLibraryItem, Session, StylePreset } from "@/types/db";
 
 export async function listSessions(): Promise<Session[]> {
   const r = await fetch("/api/sessions");
@@ -69,6 +69,90 @@ export async function uploadLayers(
     layers: Array<{ generationId: string; colorLabel: string; width: number; height: number }>;
   };
   return out;
+}
+
+// ── style presets ───────────────────────────────────────────────────────────
+export async function listPresets(): Promise<StylePreset[]> {
+  const r = await fetch("/api/presets");
+  const { presets } = (await r.json()) as { presets: StylePreset[] };
+  return presets;
+}
+
+export async function createPreset(input: {
+  name: string;
+  description?: string;
+  prompt_suffix: string;
+  negative_suffix?: string;
+}): Promise<StylePreset> {
+  const r = await fetch("/api/presets", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  return ((await r.json()) as { preset: StylePreset }).preset;
+}
+
+export async function updatePreset(id: string, patch: Partial<StylePreset>): Promise<StylePreset> {
+  const r = await fetch(`/api/presets/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  return ((await r.json()) as { preset: StylePreset }).preset;
+}
+
+export async function deletePreset(id: string): Promise<void> {
+  const r = await fetch(`/api/presets/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+}
+
+// ── prompt library ──────────────────────────────────────────────────────────
+export async function listPrompts(opts?: { search?: string; tag?: string }): Promise<PromptLibraryItem[]> {
+  const sp = new URLSearchParams();
+  if (opts?.search) sp.set("search", opts.search);
+  if (opts?.tag) sp.set("tag", opts.tag);
+  const r = await fetch(`/api/prompts${sp.toString() ? "?" + sp.toString() : ""}`);
+  const { prompts } = (await r.json()) as { prompts: PromptLibraryItem[] };
+  return prompts;
+}
+
+export async function createPrompt(input: { title: string; body: string; tags?: string[] }): Promise<PromptLibraryItem> {
+  const r = await fetch("/api/prompts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  return ((await r.json()) as { prompt: PromptLibraryItem }).prompt;
+}
+
+export async function updatePrompt(
+  id: string,
+  patch: { title?: string; body?: string; tags?: string[] },
+): Promise<PromptLibraryItem> {
+  const r = await fetch(`/api/prompts/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  return ((await r.json()) as { prompt: PromptLibraryItem }).prompt;
+}
+
+export async function deletePrompt(id: string): Promise<void> {
+  const r = await fetch(`/api/prompts/${id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+}
+
+/** "사용" 액션 — use_count++, last_used_at=now. */
+export async function bumpPromptUse(id: string): Promise<void> {
+  await fetch(`/api/prompts/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ use: true }),
+  });
 }
 
 export async function listGenerations(sessionId?: string): Promise<Generation[]> {

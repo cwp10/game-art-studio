@@ -9,15 +9,18 @@ import { SessionList } from "./SessionList";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
+import { PromptLibrarySheet } from "@/components/library/PromptLibrarySheet";
 import {
   createSession,
   deleteSession,
   listMessages,
+  listPresets,
   listSessions,
   streamChat,
   uploadLayers,
   uploadMask,
 } from "@/lib/api/client";
+import type { StylePreset } from "@/types/db";
 
 /**
  * ChatLayout — 3-column shell (좌: 세션 / 중: 대화 / 우: 추후 패널).
@@ -45,6 +48,11 @@ type Editing =
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const [editing, setEditing] = useState<Editing>(null);
+  const [libOpen, setLibOpen] = useState(false);
+  // Composer prefill — seq 카운터로 같은 text 도 매번 새 trigger.
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
+  // preset cache — handleSend 가 suffix 결합에 사용.
+  const presetCache = useRef<Map<string, StylePreset>>(new Map());
   const abortRef = useRef<AbortController | null>(null);
 
   // 초기 세션 목록 로드
@@ -87,14 +95,30 @@ export function ChatLayout() {
   // 메시지 전송. attachmentGenerationIds / maskGenerationId 가 있으면 라우트가
   // user 메시지 본문에 [reference: <id>] / [mask: <id>] marker 로 prefix → Claude 가
   // inputGenerationId / maskGenerationId 로 사용.
+  // presetId 가 있으면 client 측에서 prompt_suffix 를 메시지 끝에 결합 (서버는 결합된
+  // 형태만 받음 — Claude orchestrator 는 preset 개념 모름).
   const handleSend = useCallback(
     async (
       text: string,
-      opts?: { attachmentGenerationIds?: string[]; maskGenerationId?: string },
+      opts?: {
+        attachmentGenerationIds?: string[];
+        maskGenerationId?: string;
+        presetId?: string;
+      },
     ) => {
       if (state.generating) return;
+      let finalText = text;
+      if (opts?.presetId) {
+        let p = presetCache.current.get(opts.presetId);
+        if (!p) {
+          const all = await listPresets();
+          for (const x of all) presetCache.current.set(x.id, x);
+          p = presetCache.current.get(opts.presetId);
+        }
+        if (p?.prompt_suffix) finalText = `${text}, ${p.prompt_suffix}`;
+      }
       const tempId = "tmp-" + Math.random().toString(36).slice(2, 8);
-      dispatch({ type: "user_send", tempId, text });
+      dispatch({ type: "user_send", tempId, text: finalText });
 
       const abort = new AbortController();
       abortRef.current = abort;
@@ -102,7 +126,7 @@ export function ChatLayout() {
         await streamChat(
           {
             sessionId: state.activeSessionId ?? undefined,
-            message: text,
+            message: finalText,
             attachmentGenerationIds: opts?.attachmentGenerationIds,
             maskGenerationId: opts?.maskGenerationId,
           },
@@ -251,6 +275,11 @@ export function ChatLayout() {
     e.preventDefault();
     handleNew();
   });
+  useHotkeys(
+    "mod+k",
+    e => { e.preventDefault(); setLibOpen(o => !o); },
+    { enableOnFormTags: ["TEXTAREA", "INPUT"] },
+  );
 
   const hasItems = state.items.length > 0;
 
@@ -281,6 +310,7 @@ export function ChatLayout() {
           generating={state.generating}
           onSend={handleSend}
           onCancel={handleCancel}
+          prefill={composerPrefill}
         />
       </div>
       {editing?.mode === "inpaint" && (
@@ -314,6 +344,11 @@ export function ChatLayout() {
           onCancel={() => setEditing(null)}
         />
       )}
+      <PromptLibrarySheet
+        open={libOpen}
+        onClose={() => setLibOpen(false)}
+        onUse={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
+      />
     </div>
   );
 }
