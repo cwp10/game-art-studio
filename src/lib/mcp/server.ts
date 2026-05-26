@@ -35,7 +35,13 @@ import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
 import { createGeneration, getGeneration } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
-import { DATA_DIR, LOGS_DIR, ensureDataDirs, toRelative } from "../util/paths.js";
+import {
+  DATA_DIR,
+  LOGS_DIR,
+  ensureDataDirs,
+  jobDir as jobDirFor,
+  toRelative,
+} from "../util/paths.js";
 import type { GenerationKind } from "../../types/db.js";
 
 ensureDataDirs();
@@ -299,10 +305,25 @@ async function runImageTool(spec: {
     args: { tool: name, prompt, kind, generationId, inputGenerationIds, viaMcp: true },
   });
 
+  // progress.jsonl 채널 — Next 의 progress-tail 헬퍼가 polling 으로 읽는다.
+  // 도구 시작 직전에 빈 파일을 만들어 두면 tail 이 stat 실패를 덜 겪는다.
+  const progressPath = path.join(jobDirFor(jobId), "progress.jsonl");
+  fs.mkdirSync(path.dirname(progressPath), { recursive: true });
+  fs.writeFileSync(progressPath, "");
+  function appendProgress(stage: string, detail?: string): void {
+    const line = JSON.stringify({ ts: Date.now(), stage, detail }) + "\n";
+    try {
+      fs.appendFileSync(progressPath, line);
+    } catch (e) {
+      log(`  ${jobId} progress append fail: ${(e as Error).message}`);
+    }
+  }
+
   const backend = await selectImageBackend();
   const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths };
   const result = await backend.execute(job, (stage, detail) => {
     log(`  ${jobId} stage=${stage}${detail ? " " + detail : ""}`);
+    appendProgress(stage, detail);
   });
 
   const gen = createGeneration({

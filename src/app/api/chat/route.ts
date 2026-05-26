@@ -15,6 +15,7 @@ import { getGeneration, linkGeneration } from "@/lib/db/repo/generations";
 import { createJob, updateJob } from "@/lib/db/repo/jobs";
 import { newJobId } from "@/lib/util/ids";
 import { spawnClaude } from "@/lib/cli/claude-cli";
+import { tailProgress } from "@/lib/cli/progress-tail";
 
 /**
  * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
@@ -147,12 +148,15 @@ async function runChat(
   });
 
   // 6. 이벤트 소비. 종료 시점에 assistant 메시지를 한번에 저장.
+  const turnStartTime = Date.now();
   const blocks: MessageBlock[] = [];
   const accumulatedText: string[] = [];
   const generationIds: string[] = [];
   // imggen 외 도구(예: Claude CLI 의 내장 ToolSearch)는 SSE 로 forward 하지 않는다.
   // 우리 UI 가 표시할 의미가 없고, false-alarm 에러 카드를 만들지 않기 위해서.
   const imggenToolUseIds = new Set<string>();
+  // 각 imggen tool_use 마다 progress.jsonl tail 핸들. tool_result 또는 finally 에서 stop.
+  const progressTails = new Map<string, ReturnType<typeof tailProgress>>();
   let claudeSessionId: string | null = null;
   send({ type: "assistant_thinking" });
 
@@ -186,12 +190,23 @@ async function runChat(
             name: ev.name,
             args: ev.input,
           });
+          // MCP 도구가 별도 프로세스라 stage 를 직접 못 받음.
+          // jobs 테이블에서 새 codex_image 행을 polling 으로 찾고 그 progress.jsonl 을 tail.
+          const tail = tailProgress({
+            turnStartTime,
+            onEvent: ({ stage, detail }) => {
+              send({ type: "tool_call_progress", toolCallId: ev.toolUseId, stage, detail });
+            },
+          });
+          progressTails.set(ev.toolUseId, tail);
           break;
         }
 
         case "tool_result": {
           // 우리 도구의 결과만 처리. 메타 도구는 silent drop.
           if (!imggenToolUseIds.has(ev.toolUseId)) break;
+          progressTails.get(ev.toolUseId)?.stop();
+          progressTails.delete(ev.toolUseId);
           const { generationId, errorText } = extractGenerationId(ev.content);
           blocks.push({
             type: "tool_result",
@@ -279,6 +294,9 @@ async function runChat(
       }
     }
   } finally {
+    // 남은 progress tail 정리 (도구 응답이 안 와도 leak 안 되게)
+    for (const tail of progressTails.values()) tail.stop();
+    progressTails.clear();
     sseSignal.removeEventListener("abort", onAbort);
     reqSignal.removeEventListener("abort", onAbort);
     close();
