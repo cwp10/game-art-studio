@@ -7,6 +7,7 @@ import {
   Edit3,
   Film,
   Layers,
+  Link2,
   Maximize2,
   RotateCw,
   Scissors,
@@ -21,7 +22,8 @@ type Action =
   | "remove_bg"
   | "edit"
   | "layer_split"
-  | "sprite_split";
+  | "sprite_split"
+  | "reference";
 
 type Props = {
   generationId: string;
@@ -75,13 +77,17 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
   }
 
   return (
-    <figure className="overflow-hidden rounded-xl border border-border bg-bg-card">
-      <a href={imageUrl} target="_blank" rel="noreferrer" className="block">
+    // overflow-hidden 을 figure 에서 빼야 [리사이즈 v] 드롭다운이 figcaption 밖으로
+    // 펼쳐질 수 있음. img 자체에 rounded-t-xl 로 corner 깎임 처리.
+    <figure className="rounded-xl border border-border bg-bg-card">
+      {/* 카드 1개가 viewport 안에 들어가도록 height cap (60vh).
+          가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 원본은 a href 로 새 탭. */}
+      <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-t-xl bg-black/10">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
           alt={prompt ?? "generated image"}
-          className="block h-auto w-full max-w-full bg-black/30"
+          className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full bg-black/30"
           width={width || undefined}
           height={height || undefined}
         />
@@ -170,6 +176,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
               title="스프라이트 시트 분할 + GIF 미리보기 + 프레임 zip / GIF 다운로드"
             >
               <Film size={12} /> 스프라이트
+            </button>
+            <button
+              onClick={() => onAction?.("reference")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="이 이미지를 다음 메시지의 reference 로 첨부 → 자연어로 변형 지시"
+            >
+              <Link2 size={12} /> 참조
             </button>
             <button
               onClick={() => onAction?.("duplicate")}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { chatReducer, initialState } from "./chat-state";
-import { Composer } from "./Composer";
+import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
@@ -52,6 +52,8 @@ export function ChatLayout() {
   const [libOpen, setLibOpen] = useState(false);
   // Composer prefill — seq 카운터로 같은 text 도 매번 새 trigger.
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
+  // Composer attachment — 업로드/카드 액션 직후 set. seq 카운터로 동일 generationId 도 새로 trigger.
+  const [composerAttachment, setComposerAttachment] = useState<ComposerAttachment | null>(null);
   // preset cache — handleSend 가 suffix 결합에 사용.
   const presetCache = useRef<Map<string, StylePreset>>(new Map());
   // session 활성화 직후의 listMessages reload 를 건너뜀 — 클라이언트가 dispatch 로
@@ -182,7 +184,8 @@ export function ChatLayout() {
         | "remove_bg"
         | "edit"
         | "layer_split"
-        | "sprite_split",
+        | "sprite_split"
+        | "reference",
       payload: {
         prompt?: string;
         generationId?: string;
@@ -193,6 +196,14 @@ export function ChatLayout() {
     ) => {
       if (action === "duplicate" && payload.prompt) {
         handleSend(payload.prompt);
+      } else if (action === "reference" && payload.generationId) {
+        // 이 결과를 다음 메시지의 reference 로 attach.
+        const label = payload.prompt?.slice(0, 32) ?? payload.generationId.slice(0, 8);
+        setComposerAttachment(prev => ({
+          generationId: payload.generationId!,
+          label,
+          seq: (prev?.seq ?? 0) + 1,
+        }));
       } else if (action === "resize" && payload.generationId && payload.targetSize) {
         handleSend(`이 이미지를 ${payload.targetSize}×${payload.targetSize} 로 리사이즈해줘.`, {
           attachmentGenerationIds: [payload.generationId],
@@ -310,6 +321,12 @@ export function ChatLayout() {
           width: res.width,
           height: res.height,
         });
+        // 다음 메시지가 이 이미지를 reference 로 자연 사용. seq 카운터로 같은 id 도 재트리거.
+        setComposerAttachment(prev => ({
+          generationId: res.generationId,
+          label: file.name,
+          seq: (prev?.seq ?? 0) + 1,
+        }));
       } catch (e) {
         console.error("[upload]", e);
         dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
@@ -395,6 +412,7 @@ export function ChatLayout() {
           onCancel={handleCancel}
           prefill={composerPrefill}
           onUploadImage={handleUploadImage}
+          attachment={composerAttachment}
         />
       </div>
       {editing?.mode === "inpaint" && (
