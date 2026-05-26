@@ -11,6 +11,7 @@
     "probe": "node scripts/probe-codex-imagegen.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.5.0",
     "lucide-react": "^0.469.0",
     "nanoid": "^5.0.9",

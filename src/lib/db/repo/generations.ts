@@ -134,3 +134,29 @@ export function listGenerations(
 export function deleteGeneration(id: string): void {
   getDb().prepare("DELETE FROM generations WHERE id = ?").run(id);
 }
+
+/**
+ * MCP 서버가 만든 generation 행을 사후에 세션·메시지에 연결.
+ * Claude orchestrator 경로에서 사용: MCP 도구는 sessionId 를 모르기 때문에
+ * 결과 도착 후 Next 라우트가 ownership 을 채워준다.
+ */
+export function linkGeneration(
+  id: string,
+  patch: { session_id?: string | null; message_id?: string | null },
+): void {
+  const fields: string[] = [];
+  const values: (string | null)[] = [];
+  if (patch.session_id !== undefined) {
+    fields.push("session_id = ?");
+    values.push(patch.session_id);
+  }
+  if (patch.message_id !== undefined) {
+    fields.push("message_id = ?");
+    values.push(patch.message_id);
+  }
+  if (!fields.length) return;
+  values.push(id);
+  getDb()
+    .prepare(`UPDATE generations SET ${fields.join(", ")} WHERE id = ?`)
+    .run(...values);
+}
