@@ -11,6 +11,7 @@ import {
   Maximize2,
   RotateCw,
   Scissors,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -40,7 +41,16 @@ const RESIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048] as const;
 export function ImageResultCard({ generationId, imageUrl, width, height, prompt, onAction }: Props) {
   const [copied, setCopied] = useState(false);
   const [resizeOpen, setResizeOpen] = useState(false);
+  const [lightbox, setLightbox] = useState(false);
   const resizeRef = useRef<HTMLDivElement>(null);
+
+  // 라이트박스: Esc 닫기
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightbox(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lightbox]);
 
   // 드롭다운: 바깥 클릭 시 닫기
   useEffect(() => {
@@ -77,12 +87,38 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
   }
 
   return (
-    // overflow-hidden 을 figure 에서 빼야 [리사이즈 v] 드롭다운이 figcaption 밖으로
-    // 펼쳐질 수 있음. img 자체에 rounded-t-xl 로 corner 깎임 처리.
+    <>
+    {/* 라이트박스 오버레이 */}
+    {lightbox && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/85"
+        onClick={() => setLightbox(false)}
+      >
+        <button
+          onClick={() => setLightbox(false)}
+          className="absolute right-4 top-4 rounded-full bg-black/60 p-2 text-white hover:bg-black/90"
+          title="닫기 (Esc)"
+        >
+          <X size={20} />
+        </button>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imageUrl}
+          alt={prompt ?? "generated image"}
+          className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+          onClick={e => e.stopPropagation()}
+        />
+      </div>
+    )}
+    {/* overflow-hidden 을 figure 에서 빼야 [리사이즈 v] 드롭다운이 figcaption 밖으로
+        펼쳐질 수 있음. img 자체에 rounded-t-xl 로 corner 깎임 처리. */}
     <figure className="rounded-xl border border-border bg-bg-card">
       {/* 카드 1개가 viewport 안에 들어가도록 height cap (60vh).
-          가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 원본은 a href 로 새 탭. */}
-      <a href={imageUrl} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-t-xl bg-black/10">
+          가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 클릭 시 라이트박스. */}
+      <div
+        className="block cursor-zoom-in overflow-hidden rounded-t-xl bg-black/10"
+        onClick={() => setLightbox(true)}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
@@ -91,7 +127,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
           width={width || undefined}
           height={height || undefined}
         />
-      </a>
+      </div>
       <figcaption className="space-y-2 px-4 py-3 text-xs">
         {prompt && (
           <div className="flex items-start gap-2">
@@ -202,5 +238,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
         </div>
       </figcaption>
     </figure>
+    </>
   );
 }

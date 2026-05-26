@@ -417,7 +417,7 @@ export function SpriteCanvas({
           </div>
           <div className="flex items-center gap-2 pt-1">
             <span className="text-text-muted">GIF</span>
-            <div className="flex h-20 flex-1 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+            <div className="flex h-64 flex-1 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
               {gifBusy ? (
                 <span className="text-text-muted/60">생성 중…</span>
               ) : gifError ? (
