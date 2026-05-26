@@ -83,9 +83,8 @@ export function MaskCanvas({
     setAvail({ w, h });
   }, []);
 
-  // 화면 표시 크기: width·height 둘 다 만족하도록 한 변 크기 결정. cap 안에서 등비 축소.
-  const cap = avail ? Math.min(maxDisplayPx, avail.w, avail.h) : maxDisplayPx;
-  const scale = Math.min(1, cap / Math.max(imageWidth, imageHeight));
+  // 화면 표시 크기: 가로폭을 기준으로 등비 축소 → 패널 전체 폭 사용.
+  const scale = avail ? Math.min(1, avail.w / imageWidth) : Math.min(1, maxDisplayPx / imageWidth);
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
@@ -322,10 +321,16 @@ export function MaskCanvas({
               <RotateCcw size={12} /> 실행취소
             </button>
             <button
-              onClick={() => setStrokes([])}
-              disabled={!hasStrokes}
+              onClick={() => {
+                if (!hasStrokes || busy) return;
+                onSubmit({
+                  maskDataUrl: exportMaskDataUrl(),
+                  prompt: "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there",
+                });
+              }}
+              disabled={!hasStrokes || busy}
               className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border bg-bg-app px-2 text-text-primary hover:border-[color:var(--danger)]/60 hover:bg-[color:var(--danger)]/10 disabled:cursor-not-allowed disabled:opacity-30"
-              title="모든 마스크 지우기"
+              title="마스크 영역을 지우고 배경으로 채워 재생성"
             >
               <Trash2 size={12} /> 지우기
             </button>

@@ -249,11 +249,12 @@ export function ChatLayout() {
   const handleInpaint = useCallback(
     async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
       if (!editing || editing.mode !== "inpaint") return;
+      const { generationId } = editing;
       try {
-        const maskId = await uploadMask(editing.generationId, maskDataUrl);
+        const maskId = await uploadMask(generationId, maskDataUrl);
         setEditing(null);
         await handleSend(prompt, {
-          attachmentGenerationIds: [editing.generationId],
+          attachmentGenerationIds: [generationId],
           maskGenerationId: maskId,
         });
       } catch (e) {
@@ -423,7 +424,7 @@ export function ChatLayout() {
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
           중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
       <div
-        className={`relative ${editing ? "flex w-[420px] shrink-0 flex-col" : "flex flex-1 flex-col"}`}
+        className="relative flex flex-1 flex-col"
         onDragEnter={e => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
@@ -486,35 +487,41 @@ export function ChatLayout() {
         />
       </div>
       {editing?.mode === "inpaint" && (
-        <MaskCanvas
-          parentGenerationId={editing.generationId}
-          imageUrl={editing.imageUrl}
-          imageWidth={editing.width}
-          imageHeight={editing.height}
-          busy={state.generating}
-          onSubmit={handleInpaint}
-          onCancel={() => setEditing(null)}
-        />
+        <div className="fixed inset-0 z-40">
+          <MaskCanvas
+            parentGenerationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            imageWidth={editing.width}
+            imageHeight={editing.height}
+            busy={state.generating}
+            onSubmit={handleInpaint}
+            onCancel={() => setEditing(null)}
+          />
+        </div>
       )}
       {editing?.mode === "layer" && (
-        <LayerCanvas
-          parentGenerationId={editing.generationId}
-          imageUrl={editing.imageUrl}
-          imageWidth={editing.width}
-          imageHeight={editing.height}
-          busy={state.generating}
-          onSubmit={handleLayerSplit}
-          onCancel={() => setEditing(null)}
-        />
+        <div className="fixed inset-0 z-40">
+          <LayerCanvas
+            parentGenerationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            imageWidth={editing.width}
+            imageHeight={editing.height}
+            busy={state.generating}
+            onSubmit={handleLayerSplit}
+            onCancel={() => setEditing(null)}
+          />
+        </div>
       )}
       {editing?.mode === "sprite" && (
-        <SpriteCanvas
-          parentGenerationId={editing.generationId}
-          imageUrl={editing.imageUrl}
-          imageWidth={editing.width}
-          imageHeight={editing.height}
-          onCancel={() => setEditing(null)}
-        />
+        <div className="fixed inset-0 z-40">
+          <SpriteCanvas
+            parentGenerationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            imageWidth={editing.width}
+            imageHeight={editing.height}
+            onCancel={() => setEditing(null)}
+          />
+        </div>
       )}
       <PromptLibrarySheet
         open={libOpen}
