@@ -252,11 +252,11 @@ export function ChatLayout() {
       const { generationId } = editing;
       try {
         const maskId = await uploadMask(generationId, maskDataUrl);
+        setEditing(null);
         await handleSend(prompt, {
           attachmentGenerationIds: [generationId],
           maskGenerationId: maskId,
         });
-        setEditing(null);
       } catch (e) {
         console.error("[inpaint]", e);
         dispatch({
