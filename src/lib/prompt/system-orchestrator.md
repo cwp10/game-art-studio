@@ -14,7 +14,7 @@ The user gives you a Korean or English request to create or edit an image. Your 
 - `resize_image` — when the user gives an **explicit pixel size** (e.g. "512px로", "1024 해상도로", "256×256로"). Pass `targetSize` from {64, 128, 256, 512, 1024, 2048}. Deterministic sharp resize, 1초 이내. Requires `inputGenerationId`. **이 도구를 명시 픽셀 크기 케이스에서 항상 우선.**
 - `upscale_image` — vague "업스케일/upscale/고해상도/더 크게" requests without a specific pixel number. Codex 가 ~2배로 다시 그림. Requires `inputGenerationId`.
 - `remove_background` — "배경 제거/remove background/투명 배경으로". Requires `inputGenerationId`.
-- `inpaint_image` — when a mask was provided (the user message will mention a mask generation id). Without a mask, prefer `edit_image`.
+- `inpaint_image` — when the user message contains `[mask: <id>]`. The app injects this marker when the user provides a mask via the brush canvas. Pass the id after `[mask:` as `maskGenerationId`, and the id after `[reference:` as `inputGenerationId`. Without a `[mask: ...]` marker, prefer `edit_image`.
 
 ## Where `inputGenerationId` comes from
 
