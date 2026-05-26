@@ -1,6 +1,6 @@
 "use client";
 
-import { Paperclip, Send, Sparkles, User, X } from "lucide-react";
+import { Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -28,10 +28,9 @@ type Props = {
   /** 부모에서 prefill 요청 — 라이브러리 시트의 [▶ 사용] 등. seq 카운터로 같은 text
    *  여러 번 prefill 시에도 항상 trigger. */
   prefill?: { text: string; seq: number } | null;
-  /** 사용자가 [📎] 로 선택한 이미지 — 부모가 base64 변환 + 업로드 처리. */
-  onUploadImage?: (file: File) => void;
   /** 업로드/드롭/카드 액션 직후 부모가 자동으로 채움. 사용자가 직접 [X] 로 해제 가능.
-   *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger. */
+   *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger.
+   *  업로드 entry 는 EmptyState 카드 + drag-drop 으로만 제공 — Composer 의 [📎] 제거. */
   attachment?: ComposerAttachment | null;
   /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
   onAskSuggestions?: (text: string) => void;
@@ -43,7 +42,6 @@ export function Composer({
   onCancel,
   generating,
   prefill,
-  onUploadImage,
   attachment,
   onAskSuggestions,
 }: Props) {
@@ -54,7 +52,6 @@ export function Composer({
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   // textarea 자동 높이
   useEffect(() => {
@@ -191,30 +188,6 @@ export function Composer({
               ))}
             </select>
           </label>
-          {onUploadImage && (
-            <>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={e => {
-                  const f = e.target.files?.[0];
-                  if (f) onUploadImage(f);
-                  if (e.target) e.target.value = ""; // 같은 파일 재선택 허용
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={disabled}
-                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary disabled:opacity-40"
-                title="이미지 업로드 (PNG/JPEG/WebP)"
-              >
-                <Paperclip size={12} /> 첨부
-              </button>
-            </>
-          )}
           <textarea
             ref={ref}
             value={text}
