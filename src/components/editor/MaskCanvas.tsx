@@ -1,7 +1,7 @@
 "use client";
 
 import { Brush, Eraser, RotateCcw, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * MaskCanvas — 인페인트 마스크를 그리는 작은 캔버스 + 컨트롤.
@@ -32,7 +32,7 @@ type Props = {
   /** 원본 해상도. 마스크 export 시 이 크기로 스케일 업. */
   imageWidth: number;
   imageHeight: number;
-  /** 패널 폭에 맞춰서. 기본 560px. */
+  /** 캔버스 한 변의 최대 px. 패널이 더 좁으면 부모 폭에 자동 맞춤. 기본 1200. */
   maxDisplayPx?: number;
   /** 사용자가 prompt 와 마스크를 확정. dataUrl 은 `image/png` base64. */
   onSubmit: (args: { maskDataUrl: string; prompt: string }) => void;
@@ -46,21 +46,34 @@ export function MaskCanvas({
   imageUrl,
   imageWidth,
   imageHeight,
-  maxDisplayPx = 560,
+  maxDisplayPx = 1200,
   onSubmit,
   onCancel,
   busy = false,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement>(null);
+  // 캔버스 컨테이너 (외곽 div) 의 사용 가능한 폭을 mount 시 측정해 캔버스 최대 폭으로 사용.
+  // 패널이 좁으면 더 작게, 넓으면 maxDisplayPx 까지. strokes 좌표 정합성을 위해 1회만 측정.
+  const sizerRef = useRef<HTMLDivElement>(null);
+  const [availW, setAvailW] = useState<number | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(40);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [prompt, setPrompt] = useState("");
   const drawingRef = useRef<Stroke | null>(null);
 
-  // 화면 표시 크기 (캔버스 size = display size). 한쪽이 maxDisplayPx 가 되도록 등비 축소.
-  const scale = Math.min(1, maxDisplayPx / Math.max(imageWidth, imageHeight));
+  useLayoutEffect(() => {
+    const el = sizerRef.current;
+    if (!el) return;
+    // 패딩·border 고려: 24px 정도 여유.
+    const w = Math.max(200, el.clientWidth - 24);
+    setAvailW(w);
+  }, []);
+
+  // 화면 표시 크기 (캔버스 size = display size). max(availW, maxDisplayPx) 안에서 등비 축소.
+  const cap = availW != null ? Math.min(maxDisplayPx, availW) : maxDisplayPx;
+  const scale = Math.min(1, cap / Math.max(imageWidth, imageHeight));
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
@@ -180,7 +193,7 @@ export function MaskCanvas({
 
   // ── render ─────────────────────────────────────────────────────────────────
   return (
-    <aside className="flex h-full w-[440px] flex-col border-l border-border bg-bg-panel">
+    <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
         <span className="font-medium text-text-primary">✏ 인페인트</span>
         <span className="text-xs text-text-muted/60">
@@ -195,7 +208,7 @@ export function MaskCanvas({
         </button>
       </header>
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">다시 그릴 영역을 brush 로 칠하세요.</p>
 
         {/* 캔버스 영역 */}
