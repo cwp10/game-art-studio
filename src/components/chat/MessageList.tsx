@@ -73,7 +73,17 @@ export function MessageList({ items, onAction }: Props) {
                 }
               />
             )}
-            {it.text && <p className="text-sm text-text-primary">{it.text}</p>}
+            {it.text && (
+              <p
+                className={
+                  it.text.startsWith("⚠️")
+                    ? "rounded-lg border border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 px-3 py-2 text-sm text-[color:var(--danger)]"
+                    : "text-sm text-text-primary"
+                }
+              >
+                {it.text}
+              </p>
+            )}
           </div>
         );
       })}

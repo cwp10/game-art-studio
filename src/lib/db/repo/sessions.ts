@@ -44,13 +44,18 @@ export function getSession(id: string): Session | null {
   return row ? rowToSession(row) : null;
 }
 
-export function listSessions(opts: { limit?: number; includeArchived?: boolean } = {}): Session[] {
-  const { limit = 200, includeArchived = false } = opts;
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM sessions ${includeArchived ? "" : "WHERE archived = 0"} ORDER BY updated_at DESC LIMIT ?`,
-    )
-    .all(limit) as SessionRow[];
+export function listSessions(opts: { limit?: number; includeArchived?: boolean; search?: string } = {}): Session[] {
+  const { limit = 200, includeArchived = false, search } = opts;
+  const where: string[] = [];
+  const params: (string | number)[] = [];
+  if (!includeArchived) where.push("archived = 0");
+  if (search?.trim()) {
+    where.push("title LIKE ?");
+    params.push(`%${search.trim()}%`);
+  }
+  const sql = `SELECT * FROM sessions ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY updated_at DESC LIMIT ?`;
+  params.push(limit);
+  const rows = getDb().prepare(sql).all(...params) as SessionRow[];
   return rows.map(rowToSession);
 }
 

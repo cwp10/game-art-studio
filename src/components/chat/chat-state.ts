@@ -259,6 +259,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return { ...state, items, generating: false };
         case "error":
           assistant.finished = true;
+          // 채팅에 명시적 에러 텍스트 — MessageList 가 빨간색으로 렌더.
+          assistant.text = `⚠️ ${ev.message || "오류가 발생했어요."}`;
+          // 진행 중이던 toolCall 들은 failed 로 마킹.
+          assistant.toolCalls = assistant.toolCalls.map(tc =>
+            tc.status === "running" ? { ...tc, status: "failed", error: ev.message } : tc,
+          );
           items[lastIdx] = assistant;
           return { ...state, items, generating: false };
         default:

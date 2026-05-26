@@ -11,7 +11,8 @@ export async function GET(req: NextRequest) {
   const sessionId = url.searchParams.get("sessionId") ?? undefined;
   const kindRaw = url.searchParams.get("kind");
   const kind = kindRaw && KINDS.includes(kindRaw as GenerationKind) ? (kindRaw as GenerationKind) : undefined;
+  const search = url.searchParams.get("search") ?? undefined;
   const limit = Number(url.searchParams.get("limit") ?? "200");
-  const generations = listGenerations({ sessionId, kind, limit });
+  const generations = listGenerations({ sessionId, kind, limit, search });
   return Response.json({ generations });
 }

@@ -3,8 +3,9 @@ import { createSession, listSessions } from "@/lib/db/repo/sessions";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  const sessions = listSessions();
+export async function GET(req: NextRequest) {
+  const search = req.nextUrl.searchParams.get("search") ?? undefined;
+  const sessions = listSessions({ search });
   return Response.json({ sessions });
 }
 

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH, ensureDataDirs } from "@/lib/util/paths";
+import { cleanupTmpJobs } from "@/lib/util/tmp-cleanup";
 import { seedBuiltinPresets } from "./seed-presets";
 
 /**
@@ -36,6 +37,9 @@ function init(): DbInstance {
   // builtin style preset seed — name UNIQUE + INSERT OR IGNORE 라 멱등.
   // 사용자가 builtin 의 prompt_suffix 를 수정하면 보존됨.
   seedBuiltinPresets(db);
+  // tmp/job-* 24시간 이상 된 디렉토리 정리 — 멱등, 실패 시 throw 안 함.
+  const { removed } = cleanupTmpJobs();
+  if (removed > 0) console.log(`[db init] cleaned ${removed} old tmp/job-* dirs`);
   return db;
 }
 

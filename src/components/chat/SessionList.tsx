@@ -1,26 +1,45 @@
 "use client";
 
-import { Plus, MessageSquare, Trash2 } from "lucide-react";
+import { Image as ImageIcon, MessageSquare, Plus, Search, Trash2 } from "lucide-react";
 import type { Session } from "@/types/db";
 
 type Props = {
   sessions: Session[];
   activeId: string | null;
+  search: string;
+  onSearch: (value: string) => void;
   onNew: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onOpenGallery: () => void;
 };
 
-export function SessionList({ sessions, activeId, onNew, onSelect, onDelete }: Props) {
+export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onOpenGallery }: Props) {
   return (
     <aside className="flex h-full w-[260px] flex-col border-r border-border bg-bg-panel/50">
-      <div className="border-b border-border p-3">
+      <div className="space-y-2 border-b border-border p-3">
         <button
           onClick={onNew}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-medium hover:border-[color:var(--accent)]/60"
         >
           <Plus size={14} /> 새 세션
         </button>
+        <button
+          onClick={onOpenGallery}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+          title="갤러리 (Cmd+G)"
+        >
+          <ImageIcon size={12} /> 갤러리
+        </button>
+        <div className="flex items-center gap-1 rounded-md border border-border bg-bg-card px-2 py-1">
+          <Search size={11} className="text-text-muted" />
+          <input
+            value={search}
+            onChange={e => onSearch(e.target.value)}
+            placeholder="세션 검색"
+            className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none"
+          />
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-2">
         {sessions.length === 0 && (

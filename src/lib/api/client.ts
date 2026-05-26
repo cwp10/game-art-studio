@@ -4,8 +4,10 @@
 import type { ChatEvent, ChatRequest } from "@/types/chat";
 import type { Generation, Message, PromptLibraryItem, Session, StylePreset } from "@/types/db";
 
-export async function listSessions(): Promise<Session[]> {
-  const r = await fetch("/api/sessions");
+export async function listSessions(opts?: { search?: string }): Promise<Session[]> {
+  const sp = new URLSearchParams();
+  if (opts?.search) sp.set("search", opts.search);
+  const r = await fetch(`/api/sessions${sp.toString() ? "?" + sp.toString() : ""}`);
   const { sessions } = (await r.json()) as { sessions: Session[] };
   return sessions;
 }
@@ -181,9 +183,13 @@ export async function bumpPromptUse(id: string): Promise<void> {
   });
 }
 
-export async function listGenerations(sessionId?: string): Promise<Generation[]> {
-  const url = sessionId ? `/api/generations?sessionId=${encodeURIComponent(sessionId)}` : "/api/generations";
-  const r = await fetch(url);
+export async function listGenerations(opts?: { sessionId?: string; kind?: string; search?: string; limit?: number }): Promise<Generation[]> {
+  const sp = new URLSearchParams();
+  if (opts?.sessionId) sp.set("sessionId", opts.sessionId);
+  if (opts?.kind) sp.set("kind", opts.kind);
+  if (opts?.search) sp.set("search", opts.search);
+  if (opts?.limit) sp.set("limit", String(opts.limit));
+  const r = await fetch(`/api/generations${sp.toString() ? "?" + sp.toString() : ""}`);
   const { generations } = (await r.json()) as { generations: Generation[] };
   return generations;
 }
