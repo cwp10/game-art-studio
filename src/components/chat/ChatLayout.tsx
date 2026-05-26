@@ -1,17 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { chatReducer, initialState } from "./chat-state";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
+import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import {
   createSession,
   deleteSession,
   listMessages,
   listSessions,
   streamChat,
+  uploadMask,
 } from "@/lib/api/client";
 
 /**
@@ -19,8 +21,16 @@ import {
  *
  * 단일 useReducer 로 SSE 이벤트와 사용자 입력을 모두 받아 ChatItem 배열을 시간 순으로 누적.
  */
+type Editing = {
+  generationId: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+} | null;
+
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
+  const [editing, setEditing] = useState<Editing>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 초기 세션 목록 로드
@@ -60,10 +70,14 @@ export function ChatLayout() {
     [state.activeSessionId],
   );
 
-  // 메시지 전송. attachmentGenerationIds 가 있으면 라우트가 user 메시지 본문에
-  // [reference: <id>] marker 로 prefix → Claude 가 inputGenerationId 로 사용.
+  // 메시지 전송. attachmentGenerationIds / maskGenerationId 가 있으면 라우트가
+  // user 메시지 본문에 [reference: <id>] / [mask: <id>] marker 로 prefix → Claude 가
+  // inputGenerationId / maskGenerationId 로 사용.
   const handleSend = useCallback(
-    async (text: string, opts?: { attachmentGenerationIds?: string[] }) => {
+    async (
+      text: string,
+      opts?: { attachmentGenerationIds?: string[]; maskGenerationId?: string },
+    ) => {
       if (state.generating) return;
       const tempId = "tmp-" + Math.random().toString(36).slice(2, 8);
       dispatch({ type: "user_send", tempId, text });
@@ -76,6 +90,7 @@ export function ChatLayout() {
             sessionId: state.activeSessionId ?? undefined,
             message: text,
             attachmentGenerationIds: opts?.attachmentGenerationIds,
+            maskGenerationId: opts?.maskGenerationId,
           },
           event => dispatch({ type: "sse", event }),
           abort.signal,
@@ -106,11 +121,17 @@ export function ChatLayout() {
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
   // resize / remove_bg 는 generationId 를 attach 해서 Claude 가 inputGenerationId 로
-  // 사용하도록 한다.
+  // 사용하도록 한다. edit (인페인트) 는 우측 패널 열어 MaskCanvas 띄움.
   const handleAction = useCallback(
     (
-      action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg",
-      payload: { prompt?: string; generationId?: string; targetSize?: number },
+      action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg" | "edit",
+      payload: {
+        prompt?: string;
+        generationId?: string;
+        width?: number;
+        height?: number;
+        targetSize?: number;
+      },
     ) => {
       if (action === "duplicate" && payload.prompt) {
         handleSend(payload.prompt);
@@ -122,9 +143,38 @@ export function ChatLayout() {
         handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
           attachmentGenerationIds: [payload.generationId],
         });
+      } else if (action === "edit" && payload.generationId && payload.width && payload.height) {
+        setEditing({
+          generationId: payload.generationId,
+          imageUrl: `/api/images/${payload.generationId}`,
+          width: payload.width,
+          height: payload.height,
+        });
       }
     },
     [handleSend],
+  );
+
+  // MaskCanvas 가 submit 한 마스크 PNG → /api/upload → /api/chat 으로 inpaint 호출.
+  const handleInpaint = useCallback(
+    async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
+      if (!editing) return;
+      try {
+        const maskId = await uploadMask(editing.generationId, maskDataUrl);
+        setEditing(null);
+        await handleSend(prompt, {
+          attachmentGenerationIds: [editing.generationId],
+          maskGenerationId: maskId,
+        });
+      } catch (e) {
+        console.error("[inpaint]", e);
+        dispatch({
+          type: "sse",
+          event: { type: "error", message: (e as Error).message },
+        });
+      }
+    },
+    [editing, handleSend],
   );
 
   useHotkeys("mod+n", e => {
@@ -162,6 +212,17 @@ export function ChatLayout() {
           onCancel={handleCancel}
         />
       </div>
+      {editing && (
+        <MaskCanvas
+          parentGenerationId={editing.generationId}
+          imageUrl={editing.imageUrl}
+          imageWidth={editing.width}
+          imageHeight={editing.height}
+          busy={state.generating}
+          onSubmit={handleInpaint}
+          onCancel={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }
