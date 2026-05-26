@@ -427,7 +427,10 @@ export function ChatLayout() {
           {hasItems ? (
             <MessageList items={state.items} onAction={handleAction} />
           ) : (
-            <EmptyState onPick={handleSend} onUploadImage={handleUploadImage} />
+            <EmptyState
+              onPick={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
+              onUploadImage={handleUploadImage}
+            />
           )}
         </main>
         <Composer

@@ -99,6 +99,26 @@ export async function uploadLayers(
   return out;
 }
 
+/**
+ * 짧은 의도 → 게임 에셋 prompt 후보. builtin/사용자 preset 중 랜덤 4개의
+ * prompt_suffix 를 입력에 결합. 서버 호출 없이 즉시. 방향이 주어지면 함께 결합.
+ *
+ * 예: input='멋진 마법사', direction='측면'
+ *  → ['멋진 마법사, 측면, pixel art, 16-bit ...', '멋진 마법사, 측면, watercolor ...', ...]
+ */
+export async function suggestPrompts(input: string, direction?: string | null): Promise<string[]> {
+  const presets = await listPresets();
+  if (presets.length === 0) return [];
+  const dir = direction?.trim() && direction !== "auto" ? `, ${direction.trim()}` : "";
+  // Fisher-Yates 셔플 후 앞 4개. preset 5개 미만이면 가용분만.
+  const shuffled = [...presets];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, Math.min(4, shuffled.length)).map(p => `${input.trim()}${dir}, ${p.prompt_suffix}`);
+}
+
 // ── style presets ───────────────────────────────────────────────────────────
 export async function listPresets(): Promise<StylePreset[]> {
   const r = await fetch("/api/presets");

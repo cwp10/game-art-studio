@@ -1,10 +1,18 @@
 "use client";
 
-import { Paperclip, Send, X } from "lucide-react";
+import { Paperclip, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
-import { listPresets } from "@/lib/api/client";
+import { listPresets, suggestPrompts } from "@/lib/api/client";
+
+const DIRECTIONS: Array<{ key: string; label: string }> = [
+  { key: "auto", label: "자유" },
+  { key: "정면", label: "정면" },
+  { key: "측면", label: "측면" },
+  { key: "3/4 측면", label: "3/4" },
+  { key: "후면", label: "후면" },
+];
 
 /** 다음 메시지의 input image 로 자동 첨부될 generation — 업로드 직후 부모가 set. */
 export type ComposerAttachment = { generationId: string; label: string; seq: number };
@@ -39,8 +47,13 @@ export function Composer({
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState<string | null>(null);
+  const [direction, setDirection] = useState<string>("auto");
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
+  // LLM 기반 prompt 후보 — [✨ 제안] 으로 trigger. 카드 클릭 시 textarea replace.
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestErr, setSuggestErr] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -81,13 +94,32 @@ export function Composer({
       .catch(() => setPresetName(null));
   }, [presetId]);
 
+  async function askSuggestions() {
+    const t = text.trim();
+    if (!t || suggesting) return;
+    setSuggestErr(null);
+    setSuggesting(true);
+    setSuggestions(null);
+    try {
+      const items = await suggestPrompts(t, direction);
+      setSuggestions(items);
+    } catch (e) {
+      setSuggestErr((e as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   function submit() {
     const t = text.trim();
     if (!t || disabled) return;
+    // 방향이 'auto' 아니면 메시지 끝에 결합 (preset suffix 결합 흐름과 같은 패턴).
+    // 이미 사용자가 직접 "정면" 같은 단어 입력했어도 중복 무해.
+    const withDir = direction === "auto" ? t : `${t}, ${direction}`;
     const opts: { presetId?: string; attachmentGenerationIds?: string[] } = {};
     if (presetId) opts.presetId = presetId;
     if (attached) opts.attachmentGenerationIds = [attached.id];
-    onSend(t, Object.keys(opts).length ? opts : undefined);
+    onSend(withDir, Object.keys(opts).length ? opts : undefined);
     setText("");
     // attachment 는 일회용 — submit 후 자동 해제. 다시 reference 하고 싶으면 사용자가 카드의
     // [reference] 또는 새 업로드 필요.
@@ -154,6 +186,21 @@ export function Composer({
         ) : null}
         <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
           <StylePresetPicker value={presetId} onChange={setPresetId} />
+          {/* 캐릭터 방향 — submit 시 prompt 끝에 결합 + suggest 호출 시 반영. */}
+          <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
+            <User size={12} />
+            <select
+              value={direction}
+              onChange={e => setDirection(e.target.value)}
+              className="bg-transparent text-xs text-text-muted focus:outline-none"
+            >
+              {DIRECTIONS.map(d => (
+                <option key={d.key} value={d.key}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {onUploadImage && (
             <>
               <input
@@ -189,6 +236,15 @@ export function Composer({
           />
           <button
             type="button"
+            onClick={askSuggestions}
+            disabled={disabled || !text.trim() || suggesting}
+            className="flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
+            title="prompt 후보 3-4개 자동 생성 (Claude 호출, ~30초~1분)"
+          >
+            <Sparkles size={12} /> {suggesting ? "..." : "제안"}
+          </button>
+          <button
+            type="button"
             onClick={submit}
             disabled={disabled || !text.trim()}
             className="flex h-9 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
@@ -196,6 +252,40 @@ export function Composer({
             <Send size={14} />
           </button>
         </div>
+
+        {(suggestions || suggestErr) && (
+          <div className="mt-2 rounded-xl border border-border bg-bg-card/50 p-2">
+            <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-text-muted">
+              <Sparkles size={10} />
+              <span>제안된 prompt — 카드 클릭 시 입력란에 적용</span>
+              <button
+                onClick={() => { setSuggestions(null); setSuggestErr(null); }}
+                className="ml-auto rounded p-0.5 text-text-muted hover:text-text-primary"
+                title="제안 닫기"
+              >
+                <X size={10} />
+              </button>
+            </div>
+            {suggestErr && <p className="px-1 text-[11px] text-[color:var(--danger)]">{suggestErr}</p>}
+            {suggestions && (
+              <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                {suggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setText(s);
+                      setSuggestions(null);
+                      setTimeout(() => ref.current?.focus(), 0);
+                    }}
+                    className="rounded-lg border border-border bg-bg-card px-3 py-2 text-left text-xs leading-relaxed text-text-muted transition-colors hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

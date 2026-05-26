@@ -279,3 +279,4 @@ function normalize(parsed: unknown): ClaudeStreamEvent[] {
 
   return [{ kind: "raw", raw: obj }];
 }
+
