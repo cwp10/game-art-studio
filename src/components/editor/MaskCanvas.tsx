@@ -53,10 +53,11 @@ export function MaskCanvas({
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement>(null);
-  // 캔버스 컨테이너 (외곽 div) 의 사용 가능한 폭을 mount 시 측정해 캔버스 최대 폭으로 사용.
-  // 패널이 좁으면 더 작게, 넓으면 maxDisplayPx 까지. strokes 좌표 정합성을 위해 1회만 측정.
+  // 캔버스 컨테이너 (외곽 div) 의 사용 가능한 폭·높이를 mount 시 측정.
+  // toolbar/prompt/footer 가 가려지지 않도록 height 도 함께 고려해 한 변 크기 결정.
+  // strokes 좌표 정합성을 위해 1회만 측정 (사용자가 그리는 도중 창 리사이즈는 edge case).
   const sizerRef = useRef<HTMLDivElement>(null);
-  const [availW, setAvailW] = useState<number | null>(null);
+  const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(40);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -66,13 +67,16 @@ export function MaskCanvas({
   useLayoutEffect(() => {
     const el = sizerRef.current;
     if (!el) return;
-    // 패딩·border 고려: 24px 정도 여유.
+    // 폭: 패딩·border 고려 24px 빼기.
+    // 높이: 같은 컨테이너 안에 toolbar(약 110px) + prompt(약 100px) + gap·padding(약 40px) 도
+    //       포함되므로 캔버스 영역만 쓸 수 있는 높이를 약 250px 뺀 값으로 추정.
     const w = Math.max(200, el.clientWidth - 24);
-    setAvailW(w);
+    const h = Math.max(200, el.clientHeight - 250);
+    setAvail({ w, h });
   }, []);
 
-  // 화면 표시 크기 (캔버스 size = display size). max(availW, maxDisplayPx) 안에서 등비 축소.
-  const cap = availW != null ? Math.min(maxDisplayPx, availW) : maxDisplayPx;
+  // 화면 표시 크기: width·height 둘 다 만족하도록 한 변 크기 결정. cap 안에서 등비 축소.
+  const cap = avail ? Math.min(maxDisplayPx, avail.w, avail.h) : maxDisplayPx;
   const scale = Math.min(1, cap / Math.max(imageWidth, imageHeight));
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
@@ -282,15 +286,15 @@ export function MaskCanvas({
             <button
               onClick={() => setStrokes(s => s.slice(0, -1))}
               disabled={!hasStrokes}
-              className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-30"
-              title="마지막 stroke 취소 (Cmd+Z 미구현)"
+              className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border bg-bg-app px-2 text-text-primary hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-30"
+              title="마지막 stroke 취소"
             >
               <RotateCcw size={12} /> 실행취소
             </button>
             <button
               onClick={() => setStrokes([])}
               disabled={!hasStrokes}
-              className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-30"
+              className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border bg-bg-app px-2 text-text-primary hover:border-[color:var(--danger)]/60 hover:bg-[color:var(--danger)]/10 disabled:cursor-not-allowed disabled:opacity-30"
               title="모든 마스크 지우기"
             >
               <Trash2 size={12} /> 지우기
