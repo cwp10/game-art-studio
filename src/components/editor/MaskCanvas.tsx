@@ -252,7 +252,11 @@ export function MaskCanvas({
             width={displayW}
             height={displayH}
             onPointerDown={e => {
-              e.currentTarget.setPointerCapture(e.pointerId);
+              // setPointerCapture 는 inactive pointer (합성 PointerEvent / 일부 brower edge case) 에서
+              // NotFoundError throw. capture 실패해도 stroke 자체는 진행하도록 silent skip.
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              } catch {}
               const { x, y } = pointerPos(e);
               startStroke(x, y);
             }}
