@@ -1,9 +1,17 @@
 "use client";
 
-import { ChevronDown, Copy, Download, Maximize2, RotateCw, Scissors } from "lucide-react";
+import {
+  ChevronDown,
+  Copy,
+  Download,
+  Edit3,
+  Maximize2,
+  RotateCw,
+  Scissors,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-type Action = "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg";
+type Action = "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg" | "edit";
 
 type Props = {
   generationId: string;
@@ -88,6 +96,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             {width}×{height}
           </span>
           <div className="ml-auto flex gap-1">
+            <button
+              onClick={() => onAction?.("edit")}
+              className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="인페인트 — 영역을 brush 로 칠해서 부분 편집"
+            >
+              <Edit3 size={12} /> 편집
+            </button>
             <div ref={resizeRef} className="relative">
               <button
                 onClick={() => setResizeOpen(o => !o)}
