@@ -7,6 +7,7 @@ import {
   Edit3,
   Film,
   Layers,
+  Link2,
   Maximize2,
   RotateCw,
   Scissors,
@@ -21,7 +22,8 @@ type Action =
   | "remove_bg"
   | "edit"
   | "layer_split"
-  | "sprite_split";
+  | "sprite_split"
+  | "reference";
 
 type Props = {
   generationId: string;
@@ -170,6 +172,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
               title="스프라이트 시트 분할 + GIF 미리보기 + 프레임 zip / GIF 다운로드"
             >
               <Film size={12} /> 스프라이트
+            </button>
+            <button
+              onClick={() => onAction?.("reference")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="이 이미지를 다음 메시지의 reference 로 첨부 → 자연어로 변형 지시"
+            >
+              <Link2 size={12} /> 참조
             </button>
             <button
               onClick={() => onAction?.("duplicate")}
