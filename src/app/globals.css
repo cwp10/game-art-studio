@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+:root {
+  /* Dark-first palette (plan §UI). */
+  --bg-app: #0f0f10;
+  --bg-panel: #16161a;
+  --bg-card: #1a1a1c;
+  --border: #2a2a2f;
+  --text-primary: #ededed;
+  --text-muted: #9a9aa3;
+  --accent: #8b5cf6;
+  --success: #22c55e;
+  --danger: #ef4444;
+}
+
+@theme inline {
+  --color-bg-app: var(--bg-app);
+  --color-bg-panel: var(--bg-panel);
+  --color-bg-card: var(--bg-card);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar (subtle, dark) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a40;
+}
+
+/* Spinner used by tool-call progress */
+@keyframes shimmer {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+.shimmer {
+  animation: shimmer 1.4s ease-in-out infinite;
+}
