@@ -5,13 +5,21 @@ import {
   Copy,
   Download,
   Edit3,
+  Layers,
   Maximize2,
   RotateCw,
   Scissors,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-type Action = "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg" | "edit";
+type Action =
+  | "duplicate"
+  | "download"
+  | "copy_prompt"
+  | "resize"
+  | "remove_bg"
+  | "edit"
+  | "layer_split";
 
 type Props = {
   generationId: string;
@@ -146,6 +154,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
               title="배경 제거 (chroma key + 후처리로 투명 PNG)"
             >
               <Scissors size={12} /> 배경 제거
+            </button>
+            <button
+              onClick={() => onAction?.("layer_split")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="레이어 분리 — 부위별로 색을 칠해 색별 PNG 로 추출"
+            >
+              <Layers size={12} /> 레이어
             </button>
             <button
               onClick={() => onAction?.("duplicate")}

@@ -8,7 +8,14 @@ import { ImageResultCard } from "./ImageResultCard";
 type Props = {
   items: ChatItem[];
   onAction?: (
-    action: "duplicate" | "download" | "copy_prompt" | "resize" | "remove_bg" | "edit",
+    action:
+      | "duplicate"
+      | "download"
+      | "copy_prompt"
+      | "resize"
+      | "remove_bg"
+      | "edit"
+      | "layer_split",
     payload: {
       prompt?: string;
       generationId?: string;
