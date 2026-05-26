@@ -53,10 +53,12 @@ export function MaskCanvas({
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement>(null);
-  // 캔버스 컨테이너 (외곽 div) 의 사용 가능한 폭·높이를 mount 시 측정.
-  // toolbar/prompt/footer 가 가려지지 않도록 height 도 함께 고려해 한 변 크기 결정.
+  // 캔버스 컨테이너의 사용 가능한 폭·높이를 mount 시 측정.
+  // toolbar / prompt 의 실제 height 를 ref 로 직접 측정해서 캔버스 최대 height 정확히 결정.
   // strokes 좌표 정합성을 위해 1회만 측정 (사용자가 그리는 도중 창 리사이즈는 edge case).
   const sizerRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(40);
@@ -65,13 +67,19 @@ export function MaskCanvas({
   const drawingRef = useRef<Stroke | null>(null);
 
   useLayoutEffect(() => {
-    const el = sizerRef.current;
-    if (!el) return;
-    // 폭: 패딩·border 고려 24px 빼기.
-    // 높이: 같은 컨테이너 안에 toolbar(약 110px) + prompt(약 100px) + gap·padding(약 40px) 도
-    //       포함되므로 캔버스 영역만 쓸 수 있는 높이를 약 250px 뺀 값으로 추정.
-    const w = Math.max(200, el.clientWidth - 24);
-    const h = Math.max(200, el.clientHeight - 250);
+    const sizer = sizerRef.current;
+    if (!sizer) return;
+    // 폭: 패딩 고려 24px 빼기. (p-3 좌우 합)
+    const w = Math.max(200, sizer.clientWidth - 24);
+    // 높이: sizer.clientHeight 에서 toolbar / prompt 의 실제 height + gap(12px × 3) +
+    // 안내 텍스트(~20px) 빼고 캔버스 가능 공간. 첫 render 시 canvas 가 maxDisplayPx=1200 로
+    // 그려져도 toolbar/prompt 는 정상 layout 됨 (sizer 가 overflow-y-auto).
+    const tb = toolbarRef.current?.getBoundingClientRect().height ?? 130;
+    const pr = promptRef.current?.getBoundingClientRect().height ?? 120;
+    // 빼야 할 것: toolbar + prompt + (gap-3 × 3 children = 36) + 안내 텍스트(~20) + 안전 마진(~36).
+    // 안전 마진은 footer 와 textarea 가 viewport bottom 에서 잘리지 않도록 추가 buffer.
+    const reserved = tb + pr + 36 + 20 + 36;
+    const h = Math.max(200, sizer.clientHeight - reserved);
     setAvail({ w, h });
   }, []);
 
@@ -81,22 +89,34 @@ export function MaskCanvas({
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
-  // 1. 원본 이미지를 bottom 캔버스에 한 번만 그림
+  // 1-a. 원본 이미지 load — imageUrl 변경 시만. (displayW/H 변경에 따른 redraw 와 분리해
+  //       race 회피: 이전엔 displayW 가 useLayoutEffect 의 setAvail 로 바뀔 때마다 새 Image
+  //       를 생성해서 첫 img.onload 가 두 번째 캔버스 size 변경 이후 발화 → blank 캔버스.)
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  useEffect(() => {
+    setImgLoaded(false);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      imgRef.current = img;
+      setImgLoaded(true);
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+
+  // 1-b. 캔버스 크기 또는 이미지 load 변경 시 redraw.
   useEffect(() => {
     const c = baseRef.current;
-    if (!c) return;
+    const img = imgRef.current;
+    if (!c || !img || !imgLoaded) return;
     c.width = displayW;
     c.height = displayH;
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      ctx.clearRect(0, 0, displayW, displayH);
-      ctx.drawImage(img, 0, 0, displayW, displayH);
-    };
-    img.src = imageUrl;
-  }, [imageUrl, displayW, displayH]);
+    ctx.clearRect(0, 0, displayW, displayH);
+    ctx.drawImage(img, 0, 0, displayW, displayH);
+  }, [imgLoaded, displayW, displayH]);
 
   // 2. strokes 가 변할 때마다 마스크 layer 를 통째로 다시 그림 (단순 + 안전)
   useEffect(() => {
@@ -215,9 +235,9 @@ export function MaskCanvas({
       <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">다시 그릴 영역을 brush 로 칠하세요.</p>
 
-        {/* 캔버스 영역 */}
+        {/* 캔버스 영역 — flex-col 에서 squeeze 안 되게 shrink-0 */}
         <div
-          className="relative mx-auto select-none rounded-lg border border-border bg-bg-card"
+          className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
           style={{ width: displayW, height: displayH }}
         >
           <canvas
@@ -247,7 +267,10 @@ export function MaskCanvas({
         </div>
 
         {/* 도구 toolbar */}
-        <div className="space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
+        <div
+          ref={toolbarRef}
+          className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
+        >
           <div className="flex gap-1">
             <button
               onClick={() => setTool("brush")}
@@ -303,14 +326,15 @@ export function MaskCanvas({
         </div>
 
         {/* prompt */}
-        <div className="space-y-1">
+        <div ref={promptRef} className="shrink-0 space-y-1">
           <label className="text-xs text-text-muted">무엇으로 바꿀까요?</label>
           <textarea
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
             placeholder="예: 더 큰 검, 보라색 마법 크리스탈, 황금 코인…"
             rows={3}
-            className="w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
+            // textarea 가 flex-col 안에서 squeeze 되어 height 가 1줄로 줄어드는 것 방지.
+            className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
         </div>
       </div>
