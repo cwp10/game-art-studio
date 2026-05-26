@@ -80,6 +80,34 @@ function inferStage(
   return null;
 }
 
+/**
+ * 단순 #00ff00 chroma key. remove_bg 도구가 codex 에게 그 색 위에 다시 그리게
+ * 지시했으므로 여기서 그 색 픽셀만 알파 0 으로 친다. anti-aliased fringe 도 잡으려고
+ * 넉넉한 threshold (R<80, G>180, B<80).
+ */
+async function chromaKeyGreen(filePath: string): Promise<void> {
+  const img = sharp(filePath).ensureAlpha();
+  const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+  const channels = info.channels;
+  for (let i = 0; i < data.length; i += channels) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    if (r < 80 && g > 180 && b < 80) {
+      data[i + 3] = 0;
+    }
+  }
+  // 결과를 임시 경로에 쓰고 atomically rename — destPath 가 sharp 의 read 와 동일 파일이면
+  // truncation race 위험.
+  const tmpPath = filePath + ".chroma.tmp";
+  await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: channels as 1 | 2 | 3 | 4 },
+  })
+    .png()
+    .toFile(tmpPath);
+  await fs.rename(tmpPath, filePath);
+}
+
 export class CodexExecBackend implements ImageBackend {
   readonly kind: ImageBackendKind = "codex_exec";
 
@@ -104,6 +132,9 @@ export class CodexExecBackend implements ImageBackend {
     }
 
     const naturalPrompt = buildNaturalPrompt(job);
+    // `-i, --image <FILE>...` 는 multi-value 옵션이라 그 뒤의 positional 인자도
+    // file 로 흡수해버린다. attached image 가 있으면 `--` 로 옵션 종료를 명시해서
+    // prompt 가 PROMPT positional 로 들어가도록 한다.
     const args = [
       "exec",
       "--cd",
@@ -112,6 +143,7 @@ export class CodexExecBackend implements ImageBackend {
       "workspace-write",
       "--skip-git-repo-check",
       ...attachedImages.flatMap(p => ["-i", p]),
+      ...(attachedImages.length > 0 ? ["--"] : []),
       naturalPrompt,
     ];
 
@@ -203,6 +235,13 @@ export class CodexExecBackend implements ImageBackend {
     const destPath = imagePathFor(job.generationId);
     await fs.mkdir(IMAGES_DIR, { recursive: true });
     await fs.rename(pickedPath, destPath);
+
+    // remove_bg 후처리: prompt 에서 #00ff00 chroma-key 위에 다시 그리도록 지시했으므로
+    // 그 픽셀들을 투명화. anti-aliased fringe 까지 잡으려고 넉넉한 threshold 사용.
+    if (job.kind === "remove_bg") {
+      onProgress("recovering", "chroma key post-process");
+      await chromaKeyGreen(destPath);
+    }
 
     // 메타데이터
     const meta = await sharp(destPath).metadata();
