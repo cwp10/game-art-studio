@@ -1,11 +1,10 @@
 "use client";
 
-import { Send, X } from "lucide-react";
+import { Paperclip, Send, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
-import type { StylePreset } from "@/types/db";
 
 type Props = {
   disabled: boolean;
@@ -15,13 +14,16 @@ type Props = {
   /** 부모에서 prefill 요청 — 라이브러리 시트의 [▶ 사용] 등. seq 카운터로 같은 text
    *  여러 번 prefill 시에도 항상 trigger. */
   prefill?: { text: string; seq: number } | null;
+  /** 사용자가 [📎] 로 선택한 이미지 — 부모가 base64 변환 + 업로드 처리. */
+  onUploadImage?: (file: File) => void;
 };
 
-export function Composer({ disabled, onSend, onCancel, generating, prefill }: Props) {
+export function Composer({ disabled, onSend, onCancel, generating, prefill, onUploadImage }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // textarea 자동 높이
   useEffect(() => {
@@ -99,6 +101,30 @@ export function Composer({ disabled, onSend, onCancel, generating, prefill }: Pr
         )}
         <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
           <StylePresetPicker value={presetId} onChange={setPresetId} />
+          {onUploadImage && (
+            <>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={e => {
+                  const f = e.target.files?.[0];
+                  if (f) onUploadImage(f);
+                  if (e.target) e.target.value = ""; // 같은 파일 재선택 허용
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={disabled}
+                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary disabled:opacity-40"
+                title="이미지 업로드 (PNG/JPEG/WebP)"
+              >
+                <Paperclip size={12} /> 첨부
+              </button>
+            </>
+          )}
           <textarea
             ref={ref}
             value={text}

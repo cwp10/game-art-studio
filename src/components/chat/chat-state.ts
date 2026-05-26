@@ -43,6 +43,14 @@ export type ChatAction =
   | { type: "user_send"; tempId: string; text: string }
   | { type: "set_generating"; generating: boolean }
   | { type: "sse"; event: ChatEvent }
+  | {
+      type: "external_upload";
+      tempId: string;
+      filename: string;
+      generationId: string;
+      width: number;
+      height: number;
+    }
   | { type: "reset_items" };
 
 export const initialState: ChatState = {
@@ -153,6 +161,37 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     case "set_generating":
       return { ...state, generating: action.generating };
+    case "external_upload": {
+      // 가짜 assistant turn — toolCall 1개를 succeeded 로 채워 결과 카드 흐름 재사용.
+      const fakeToolCallId = "ext-" + action.generationId;
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "user", id: action.tempId, text: `🖼 업로드: ${action.filename}` },
+          {
+            kind: "assistant",
+            id: "ext-msg-" + action.generationId,
+            finished: true,
+            toolCalls: [
+              {
+                toolCallId: fakeToolCallId,
+                name: "upload_image",
+                args: { filename: action.filename },
+                status: "succeeded",
+                progress: [{ stage: "done" }],
+                result: {
+                  generationId: action.generationId,
+                  imageUrl: `/api/images/${action.generationId}`,
+                  width: action.width,
+                  height: action.height,
+                },
+              },
+            ],
+          },
+        ],
+      };
+    }
     case "reset_items":
       return { ...state, items: [], generating: false };
     case "sse": {

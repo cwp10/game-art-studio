@@ -17,6 +17,7 @@ import {
   listPresets,
   listSessions,
   streamChat,
+  uploadImage,
   uploadLayers,
   uploadMask,
 } from "@/lib/api/client";
@@ -53,6 +54,9 @@ export function ChatLayout() {
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
   // preset cache — handleSend 가 suffix 결합에 사용.
   const presetCache = useRef<Map<string, StylePreset>>(new Map());
+  // session 활성화 직후의 listMessages reload 를 건너뜀 — 클라이언트가 dispatch 로
+  // 이미 items 를 채운 경우 (예: 업로드 흐름) race 로 items 가 빈 응답에 reset 되는 것 방지.
+  const skipNextLoadRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
 
   // 초기 세션 목록 로드
@@ -64,6 +68,11 @@ export function ChatLayout() {
   useEffect(() => {
     if (!state.activeSessionId) {
       dispatch({ type: "reset_items" });
+      return;
+    }
+    // upload 등이 dispatch 로 items 를 채운 직후의 reload 는 skip — 빈 응답이 우리 items 를 덮어쓰는 race 방지.
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
       return;
     }
     listMessages(state.activeSessionId).then(messages =>
@@ -271,6 +280,41 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
+  // 사용자가 [📎 첨부] 또는 EmptyState 의 업로드 카드로 파일 선택 → base64 →
+  // /api/upload (kind='image'). active session 없으면 신규 생성해서 결과를 그 세션에
+  // 누적. dispatch external_upload 로 chat 에 결과 카드 표시.
+  const handleUploadImage = useCallback(
+    async (file: File) => {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        // active session 없으면 생성
+        let sid = state.activeSessionId;
+        if (!sid) {
+          const newSession = await createSession(file.name);
+          sid = newSession.id;
+          const next = await listSessions();
+          dispatch({ type: "set_sessions", sessions: next });
+          // 이후의 listMessages reload race 회피 — dispatch 로 직접 채울 예정.
+          skipNextLoadRef.current = true;
+          dispatch({ type: "set_active", sessionId: sid });
+        }
+        const res = await uploadImage({ dataUrl, sessionId: sid, filename: file.name });
+        dispatch({
+          type: "external_upload",
+          tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+          filename: file.name,
+          generationId: res.generationId,
+          width: res.width,
+          height: res.height,
+        });
+      } catch (e) {
+        console.error("[upload]", e);
+        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+      }
+    },
+    [state.activeSessionId],
+  );
+
   useHotkeys("mod+n", e => {
     e.preventDefault();
     handleNew();
@@ -302,7 +346,7 @@ export function ChatLayout() {
           {hasItems ? (
             <MessageList items={state.items} onAction={handleAction} />
           ) : (
-            <EmptyState onPick={handleSend} />
+            <EmptyState onPick={handleSend} onUploadImage={handleUploadImage} />
           )}
         </main>
         <Composer
@@ -311,6 +355,7 @@ export function ChatLayout() {
           onSend={handleSend}
           onCancel={handleCancel}
           prefill={composerPrefill}
+          onUploadImage={handleUploadImage}
         />
       </div>
       {editing?.mode === "inpaint" && (
@@ -362,17 +407,47 @@ const SEED_PROMPTS = [
   "평타 이펙트 4프레임, 슬래시, 투명 배경",
 ];
 
-function EmptyState({ onPick }: { onPick: (text: string) => void }) {
+function EmptyState({
+  onPick,
+  onUploadImage,
+}: {
+  onPick: (text: string) => void;
+  onUploadImage: (file: File) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="mx-auto flex h-full max-w-[680px] flex-col items-center justify-center gap-6 px-8 text-center">
       <div className="text-5xl">🎨</div>
       <div>
         <h2 className="text-xl font-medium">무엇을 만들까요?</h2>
         <p className="mt-1 text-sm text-text-muted">
-          텍스트로 설명하거나, 아래 카드에서 시작점을 골라보세요.
+          텍스트로 만들거나, 가진 이미지를 업로드해 편집/레이어/스프라이트로 시작하세요.
         </p>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onUploadImage(f);
+          if (e.target) e.target.value = "";
+        }}
+      />
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="flex w-full items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-border bg-bg-card px-6 py-5 text-sm text-text-muted transition-colors hover:border-[color:var(--accent)]/50 hover:bg-[color:var(--accent)]/5 hover:text-text-primary"
+      >
+        <span className="text-2xl">🖼</span>
+        <span className="text-left">
+          <span className="block font-medium text-text-primary">이미지 업로드해서 시작</span>
+          <span className="text-xs text-text-muted/70">PNG·JPEG·WebP — 업로드 후 편집/레이어/스프라이트 도구 사용 가능</span>
+        </span>
+      </button>
+
+      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
         {SEED_PROMPTS.map(p => (
           <button
             key={p}
@@ -385,4 +460,14 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
       </div>
     </div>
   );
+}
+
+/** File → "data:image/...;base64,..." dataUrl. */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
 }

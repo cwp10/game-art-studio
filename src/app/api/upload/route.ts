@@ -8,25 +8,30 @@ import { IMAGES_DIR, ensureDataDirs, imagePath as imagePathFor, toRelative } fro
 export const runtime = "nodejs";
 
 /**
- * POST /api/upload — 클라이언트에서 만든 이미지(인페인트 마스크 등) 를 업로드.
+ * POST /api/upload — 클라이언트가 만든/가져온 이미지를 generation 행으로 저장.
  *
- * 마스크 캔버스 컴포넌트가 그린 PNG 를 base64 dataUrl 로 보내면 여기서 generation 행을
- * 만들어 generationId 를 돌려준다. 그 id 를 `ChatRequest.maskGenerationId` 로 박아
- * /api/chat 을 호출하면 라우트가 본문에 `[mask: <id>]` marker 를 prefix → Claude 가
- * inpaint_image 의 maskGenerationId 로 사용.
+ * kind:
+ *   "mask"  — 인페인트 마스크. parentGenerationId 필수. lineage 는 input_image_ids.
+ *             generations.kind='inpaint' + params.kindHint='mask'.
+ *   "image" — 외부 이미지 import (Composer 첨부 / EmptyState 업로드). parent 없음.
+ *             generations.kind='text2img' (enum 회피) + params.kindHint='external',
+ *             prompt='업로드 이미지', backend='external', sessionId 있으면 연결.
  *
- * body:
- *   { kind: "mask", parentGenerationId, dataUrl: "data:image/png;base64,..." }
+ * body (mask):  { kind:"mask", parentGenerationId, dataUrl }
+ * body (image): { kind:"image", dataUrl, sessionId?, filename? }
  *
- * 응답:
- *   { generationId }
+ * dataUrl 은 `data:image/<png|jpeg|webp>;base64,...`. 응답: { generationId, width, height }.
  */
 
 type UploadBody = {
-  kind?: "mask";
+  kind?: "mask" | "image";
   parentGenerationId?: string;
+  sessionId?: string;
+  filename?: string;
   dataUrl?: string;
 };
+
+const DATAURL_PREFIX = /^data:image\/(png|jpeg|webp);base64,/;
 
 export async function POST(req: NextRequest) {
   let body: UploadBody;
@@ -35,52 +40,73 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  if (body.kind !== "mask") {
-    return Response.json({ error: "kind must be 'mask'" }, { status: 400 });
+  if (body.kind !== "mask" && body.kind !== "image") {
+    return Response.json({ error: "kind must be 'mask' or 'image'" }, { status: 400 });
   }
-  if (!body.parentGenerationId) {
-    return Response.json({ error: "parentGenerationId required" }, { status: 400 });
-  }
-  if (!body.dataUrl || !body.dataUrl.startsWith("data:image/png;base64,")) {
-    return Response.json({ error: "dataUrl must be a PNG base64 data URL" }, { status: 400 });
+  if (!body.dataUrl || !DATAURL_PREFIX.test(body.dataUrl)) {
+    return Response.json({ error: "dataUrl must be image/(png|jpeg|webp) base64" }, { status: 400 });
   }
 
-  const parent = getGeneration(body.parentGenerationId);
-  if (!parent) {
-    return Response.json({ error: "parent generation not found" }, { status: 404 });
+  // 마스크는 항상 PNG 만 허용 (codex 가 binary mask 로 read).
+  if (body.kind === "mask" && !body.dataUrl.startsWith("data:image/png;base64,")) {
+    return Response.json({ error: "mask dataUrl must be PNG" }, { status: 400 });
   }
 
-  const buf = Buffer.from(body.dataUrl.slice("data:image/png;base64,".length), "base64");
-  if (buf.length === 0) {
-    return Response.json({ error: "empty PNG body" }, { status: 400 });
+  let parent = null;
+  if (body.kind === "mask") {
+    if (!body.parentGenerationId) {
+      return Response.json({ error: "parentGenerationId required" }, { status: 400 });
+    }
+    parent = getGeneration(body.parentGenerationId);
+    if (!parent) return Response.json({ error: "parent generation not found" }, { status: 404 });
   }
+
+  const base64Idx = body.dataUrl.indexOf(",") + 1;
+  const buf = Buffer.from(body.dataUrl.slice(base64Idx), "base64");
+  if (buf.length === 0) return Response.json({ error: "empty image body" }, { status: 400 });
 
   ensureDataDirs();
   const generationId = newGenerationId();
+  // 파일은 항상 PNG 로 정규화 (sharp 변환) — 후속 codex 도구가 PNG 가정.
   const destPath = imagePathFor(generationId);
   await fs.mkdir(IMAGES_DIR, { recursive: true });
-  await fs.writeFile(destPath, buf);
-
-  // 실제 해상도 검증
+  // mask 는 PNG 그대로, image 는 sharp 로 png 출력 (jpeg/webp 도 png 로 통일).
+  if (body.kind === "mask") {
+    await fs.writeFile(destPath, buf);
+  } else {
+    await sharp(buf).png().toFile(destPath);
+  }
   const meta = await sharp(destPath).metadata();
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
 
-  // 마스크는 generations.kind 'inpaint' 재활용 + params.kindHint='mask' 로 구분.
-  // (스키마의 CHECK enum 변경 마이그레이션 회피.) lineage 는 input_image_ids=[parent].
-  const gen = createGeneration({
-    id: generationId,
-    session_id: parent.session_id,
-    message_id: null,
-    kind: "inpaint",
-    prompt: null,
-    input_image_ids: [parent.id],
-    params: { kindHint: "mask" },
-    image_path: toRelative(destPath),
-    width,
-    height,
-    backend: "external",
-  });
+  const gen =
+    body.kind === "mask"
+      ? createGeneration({
+          id: generationId,
+          session_id: parent!.session_id,
+          message_id: null,
+          kind: "inpaint",
+          prompt: null,
+          input_image_ids: [parent!.id],
+          params: { kindHint: "mask" },
+          image_path: toRelative(destPath),
+          width,
+          height,
+          backend: "external",
+        })
+      : createGeneration({
+          id: generationId,
+          session_id: body.sessionId ?? null,
+          message_id: null,
+          kind: "text2img",
+          prompt: body.filename ? `업로드: ${body.filename}` : "업로드 이미지",
+          params: { kindHint: "external", filename: body.filename },
+          image_path: toRelative(destPath),
+          width,
+          height,
+          backend: "external",
+        });
 
   return Response.json({ generationId: gen.id, width: gen.width, height: gen.height });
 }
