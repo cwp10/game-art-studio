@@ -325,7 +325,7 @@ export function MaskCanvas({
                 if (!hasStrokes || busy) return;
                 onSubmit({
                   maskDataUrl: exportMaskDataUrl(),
-                  prompt: "마스크로 표시된 영역을 제거하고 주변 배경과 자연스럽게 이어지도록 채워줘",
+                  prompt: "Remove the object in the masked area completely. Fill the empty space with a seamless continuation of the surrounding background — same colors, textures, and lighting. The result should look like the object was never there.",
                 });
               }}
               disabled={!hasStrokes || busy}
