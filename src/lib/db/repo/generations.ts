@@ -108,9 +108,9 @@ export function getGeneration(id: string): Generation | null {
 }
 
 export function listGenerations(
-  opts: { sessionId?: string; kind?: GenerationKind; limit?: number } = {},
+  opts: { sessionId?: string; kind?: GenerationKind; limit?: number; search?: string } = {},
 ): Generation[] {
-  const { sessionId, kind, limit = 200 } = opts;
+  const { sessionId, kind, limit = 200, search } = opts;
   const where: string[] = [];
   const params: (string | number)[] = [];
   if (sessionId) {
@@ -120,6 +120,15 @@ export function listGenerations(
   if (kind) {
     where.push("kind = ?");
     params.push(kind);
+  }
+  if (search?.trim()) {
+    where.push("prompt LIKE ?");
+    params.push(`%${search.trim()}%`);
+  }
+  // 갤러리는 마스크/레이어 등 'kindHint' 가 'mask'/'layer' 인 행은 노이즈 — 기본적으로 제외.
+  // 별도 옵션으로 보고 싶으면 sessionId 또는 kind 필터 명시 시.
+  if (!sessionId && !kind) {
+    where.push("(params IS NULL OR (params NOT LIKE '%\"kindHint\":\"mask\"%' AND params NOT LIKE '%\"kindHint\":\"layer\"%'))");
   }
   const sql = `SELECT * FROM generations ${
     where.length ? "WHERE " + where.join(" AND ") : ""

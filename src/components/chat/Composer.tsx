@@ -1,10 +1,18 @@
 "use client";
 
-import { Paperclip, Send, X } from "lucide-react";
+import { Paperclip, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
+
+const DIRECTIONS: Array<{ key: string; label: string }> = [
+  { key: "auto", label: "자유" },
+  { key: "정면", label: "정면" },
+  { key: "측면", label: "측면" },
+  { key: "3/4 측면", label: "3/4" },
+  { key: "후면", label: "후면" },
+];
 
 /** 다음 메시지의 input image 로 자동 첨부될 generation — 업로드 직후 부모가 set. */
 export type ComposerAttachment = { generationId: string; label: string; seq: number };
@@ -25,6 +33,8 @@ type Props = {
   /** 업로드/드롭/카드 액션 직후 부모가 자동으로 채움. 사용자가 직접 [X] 로 해제 가능.
    *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger. */
   attachment?: ComposerAttachment | null;
+  /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
+  onAskSuggestions?: (text: string) => void;
 };
 
 export function Composer({
@@ -35,10 +45,12 @@ export function Composer({
   prefill,
   onUploadImage,
   attachment,
+  onAskSuggestions,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [presetName, setPresetName] = useState<string | null>(null);
+  const [direction, setDirection] = useState<string>("auto");
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -81,13 +93,23 @@ export function Composer({
       .catch(() => setPresetName(null));
   }, [presetId]);
 
+  function askSuggestions() {
+    const t = text.trim();
+    if (!t || !onAskSuggestions) return;
+    onAskSuggestions(t);
+    setText("");
+  }
+
   function submit() {
     const t = text.trim();
     if (!t || disabled) return;
+    // 방향이 'auto' 아니면 메시지 끝에 결합 (preset suffix 결합 흐름과 같은 패턴).
+    // 이미 사용자가 직접 "정면" 같은 단어 입력했어도 중복 무해.
+    const withDir = direction === "auto" ? t : `${t}, ${direction}`;
     const opts: { presetId?: string; attachmentGenerationIds?: string[] } = {};
     if (presetId) opts.presetId = presetId;
     if (attached) opts.attachmentGenerationIds = [attached.id];
-    onSend(t, Object.keys(opts).length ? opts : undefined);
+    onSend(withDir, Object.keys(opts).length ? opts : undefined);
     setText("");
     // attachment 는 일회용 — submit 후 자동 해제. 다시 reference 하고 싶으면 사용자가 카드의
     // [reference] 또는 새 업로드 필요.
@@ -154,6 +176,21 @@ export function Composer({
         ) : null}
         <div className="flex items-end gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
           <StylePresetPicker value={presetId} onChange={setPresetId} />
+          {/* 캐릭터 방향 — submit 시 prompt 끝에 결합 + suggest 호출 시 반영. */}
+          <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="캐릭터 방향">
+            <User size={12} />
+            <select
+              value={direction}
+              onChange={e => setDirection(e.target.value)}
+              className="bg-transparent text-xs text-text-muted focus:outline-none"
+            >
+              {DIRECTIONS.map(d => (
+                <option key={d.key} value={d.key}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
           {onUploadImage && (
             <>
               <input
@@ -189,6 +226,15 @@ export function Composer({
           />
           <button
             type="button"
+            onClick={askSuggestions}
+            disabled={disabled || !text.trim() || !onAskSuggestions}
+            className="flex h-9 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary disabled:opacity-40"
+            title="입력 맥락을 LLM 으로 분석해 3-4개 컨셉 제안 (~30~60초). 결과는 chat 에 카드로."
+          >
+            <Sparkles size={12} /> 제안
+          </button>
+          <button
+            type="button"
             onClick={submit}
             disabled={disabled || !text.trim()}
             className="flex h-9 items-center gap-1 rounded-md bg-[color:var(--accent)] px-3 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
@@ -196,6 +242,7 @@ export function Composer({
             <Send size={14} />
           </button>
         </div>
+
       </div>
     </div>
   );

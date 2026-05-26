@@ -9,6 +9,8 @@ import { SessionList } from "./SessionList";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
+import { GallerySheet } from "@/components/library/GallerySheet";
+import { LogsPanel } from "@/components/library/LogsPanel";
 import { PromptLibrarySheet } from "@/components/library/PromptLibrarySheet";
 import {
   createSession,
@@ -17,6 +19,7 @@ import {
   listPresets,
   listSessions,
   streamChat,
+  suggestPrompts,
   uploadImage,
   uploadLayers,
   uploadMask,
@@ -50,6 +53,9 @@ export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const [editing, setEditing] = useState<Editing>(null);
   const [libOpen, setLibOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [sessionSearch, setSessionSearch] = useState("");
   // Composer prefill — seq 카운터로 같은 text 도 매번 새 trigger.
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
   // Composer attachment — 업로드/카드 액션 직후 set. seq 카운터로 동일 generationId 도 새로 trigger.
@@ -64,10 +70,15 @@ export function ChatLayout() {
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
 
-  // 초기 세션 목록 로드
+  // 세션 목록 로드 — search 변경 시 reload (debounce 200ms).
   useEffect(() => {
-    listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
-  }, []);
+    const t = setTimeout(() => {
+      listSessions({ search: sessionSearch || undefined }).then(sessions =>
+        dispatch({ type: "set_sessions", sessions }),
+      );
+    }, sessionSearch ? 200 : 0);
+    return () => clearTimeout(t);
+  }, [sessionSearch]);
 
   // 활성 세션 변경 시 메시지 로드
   useEffect(() => {
@@ -151,7 +162,9 @@ export function ChatLayout() {
         const next = await listSessions();
         dispatch({ type: "set_sessions", sessions: next });
       } catch (e) {
-        if ((e as Error).name !== "AbortError") {
+        if ((e as Error).name === "AbortError") {
+          dispatch({ type: "sse", event: { type: "error", message: "취소되었습니다." } });
+        } else {
           console.error(e);
           dispatch({
             type: "sse",
@@ -294,6 +307,43 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
+  // [✨ 제안] — 사용자 입력을 LLM 으로 다양화한 3-4개 컨셉을 chat 에 카드로 표시.
+  // active session 없으면 신규 생성. dispatch suggestions_requested → API 호출 →
+  // suggestions_received. 카드 클릭은 onPickSuggestion 으로 Composer prefill.
+  const handleAskSuggestions = useCallback(
+    async (text: string) => {
+      try {
+        let sid = state.activeSessionId;
+        if (!sid) {
+          const newSession = await createSession(text.slice(0, 40));
+          sid = newSession.id;
+          const next = await listSessions();
+          dispatch({ type: "set_sessions", sessions: next });
+          skipNextLoadRef.current = true;
+          dispatch({ type: "set_active", sessionId: sid });
+        }
+        const userTempId = "tmp-" + Math.random().toString(36).slice(2, 8);
+        const suggestId = "sug-" + Math.random().toString(36).slice(2, 8);
+        dispatch({ type: "suggestions_requested", userTempId, suggestId, text });
+        try {
+          const items = await suggestPrompts(text);
+          dispatch({ type: "suggestions_received", suggestId, items });
+        } catch (e) {
+          dispatch({ type: "suggestions_failed", suggestId, error: (e as Error).message });
+        }
+      } catch (e) {
+        console.error("[suggest]", e);
+        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+      }
+    },
+    [state.activeSessionId],
+  );
+
+  const handlePickSuggestion = useCallback((suggestId: string, body: string) => {
+    setComposerPrefill(prev => ({ text: body, seq: (prev?.seq ?? 0) + 1 }));
+    dispatch({ type: "suggestion_picked", suggestId, body });
+  }, []);
+
   // 사용자가 [📎 첨부] 또는 EmptyState 의 업로드 카드로 파일 선택 → base64 →
   // /api/upload (kind='image'). active session 없으면 신규 생성해서 결과를 그 세션에
   // 누적. dispatch external_upload 로 chat 에 결과 카드 표시.
@@ -344,6 +394,16 @@ export function ChatLayout() {
     e => { e.preventDefault(); setLibOpen(o => !o); },
     { enableOnFormTags: ["TEXTAREA", "INPUT"] },
   );
+  useHotkeys(
+    "mod+g",
+    e => { e.preventDefault(); setGalleryOpen(o => !o); },
+    { enableOnFormTags: ["TEXTAREA", "INPUT"] },
+  );
+  useHotkeys(
+    "mod+shift+l",
+    e => { e.preventDefault(); setLogsOpen(o => !o); },
+    { enableOnFormTags: ["TEXTAREA", "INPUT"] },
+  );
 
   const hasItems = state.items.length > 0;
 
@@ -352,9 +412,12 @@ export function ChatLayout() {
       <SessionList
         sessions={state.sessions}
         activeId={state.activeSessionId}
+        search={sessionSearch}
+        onSearch={setSessionSearch}
         onNew={handleNew}
         onSelect={handleSelect}
         onDelete={handleDelete}
+        onOpenGallery={() => setGalleryOpen(true)}
       />
       {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
@@ -400,9 +463,16 @@ export function ChatLayout() {
         </header>
         <main className="flex-1 overflow-y-auto">
           {hasItems ? (
-            <MessageList items={state.items} onAction={handleAction} />
+            <MessageList
+              items={state.items}
+              onAction={handleAction}
+              onPickSuggestion={handlePickSuggestion}
+            />
           ) : (
-            <EmptyState onPick={handleSend} onUploadImage={handleUploadImage} />
+            <EmptyState
+              onPick={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
+              onUploadImage={handleUploadImage}
+            />
           )}
         </main>
         <Composer
@@ -413,6 +483,7 @@ export function ChatLayout() {
           prefill={composerPrefill}
           onUploadImage={handleUploadImage}
           attachment={composerAttachment}
+          onAskSuggestions={handleAskSuggestions}
         />
       </div>
       {editing?.mode === "inpaint" && (
@@ -451,6 +522,8 @@ export function ChatLayout() {
         onClose={() => setLibOpen(false)}
         onUse={text => setComposerPrefill(prev => ({ text, seq: (prev?.seq ?? 0) + 1 }))}
       />
+      <GallerySheet open={galleryOpen} onClose={() => setGalleryOpen(false)} />
+      <LogsPanel open={logsOpen} onClose={() => setLogsOpen(false)} />
     </div>
   );
 }

@@ -18,7 +18,7 @@ export type ToolCallState = {
   error?: string;
 };
 
-/** 화면에 그리는 단위. user message / assistant turn / 진행 중 turn. */
+/** 화면에 그리는 단위. user message / assistant turn / suggestions 그리드. */
 export type ChatItem =
   | { kind: "user"; id: string; text: string }
   | {
@@ -27,6 +27,15 @@ export type ChatItem =
       toolCalls: ToolCallState[];
       text?: string;
       finished: boolean;
+    }
+  | {
+      /** LLM 이 만들어준 prompt 후보 카드 그리드. 사용자가 카드 클릭 → Composer prefill. */
+      kind: "suggestions";
+      id: string;
+      pending: boolean; // 응답 대기 중
+      items: Array<{ label: string; body: string }>;
+      pickedBody?: string;
+      error?: string;
     };
 
 export type ChatState = {
@@ -51,6 +60,10 @@ export type ChatAction =
       width: number;
       height: number;
     }
+  | { type: "suggestions_requested"; userTempId: string; suggestId: string; text: string }
+  | { type: "suggestions_received"; suggestId: string; items: Array<{ label: string; body: string }> }
+  | { type: "suggestions_failed"; suggestId: string; error: string }
+  | { type: "suggestion_picked"; suggestId: string; body: string }
   | { type: "reset_items" };
 
 export const initialState: ChatState = {
@@ -161,6 +174,42 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     case "set_generating":
       return { ...state, generating: action.generating };
+    case "suggestions_requested":
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "user", id: action.userTempId, text: action.text },
+          { kind: "suggestions", id: action.suggestId, pending: true, items: [] },
+        ],
+      };
+    case "suggestions_received":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "suggestions" && it.id === action.suggestId
+            ? { ...it, pending: false, items: action.items }
+            : it,
+        ),
+      };
+    case "suggestions_failed":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "suggestions" && it.id === action.suggestId
+            ? { ...it, pending: false, error: action.error }
+            : it,
+        ),
+      };
+    case "suggestion_picked":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "suggestions" && it.id === action.suggestId
+            ? { ...it, pickedBody: action.body }
+            : it,
+        ),
+      };
     case "external_upload": {
       // 가짜 assistant turn — toolCall 1개를 succeeded 로 채워 결과 카드 흐름 재사용.
       const fakeToolCallId = "ext-" + action.generationId;
@@ -259,6 +308,12 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           return { ...state, items, generating: false };
         case "error":
           assistant.finished = true;
+          // 채팅에 명시적 에러 텍스트 — MessageList 가 빨간색으로 렌더.
+          assistant.text = `⚠️ ${ev.message || "오류가 발생했어요."}`;
+          // 진행 중이던 toolCall 들은 failed 로 마킹.
+          assistant.toolCalls = assistant.toolCalls.map(tc =>
+            tc.status === "running" ? { ...tc, status: "failed", error: ev.message } : tc,
+          );
           items[lastIdx] = assistant;
           return { ...state, items, generating: false };
         default:

@@ -4,8 +4,10 @@
 import type { ChatEvent, ChatRequest } from "@/types/chat";
 import type { Generation, Message, PromptLibraryItem, Session, StylePreset } from "@/types/db";
 
-export async function listSessions(): Promise<Session[]> {
-  const r = await fetch("/api/sessions");
+export async function listSessions(opts?: { search?: string }): Promise<Session[]> {
+  const sp = new URLSearchParams();
+  if (opts?.search) sp.set("search", opts.search);
+  const r = await fetch(`/api/sessions${sp.toString() ? "?" + sp.toString() : ""}`);
   const { sessions } = (await r.json()) as { sessions: Session[] };
   return sessions;
 }
@@ -97,6 +99,28 @@ export async function uploadLayers(
   return out;
 }
 
+export type Suggestion = { label: string; body: string };
+
+/**
+ * 짧은 의도 → 게임 에셋 prompt 후보 3-4개. Claude 가 맥락 유추해서 라벨 + 본문
+ * 형태로 제안. 30~60초 + 구독 한도 소모.
+ *
+ * 본문은 스타일/방향/첨부 미포함 — 사용자가 카드 선택 후 별도 picker 로 결합.
+ */
+export async function suggestPrompts(input: string, signal?: AbortSignal): Promise<Suggestion[]> {
+  const r = await fetch("/api/suggest", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ input }),
+    signal,
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(error ?? r.statusText);
+  }
+  return ((await r.json()) as { suggestions: Suggestion[] }).suggestions;
+}
+
 // ── style presets ───────────────────────────────────────────────────────────
 export async function listPresets(): Promise<StylePreset[]> {
   const r = await fetch("/api/presets");
@@ -181,9 +205,13 @@ export async function bumpPromptUse(id: string): Promise<void> {
   });
 }
 
-export async function listGenerations(sessionId?: string): Promise<Generation[]> {
-  const url = sessionId ? `/api/generations?sessionId=${encodeURIComponent(sessionId)}` : "/api/generations";
-  const r = await fetch(url);
+export async function listGenerations(opts?: { sessionId?: string; kind?: string; search?: string; limit?: number }): Promise<Generation[]> {
+  const sp = new URLSearchParams();
+  if (opts?.sessionId) sp.set("sessionId", opts.sessionId);
+  if (opts?.kind) sp.set("kind", opts.kind);
+  if (opts?.search) sp.set("search", opts.search);
+  if (opts?.limit) sp.set("limit", String(opts.limit));
+  const r = await fetch(`/api/generations${sp.toString() ? "?" + sp.toString() : ""}`);
   const { generations } = (await r.json()) as { generations: Generation[] };
   return generations;
 }

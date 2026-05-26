@@ -279,3 +279,48 @@ function normalize(parsed: unknown): ClaudeStreamEvent[] {
 
   return [{ kind: "raw", raw: obj }];
 }
+
+/**
+ * 단순 1-turn 호출. stream-json 없이 plain text 응답을 통째로 받아 반환.
+ *
+ * 도구 / MCP 없이 가벼운 prompt 후보 생성에 사용. spawnClaude (full orchestrator)
+ * 와 분리한 이유: stream-json 인프라가 무겁고, mcp.json 도 필요 없는 단일 호출.
+ */
+export function claudeRunSimple(opts: {
+  systemPrompt: string;
+  userMessage: string;
+  model?: string;
+  signal?: AbortSignal;
+}): Promise<string> {
+  ensureDataDirs();
+  const args = [
+    "-p",
+    "--system-prompt",
+    opts.systemPrompt,
+    "--model",
+    opts.model ?? "sonnet",
+    opts.userMessage,
+  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", c => (stdout += c.toString("utf8")));
+    child.stderr.on("data", c => (stderr += c.toString("utf8")));
+    const onAbort = () => child.kill("SIGTERM");
+    opts.signal?.addEventListener("abort", onAbort);
+    child.on("error", err => {
+      opts.signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    });
+    child.on("close", code => {
+      opts.signal?.removeEventListener("abort", onAbort);
+      if (code === 0) resolve(stdout.trim());
+      else reject(new Error(`claude exited ${code}: ${stderr.slice(0, 400)}`));
+    });
+  });
+}
+
