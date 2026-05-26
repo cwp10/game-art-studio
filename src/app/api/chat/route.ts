@@ -54,6 +54,7 @@ const MCP_TOOL_NAMES = [
   "mcp__imggen__make_spritesheet",
   "mcp__imggen__edit_image",
   "mcp__imggen__upscale_image",
+  "mcp__imggen__resize_image",
   "mcp__imggen__remove_background",
   "mcp__imggen__inpaint_image",
 ];
