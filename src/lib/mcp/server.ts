@@ -337,14 +337,22 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         return await runResizeTool({ inputGenerationId: inputId, targetSize, sessionId });
       }
 
-      case "remove_background":
+      case "remove_background": {
+        const inputId = requireString(args.inputGenerationId, "inputGenerationId");
+        const inputGen = getGeneration(inputId);
+        // 스프라이트 시트는 배경이 항상 흰색 → Codex 없이 sharp 로 직접 흰 픽셀 투명화.
+        // Codex 방식(chroma-key)은 전체 시트를 보고 첫 프레임만 재생성하는 문제가 있다.
+        if (inputGen?.kind === "spritesheet") {
+          return await runWhiteBgRemoveTool({ inputGenerationId: inputId, sessionId });
+        }
         return await runImageTool({
           name,
           kind: "remove_bg",
           prompt: "Remove the background, keep the subject sharp and intact.",
-          inputGenerationIds: [requireString(args.inputGenerationId, "inputGenerationId")],
+          inputGenerationIds: [inputId],
           sessionId,
         });
+      }
 
       case "inpaint_image": {
         const inputId = requireString(args.inputGenerationId, "inputGenerationId");
@@ -598,6 +606,112 @@ async function runResizeTool(spec: {
       imagePath: `/api/images/${gen.id}`,
       width: spec.targetSize,
       height: spec.targetSize,
+      elapsedMs,
+    },
+  };
+}
+
+/**
+ * 스프라이트 시트 전용 배경 제거 — Codex 호출 없이 sharp 로 흰 픽셀을 직접 투명화.
+ *
+ * Codex chroma-key 방식은 "피사체 하나를 #00ff00 위에 재생성" 지시를 사용하므로
+ * 스프라이트 시트 전체 대신 첫 프레임만 처리하는 문제가 있다.
+ * 스프라이트 시트의 배경은 항상 흰색(또는 격자선 회색)이므로
+ * 픽셀 값이 R>240 && G>240 && B>240 이면 alpha=0 으로 치환한다.
+ */
+async function runWhiteBgRemoveTool(spec: {
+  inputGenerationId: string;
+  sessionId: string | null;
+}) {
+  const inputGen = getGeneration(spec.inputGenerationId);
+  if (!inputGen) throw new Error(`generation not found: ${spec.inputGenerationId}`);
+
+  const inputPath = path.join(DATA_DIR, inputGen.image_path);
+  const generationId = newGenerationId();
+  const jobId = newJobId();
+  const destPath = imagePathFor(generationId);
+
+  log(
+    `remove_background(white-sharp) start job=${jobId} gen=${generationId} ` +
+      `input=${spec.inputGenerationId} session=${spec.sessionId}`,
+  );
+  createJob({
+    id: jobId,
+    session_id: spec.sessionId,
+    kind: "codex_image",
+    args: {
+      tool: "remove_background",
+      inputGenerationId: spec.inputGenerationId,
+      generationId,
+      viaMcp: true,
+    },
+  });
+
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  const startedAt = performance.now();
+
+  // 흰색·연회색 픽셀(R>240 && G>240 && B>240)을 alpha=0 으로 투명화.
+  // 스프라이트 격자선(~#cccccc, 204)도 이 범위를 벗어나므로 같이 제거된다.
+  const { data, info } = await sharp(inputPath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels; // 4 (RGBA)
+  for (let i = 0; i < data.length; i += ch) {
+    if (data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240) {
+      data[i + 3] = 0;
+    }
+  }
+  const tmpPath = `${destPath}.tmp`;
+  await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: ch as 1 | 2 | 3 | 4 },
+  })
+    .png()
+    .toFile(tmpPath);
+  fs.renameSync(tmpPath, destPath);
+
+  const elapsedMs = Math.round(performance.now() - startedAt);
+  const meta = await sharp(destPath).metadata();
+  const width = meta.width ?? info.width;
+  const height = meta.height ?? info.height;
+
+  const gen = createGeneration({
+    id: generationId,
+    session_id: spec.sessionId,
+    message_id: null,
+    kind: "remove_bg",
+    prompt: "Remove white background (spritesheet)",
+    input_image_ids: [spec.inputGenerationId],
+    image_path: toRelative(destPath),
+    width,
+    height,
+    backend: "direct",
+  });
+  updateJob(jobId, {
+    status: "succeeded",
+    result: { generationId: gen.id, elapsedMs },
+    ended_at: Date.now(),
+  });
+
+  log(
+    `remove_background(white-sharp) done job=${jobId} gen=${gen.id} ` +
+      `${width}x${height} ${elapsedMs}ms`,
+  );
+
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Generated image ${gen.id} (${width}×${height}, ${(elapsedMs / 1000).toFixed(1)}s). ` +
+          `Show it with image ref id "${gen.id}".`,
+      },
+    ],
+    structuredContent: {
+      generationId: gen.id,
+      imagePath: `/api/images/${gen.id}`,
+      width,
+      height,
       elapsedMs,
     },
   };
