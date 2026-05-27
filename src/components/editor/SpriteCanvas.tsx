@@ -25,9 +25,10 @@ export function SpriteCanvas({
   const baseRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
-  // 레퍼런스 그리드(7열×6행) 기본값
-  const [rows, setRows] = useState(6);
-  const [cols, setCols] = useState(7);
+  // 이미지 크기에서 GCD로 셀 크기를 역산해 rows/cols 자동 감지. 감지 실패 시 기본값 6×7.
+  const detected = detectSpriteGrid(imageWidth, imageHeight);
+  const [rows, setRows] = useState(detected?.rows ?? 6);
+  const [cols, setCols] = useState(detected?.cols ?? 7);
   const [order, setOrder] = useState<Order>("row");
   const [fps, setFps] = useState(12);
   const [gifUrl, setGifUrl] = useState<string | null>(null);
@@ -508,4 +509,46 @@ function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: numb
       ))}
     </svg>
   );
+}
+
+// ─── 그리드 자동 감지 ────────────────────────────────────────────────────────
+
+/**
+ * 스프라이트 시트 이미지 크기에서 rows × cols 를 역산.
+ *
+ * make_spritesheet 는 cellW = cellH = Math.min(512, floor(2048 / max(rows,cols))) 로
+ * 정사각 셀을 쓰므로, cellSize = gcd(width, height) 의 약수 중 가장 큰 적합한 값을 찾는다.
+ *
+ * 예) 2048×2048 → gcd=2048, 최대 유효 약수=512, cols=4, rows=4
+ *     2044×1752 → gcd=292,  cols=7, rows=6
+ *     1636×2045 → gcd=409,  cols=4, rows=5
+ */
+function detectSpriteGrid(
+  width: number,
+  height: number,
+): { rows: number; cols: number } | null {
+  if (!width || !height) return null;
+  const g = gcd(width, height);
+  // g 의 모든 약수를 구해 내림차순 정렬
+  const divs: number[] = [];
+  for (let d = 1; d * d <= g; d++) {
+    if (g % d === 0) {
+      divs.push(d);
+      if (d !== g / d) divs.push(g / d);
+    }
+  }
+  divs.sort((a, b) => b - a);
+  for (const d of divs) {
+    if (d < 64 || d > 512) continue; // 64 ~ 512 px 범위 셀만 유효
+    const c = width / d;
+    const r = height / d;
+    if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
+      return { rows: r, cols: c };
+    }
+  }
+  return null;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
 }
