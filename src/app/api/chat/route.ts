@@ -219,11 +219,6 @@ async function runChat(
           if (!imggenToolUseIds.has(ev.toolUseId)) break;
           progressTails.get(ev.toolUseId)?.stop();
           progressTails.delete(ev.toolUseId);
-          // 디버그: tool_result content 원형 로그 (generationId 파싱 실패 분석용)
-          // structuredContent 가 content 로 에코되면 object 형태로 올 수 있음.
-          let rawContentDbg: string;
-          try { rawContentDbg = JSON.stringify(ev.content).slice(0, 300); } catch { rawContentDbg = String(ev.content); }
-          console.log(`[route] tool_result toolUseId=${ev.toolUseId} content=${rawContentDbg}`);
           const { generationId, errorText } = extractGenerationId(ev.content);
           blocks.push({
             type: "tool_result",
@@ -340,9 +335,21 @@ function extractGenerationId(content: unknown): {
   generationId: string | null;
   errorText: string | null;
 } {
-  // 1) string 그대로
+  // 1) string 그대로 — 두 가지 형태를 처리:
+  //    a) 텍스트: "Generated image ... Show it with image ref id \"<id>\"."
+  //    b) JSON 직렬화된 structuredContent: '{"generationId":"<id>","imagePath":...}'
+  //       (Claude CLI 2.x 가 structuredContent 를 JSON string 으로 content 에 담는 경우)
   if (typeof content === "string") {
-    return { generationId: findIdInString(content), errorText: null };
+    const idFromText = findIdInString(content);
+    if (idFromText) return { generationId: idFromText, errorText: null };
+    // JSON string fallback
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      if (parsed && typeof parsed.generationId === "string" && /^[a-z0-9]{16}$/.test(parsed.generationId)) {
+        return { generationId: parsed.generationId, errorText: null };
+      }
+    } catch { /* not JSON */ }
+    return { generationId: null, errorText: content.slice(0, 200) || null };
   }
   // 2) array of blocks
   if (Array.isArray(content)) {
