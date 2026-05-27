@@ -199,7 +199,7 @@ export function SpriteCanvas({
           quality: 10,
           width: cellW,
           height: cellH,
-          transparent: 0x000000,
+          transparent: 0x000000 as unknown as string,
         });
         const delay = Math.max(20, Math.round(1000 / fps));
         for (const f of adjustedFrames) gif.addFrame(f, { delay });

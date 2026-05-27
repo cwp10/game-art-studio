@@ -420,7 +420,7 @@ export function PromptLibrarySheet({ open, onClose, onUse }: Props) {
 type VarFillPanelProps = {
   item: PromptLibraryItem;
   values: Record<string, string>;
-  firstRef: React.RefObject<HTMLInputElement>;
+  firstRef: React.RefObject<HTMLInputElement | null>;
   onChange: (name: string, val: string) => void;
   onBack: () => void;
   onApply: () => void;
