@@ -235,6 +235,7 @@ export class CodexExecBackend implements ImageBackend {
     let stderrBuf = "";
     let lastStage: ReturnType<typeof inferStage> = null;
     let lineBuf = "";
+    let stderrLineBuf = "";
 
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
@@ -251,8 +252,22 @@ export class CodexExecBackend implements ImageBackend {
         }
       }
     });
+    // inferStage 패턴(SKILL.md, generated_images find/cp)은 모두 stderr 에 출력됨.
+    // stdout 에는 마지막 ./output.png 한 줄만 오므로 stderr 도 라인 단위로 파싱.
     child.stderr!.on("data", (chunk: Buffer) => {
-      stderrBuf += chunk.toString();
+      const text = chunk.toString();
+      stderrBuf += text;
+      stderrLineBuf += text;
+      let idx: number;
+      while ((idx = stderrLineBuf.indexOf("\n")) !== -1) {
+        const line = stderrLineBuf.slice(0, idx);
+        stderrLineBuf = stderrLineBuf.slice(idx + 1);
+        const stage = inferStage(line);
+        if (stage && stage !== lastStage) {
+          lastStage = stage;
+          onProgress(stage);
+        }
+      }
     });
 
     const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(

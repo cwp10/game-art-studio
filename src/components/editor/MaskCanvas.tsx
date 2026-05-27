@@ -65,22 +65,36 @@ export function MaskCanvas({
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [prompt, setPrompt] = useState("");
   const drawingRef = useRef<Stroke | null>(null);
+  // 리사이즈 시 stroke 좌표 정합성을 위해 스트로크가 시작된 후엔 avail 을 고정.
+  // useLayoutEffect 의 클로저에서 최신 strokes.length 에 접근하기 위해 ref 사용.
+  const strokesLenRef = useRef(0);
+  useEffect(() => { strokesLenRef.current = strokes.length; }, [strokes]);
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
     if (!sizer) return;
-    // 폭: 패딩 고려 24px 빼기. (p-3 좌우 합)
-    const w = Math.max(200, sizer.clientWidth - 24);
-    // 높이: sizer.clientHeight 에서 toolbar / prompt 의 실제 height + gap(12px × 3) +
-    // 안내 텍스트(~20px) 빼고 캔버스 가능 공간. 첫 render 시 canvas 가 maxDisplayPx=1200 로
-    // 그려져도 toolbar/prompt 는 정상 layout 됨 (sizer 가 overflow-y-auto).
-    const tb = toolbarRef.current?.getBoundingClientRect().height ?? 130;
-    const pr = promptRef.current?.getBoundingClientRect().height ?? 120;
-    // 빼야 할 것: toolbar + prompt + (gap-3 × 3 children = 36) + 안내 텍스트(~20) + 안전 마진(~36).
-    // 안전 마진은 footer 와 textarea 가 viewport bottom 에서 잘리지 않도록 추가 buffer.
-    const reserved = tb + pr + 36 + 20 + 36;
-    const h = Math.max(200, sizer.clientHeight - reserved);
-    setAvail({ w, h });
+
+    const measure = () => {
+      // 스트로크가 하나라도 있으면 캔버스 크기를 고정 — 리사이즈로 인한 좌표 mismatch 방지.
+      if (strokesLenRef.current > 0 || drawingRef.current) return;
+      // 폭: 패딩 고려 24px 빼기. (p-3 좌우 합)
+      const w = Math.max(200, sizer.clientWidth - 24);
+      // 높이: sizer.clientHeight 에서 toolbar / prompt 의 실제 height + gap(12px × 3) +
+      // 안내 텍스트(~20px) 빼고 캔버스 가능 공간. 첫 render 시 canvas 가 maxDisplayPx=1200 로
+      // 그려져도 toolbar/prompt 는 정상 layout 됨 (sizer 가 overflow-y-auto).
+      const tb = toolbarRef.current?.getBoundingClientRect().height ?? 130;
+      const pr = promptRef.current?.getBoundingClientRect().height ?? 120;
+      // 빼야 할 것: toolbar + prompt + (gap-3 × 3 children = 36) + 안내 텍스트(~20) + 안전 마진(~36).
+      const reserved = tb + pr + 36 + 20 + 36;
+      const h = Math.max(200, sizer.clientHeight - reserved);
+      setAvail({ w, h });
+    };
+
+    measure();
+    // ResizeObserver 로 오버레이 오픈 직후 layout settle + 이후 창 리사이즈 대응.
+    const ro = new ResizeObserver(measure);
+    ro.observe(sizer);
+    return () => ro.disconnect();
   }, []);
 
   // 화면 표시 크기: 가로폭을 기준으로 등비 축소 → 패널 전체 폭 사용.
