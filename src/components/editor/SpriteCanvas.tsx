@@ -37,6 +37,9 @@ export function SpriteCanvas({
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  // 잔재 제거 두 관문: 크기(메인 대비 %)·여백(셀 짧은변 %). 클수록 강하게 제거.
+  const [cleanSizePct, setCleanSizePct] = useState(10);
+  const [cleanMarginPct, setCleanMarginPct] = useState(5);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
@@ -287,7 +290,7 @@ export function SpriteCanvas({
       if (x > maxX) maxX = x;
       if (y > maxY) maxY = y;
     }
-    const margin = Math.round(Math.min(W, H) * 0.05);
+    const margin = Math.round(Math.min(W, H) * (cleanMarginPct / 100));
     const exMinX = Math.max(0, minX - margin);
     const exMinY = Math.max(0, minY - margin);
     const exMaxX = Math.min(W - 1, maxX + margin);
@@ -305,8 +308,8 @@ export function SpriteCanvas({
       cySum[l] += y;
     }
 
-    // 작은 컴포넌트(메인의 10% 미만) 중 centroid 가 메인 bbox+margin 밖인 것만 제거
-    const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
+    // 작은 컴포넌트(메인의 cleanSizePct% 미만) 중 centroid 가 메인 bbox+margin 밖인 것만 제거
+    const minKeep = Math.max(4, Math.floor(maxSize * (cleanSizePct / 100)));
     const remove = new Uint8Array(sizes.length);
     for (let l = 1; l < sizes.length; l++) {
       if (l === mainLabel || sizes[l] >= minKeep) continue;
@@ -541,18 +544,40 @@ export function SpriteCanvas({
             드래그 또는 클릭으로 셀 선택 후 화살표 키(Shift = 10px)로 미세 조정. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
           </p>
           {selectedIdx !== null && (
-            <div className="flex items-center gap-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
-              <span className="text-text-primary">셀 #{selectedIdx}</span>
-              <span className="flex-1 text-text-muted/70">
-                인접 셀에서 넘어온 작은 픽셀 덩어리만 제거합니다.
-              </span>
-              <button
-                onClick={cleanSelectedCell}
-                className="flex h-6 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
-                title="메인 콘텐츠 외 작은 잔재 픽셀(메인의 10% 미만 크기) 자동 제거"
-              >
-                <Eraser size={10} /> 잔재 제거
-              </button>
+            <div className="space-y-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
+              <div className="flex items-center gap-2">
+                <span className="text-text-primary">셀 #{selectedIdx}</span>
+                <span className="flex-1 text-text-muted/70">
+                  메인 콘텐츠에서 떨어진 잔재를 제거합니다.
+                </span>
+                <button
+                  onClick={cleanSelectedCell}
+                  className="flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
+                  title={`메인의 ${cleanSizePct}% 미만 + bbox 여백 ${cleanMarginPct}% 밖 잔재 제거`}
+                >
+                  <Eraser size={10} /> 잔재 제거
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-text-muted" title="이 비율보다 작은 덩어리만 제거 대상. 클수록 더 큰 잔재까지 제거">
+                  크기 &lt; {cleanSizePct}%
+                </span>
+                <input
+                  type="range" min={1} max={50} value={cleanSizePct}
+                  onChange={e => setCleanSizePct(Number(e.target.value))}
+                  className="flex-1 accent-[color:var(--accent)]"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-20 shrink-0 text-text-muted" title="캐릭터 bbox 둘레 보호 여백. 줄일수록 캐릭터 가까운 잔재까지 제거(자기 디테일도 지워질 위험↑)">
+                  여백 {cleanMarginPct}%
+                </span>
+                <input
+                  type="range" min={0} max={25} value={cleanMarginPct}
+                  onChange={e => setCleanMarginPct(Number(e.target.value))}
+                  className="flex-1 accent-[color:var(--accent)]"
+                />
+              </div>
             </div>
           )}
           {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
