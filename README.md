@@ -1,4 +1,4 @@
-# image-generator
+# SpriteForge
 
 개인용 게임 에셋 이미지 생성기. Codex CLI 의 imagegen 스킬을 백엔드로, Claude Code CLI 를 오케스트레이션으로 사용하는 ChatGPT 스타일 단일 채팅 UI.
 
