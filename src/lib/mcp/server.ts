@@ -314,7 +314,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           `Place exactly one animation frame per cell, filling every cell. ` +
           `CRITICAL framing rules: ` +
-          `(1) Draw each character at approximately 60% of cell size, centered within its cell, leaving ~20% padding on every side; NEVER let any pixel of the character cross into a neighboring cell. ` +
+          `(1) Each character must be fully contained within its own cell — never let any pixel cross into a neighboring cell. ` +
           `(2) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
           `(3) feet always on the same ground line across all frames; ` +
           `(4) same character scale and height in every frame — no shrinking or growing; ` +
@@ -335,8 +335,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // ── 후처리 파이프라인 ──────────────────────────────────────────────
         // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
         // 2) wantsTransparent: #00ff00 chroma-key → alpha 0 변환
-        // 3) 각 셀의 콘텐츠 bbox 를 inner 60% 영역에 맞춰 스케일+센터링 — 모델이
-        //    셀 밖으로 그림을 빠뜨려도 강제로 가둠.
         const genId: string | undefined = mcpResult?.structuredContent?.generationId;
         if (genId) {
           const filePath = imagePathFor(genId);
@@ -353,9 +351,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               await chromaKeyGreenFile(filePath);
               log(`make_spritesheet chroma-keyed gen=${genId}`);
             }
-
-            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
-            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols})`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
