@@ -129,6 +129,17 @@ function buildNaturalPrompt(job: ImageJob): string {
       //   inputCount === 1 → [0] = 그리드 템플릿
       // Codex 는 image[0] 을 primary 로 인식 → 그리드를 먼저 넣어 캔버스 구조를 강제.
       const inputCount = job.inputImagePaths?.length ?? 0;
+      const seamlessLoop = job.params?.seamlessLoop === true;
+
+      // 루프 사이클 규칙 — seamlessLoop=true 일 때만 삽입.
+      // "Frame N 직후 Frame 1이 재생"되므로 두 프레임이 인접해야 한다는 관점으로 지시.
+      const loopRule = seamlessLoop
+        ? `INFINITE LOOP DESIGN: These frames loop forever as [1→2→…→N→1→2→…]. ` +
+          `Frame N plays immediately before Frame 1 — design a closed cycle with no visible start or end. ` +
+          `Walk/run: Frame N's foot position is the natural step just before Frame 1's foot position resumes. ` +
+          `Idle: Frame N is a mid-breath moment that flows directly into Frame 1. ` +
+          `NEVER a linear arc. ALWAYS a cycle. `
+        : "";
 
       if (inputCount >= 2) {
         // [0] 그리드 템플릿, [1] 참조 캐릭터
@@ -144,7 +155,8 @@ function buildNaturalPrompt(job: ImageJob): string {
           `Task: ${job.prompt}\n\n` +
           `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
           `Each frame contains the reference character (image 2) performing a different step of the animation. ` +
-          `Each character must be fully contained within its own cell.`
+          `Each character must be fully contained within its own cell. ` +
+          loopRule
         );
       }
       if (inputCount === 1) {
@@ -155,14 +167,16 @@ function buildNaturalPrompt(job: ImageJob): string {
           `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
           `Task: ${job.prompt}\n` +
           `Draw one sequential animation frame inside each cell of the grid. ` +
-          `Each character must be fully contained within its own cell.`
+          `Each character must be fully contained within its own cell. ` +
+          loopRule
         );
       }
       // 그리드 템플릿 없음 (fallback)
       return (
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
-        `Uniform cell size, evenly spaced grid, one animation frame per cell.`
+        `Uniform cell size, evenly spaced grid, one animation frame per cell. ` +
+        loopRule
       );
     }
   }
