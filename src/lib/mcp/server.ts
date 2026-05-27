@@ -770,8 +770,25 @@ async function normalizeSpritesheetCells(
         .png()
         .toBuffer();
 
+      // 7. 발 라인 추정 — 메인 컴포넌트 y 좌표의 95th percentile.
+      //    캐릭터 발 아래 짧은 이펙트(파란 화염 등)가 메인의 일부여도, 픽셀 수가
+      //    캐릭터 본체보다 적으면 percentile 은 발 근처에 수렴.
+      //    union bbox bottom (가장 아래 픽셀) 으로 정렬하면 이펙트 길이가 셀마다
+      //    달라질 때 캐릭터 발 위치가 흔들리는 드리프트가 생김.
+      const mainYs: number[] = [];
+      for (let i = 0; i < cellN; i++) {
+        if (labels[i] !== mainLabel) continue;
+        mainYs.push(Math.floor(i / cellW));
+      }
+      mainYs.sort((a, b) => a - b);
+      const footY = mainYs[Math.min(mainYs.length - 1, Math.floor(mainYs.length * 0.95))];
+
+      // 발 라인을 셀 하단 paddingBottom 위에 맞춤. layer 가 셀 경계를 벗어나면 클램프.
+      const targetFootY = cellH - paddingBottom - 1;
+      const layerFootY = footY - bMinY;
+      const desiredTop = Math.round(targetFootY - layerFootY);
       const left = cellX0 + Math.round((cellW - bbW) / 2);
-      const top = cellY0 + Math.max(0, cellH - bbH - paddingBottom);
+      const top = cellY0 + Math.max(0, Math.min(cellH - bbH, desiredTop));
       layers.push({ input: layerPng, top, left });
     }
   }
