@@ -321,15 +321,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `(5) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
+        // 이미지 순서: 그리드 템플릿(index 0) → 참조 캐릭터(index 1, 있을 때만).
+        // Codex 는 image[0] 을 primary 로 인식하므로 그리드를 먼저 넣어
+        // "이 캔버스의 각 셀을 채워라" 의도를 강하게 전달.
+        // 참조 캐릭터가 있을 때 image[1] 로 넣어 스타일 힌트를 준다.
+        const refGen = refId ? getGeneration(refId) : null;
+        const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
+        const overrideInputPaths = refPath
+          ? [gridTemplatePath, refPath]   // [grid, ref]
+          : [gridTemplatePath];            // [grid only]
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpResult = await runImageTool({
           name,
           kind: "spritesheet",
           prompt: decorated,
-          // 참조 이미지가 있으면 Codex 입력으로 전달 → 캐릭터 스타일 일관성 강화.
-          // extraInputPaths 의 그리드 템플릿은 그 뒤에 추가된다.
-          inputGenerationIds: refId ? [refId] : [],
-          extraInputPaths: [gridTemplatePath],
+          inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
+          overrideInputPaths,                         // Codex 실제 입력 순서 제어
           sessionId,
         }) as any;
         // ── 후처리 파이프라인 ──────────────────────────────────────────────
@@ -668,20 +676,28 @@ async function runImageTool(spec: {
   prompt: string;
   inputGenerationIds: string[];
   extraInputPaths?: string[];
+  /** Codex 에 실제로 전달할 이미지 경로 순서를 완전히 override.
+   *  설정하면 inputGenerationIds + extraInputPaths 자동 조합을 무시. */
+  overrideInputPaths?: string[];
   sessionId: string | null;
 }) {
-  const { name, kind, prompt, inputGenerationIds, extraInputPaths, sessionId } = spec;
+  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, sessionId } = spec;
 
-  // inputGenerationId → 실제 PNG 경로로 해석
-  const inputImagePaths: string[] = [];
-  for (const gid of inputGenerationIds) {
-    const g = getGeneration(gid);
-    if (!g) throw new Error(`generation not found: ${gid}`);
-    inputImagePaths.push(path.join(DATA_DIR, g.image_path));
-  }
-  // 그리드 템플릿 등 추가 입력 경로 (generation DB 불필요)
-  if (extraInputPaths?.length) {
-    inputImagePaths.push(...extraInputPaths);
+  // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
+  // 없으면 inputGenerationIds → 경로 변환 후 extraInputPaths 를 뒤에 추가.
+  let inputImagePaths: string[];
+  if (overrideInputPaths) {
+    inputImagePaths = overrideInputPaths;
+  } else {
+    inputImagePaths = [];
+    for (const gid of inputGenerationIds) {
+      const g = getGeneration(gid);
+      if (!g) throw new Error(`generation not found: ${gid}`);
+      inputImagePaths.push(path.join(DATA_DIR, g.image_path));
+    }
+    if (extraInputPaths?.length) {
+      inputImagePaths.push(...extraInputPaths);
+    }
   }
 
   const generationId = newGenerationId();

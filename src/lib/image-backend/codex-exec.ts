@@ -124,40 +124,45 @@ function buildNaturalPrompt(job: ImageJob): string {
         `the post-processing pipeline will key out the green. ${job.prompt}`
       );
     case "spritesheet": {
-      // 배경 처리는 server.ts 의 decorated 프롬프트가 이미 chroma-key/흰 배경을
-      // 명시했으므로 여기서는 중복 지시하지 않음. 패딩도 server.ts decorated 에
-      // 강하게 명시되어 있고, 후처리(normalizeSpritesheetCells)가 픽셀 단위로
-      // 강제하므로 텍스트 중복은 제거.
+      // 이미지 첨부 순서 (server.ts overrideInputPaths 기준):
+      //   inputCount >= 2 → [0] = 그리드 템플릿, [1] = 참조 캐릭터
+      //   inputCount === 1 → [0] = 그리드 템플릿
+      // Codex 는 image[0] 을 primary 로 인식 → 그리드를 먼저 넣어 캔버스 구조를 강제.
       const inputCount = job.inputImagePaths?.length ?? 0;
 
       if (inputCount >= 2) {
-        // inputImagePaths[0] = 참조 캐릭터 이미지, [1] = 그리드 템플릿
+        // [0] 그리드 템플릿, [1] 참조 캐릭터
         return (
           PROMPT_HEADER +
           `I am attaching TWO images:\n` +
-          `(1) REFERENCE CHARACTER IMAGE — carefully analyze this character's exact visual style, ` +
-          `colors, outfit, proportions, and design details. Reproduce this exact character in every frame.\n` +
-          `(2) GRID TEMPLATE — a blank canvas with thin gray cell lines showing the exact empty cell layout.\n\n` +
+          `(1) GRID TEMPLATE — this is the OUTPUT CANVAS. ` +
+          `It shows a blank ${job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M"} grid with thin gray cell lines. ` +
+          `Your output PNG must have EXACTLY the same pixel dimensions as this template, ` +
+          `with one sequential animation frame drawn inside each cell.\n` +
+          `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
+          `and proportions in every frame. Only the pose/action changes between frames.\n\n` +
           `Task: ${job.prompt}\n\n` +
-          `Output a PNG with EXACTLY the same pixel dimensions as the grid template (image 2). ` +
-          `Fill every cell with exactly one sequential animation frame. ` +
-          `The character in every frame must faithfully match the visual style of the reference (image 1).`
+          `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
+          `Each frame contains the reference character (image 2) performing a different step of the animation. ` +
+          `Each character must be fully contained within its own cell.`
         );
       }
       if (inputCount === 1) {
-        // inputImagePaths[0] = 그리드 템플릿만
+        // [0] 그리드 템플릿만
         return (
           PROMPT_HEADER +
-          `The attached image is a GRID TEMPLATE — a blank canvas with thin gray cell lines showing the exact empty cell layout. ` +
-          `Generate a sprite sheet to fill this template: ${job.prompt}\n` +
-          `Output a PNG with EXACTLY the same pixel dimensions as the template. ` +
-          `Fill every cell of the grid with exactly one sequential animation frame.`
+          `The attached image is the OUTPUT CANVAS — a blank grid with thin gray cell lines. ` +
+          `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
+          `Task: ${job.prompt}\n` +
+          `Draw one sequential animation frame inside each cell of the grid. ` +
+          `Each character must be fully contained within its own cell.`
         );
       }
+      // 그리드 템플릿 없음 (fallback)
       return (
         PROMPT_HEADER +
-        `Generate a single PNG containing a sprite sheet of: ${job.prompt}. ` +
-        `Uniform cell size, evenly spaced grid.`
+        `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
+        `Uniform cell size, evenly spaced grid, one animation frame per cell.`
       );
     }
   }
