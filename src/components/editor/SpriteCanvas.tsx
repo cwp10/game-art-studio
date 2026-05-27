@@ -267,16 +267,61 @@ export function SpriteCanvas({
 
     if (sizes.length <= 2) return; // 컴포넌트 1개 이하 → 잔재 없음
 
+    // 가장 큰 컴포넌트 = 메인 콘텐츠
     let maxSize = 0;
+    let mainLabel = 0;
     for (let l = 1; l < sizes.length; l++) {
-      if (sizes[l] > maxSize) maxSize = sizes[l];
+      if (sizes[l] > maxSize) {
+        maxSize = sizes[l];
+        mainLabel = l;
+      }
     }
+
+    // 메인 컴포넌트의 bounding box + 5% margin
+    // → 메인 영역 주변의 작은 디테일(불꽃 튀기 등)은 보존, 멀리 떨어진 침범 픽셀만 제거
+    let minX = W, minY = H, maxX = -1, maxY = -1;
+    for (let i = 0; i < N; i++) {
+      if (labels[i] !== mainLabel) continue;
+      const x = i % W;
+      const y = (i - x) / W;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    const margin = Math.round(Math.min(W, H) * 0.05);
+    const exMinX = Math.max(0, minX - margin);
+    const exMinY = Math.max(0, minY - margin);
+    const exMaxX = Math.min(W - 1, maxX + margin);
+    const exMaxY = Math.min(H - 1, maxY + margin);
+
+    // 각 컴포넌트의 centroid (중심점) — 컴포넌트가 메인 영역 안인지 밖인지 결정
+    const cxSum = new Float64Array(sizes.length);
+    const cySum = new Float64Array(sizes.length);
+    for (let i = 0; i < N; i++) {
+      const l = labels[i];
+      if (l === 0) continue;
+      const x = i % W;
+      const y = (i - x) / W;
+      cxSum[l] += x;
+      cySum[l] += y;
+    }
+
+    // 작은 컴포넌트(메인의 10% 미만) 중 centroid 가 메인 bbox+margin 밖인 것만 제거
     const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
+    const remove = new Uint8Array(sizes.length);
+    for (let l = 1; l < sizes.length; l++) {
+      if (l === mainLabel || sizes[l] >= minKeep) continue;
+      const cx = cxSum[l] / sizes[l];
+      const cy = cySum[l] / sizes[l];
+      if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) {
+        remove[l] = 1;
+      }
+    }
 
     let removed = 0;
     for (let i = 0; i < N; i++) {
-      const l = labels[i];
-      if (l > 0 && sizes[l] < minKeep) {
+      if (remove[labels[i]] === 1) {
         d[i * 4 + 3] = 0;
         removed++;
       }
