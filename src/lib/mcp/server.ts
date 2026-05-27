@@ -333,12 +333,14 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           `Place exactly one animation frame per cell, filling every cell. ` +
-          `CRITICAL framing rules: ` +
-          `(1) Each character must be fully contained within its own cell — never let any pixel cross into a neighboring cell. ` +
-          `(2) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
-          `(3) feet always on the same ground line across all frames; ` +
-          `(4) same character scale and height in every frame — no shrinking or growing; ` +
-          `(5) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
+          `CRITICAL framing rules (apply to EVERY cell): ` +
+          `(1) The ENTIRE frame content — the character AND all spell effects, magic, auras, particles, projectiles, weapons, and flowing capes/robes — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
+          `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
+          `(3) If a spell or effect would be large, SCALE IT DOWN so it stays inside the cell — never let an effect sprawl across cell boundaries. An effect belongs to the SAME cell as the character casting it. ` +
+          `(4) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
+          `(5) feet always on the same ground line across all frames; ` +
+          `(6) same character scale and height in every frame — no shrinking or growing; ` +
+          `(7) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
