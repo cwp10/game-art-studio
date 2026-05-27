@@ -136,20 +136,11 @@ export function SpriteCanvas({
     });
   }, [frames, offsets, cellW, cellH, dragPad]);
 
-  // 내보내기용 — 패딩 캔버스를 원본 cellW×cellH 로 센터 크롭.
-  // GIF/zip 은 이 exportFrames 를 사용.
-  const exportFrames = useMemo(() => {
-    return adjustedFrames.map(f => {
-      if (f.width === cellW && f.height === cellH) return f; // 패딩 없는 fallback 프레임
-      const c = document.createElement("canvas");
-      c.width = cellW;
-      c.height = cellH;
-      const ctx = c.getContext("2d");
-      if (!ctx) return c;
-      ctx.drawImage(f, dragPad, dragPad, cellW, cellH, 0, 0, cellW, cellH);
-      return c;
-    });
-  }, [adjustedFrames, cellW, cellH, dragPad]);
+  // 내보내기 = 패딩 캔버스(cellW+2*dragPad × cellH+2*dragPad) 그대로.
+  // 드래그로 원본 셀 경계 밖으로 빠진 픽셀도 잘리지 않음.
+  const exportFrames = adjustedFrames;
+  const exportW = cellW + 2 * dragPad;
+  const exportH = cellH + 2 * dragPad;
 
   // GIF 는 항상 순방향 — AI 가 seamlessLoop 로 설계한 사이클을 그대로 재생
   const gifFrames = exportFrames;
@@ -220,8 +211,8 @@ export function SpriteCanvas({
           workers: 2,
           workerScript: "/gif.worker.js",
           quality: 10,
-          width: cellW,
-          height: cellH,
+          width: exportW,
+          height: exportH,
           transparent: 0x000000 as unknown as string,
         });
         const delay = Math.max(20, Math.round(1000 / fps));
@@ -246,7 +237,7 @@ export function SpriteCanvas({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [gifFrames, fps, cellW, cellH]);
+  }, [gifFrames, fps, exportW, exportH]);
 
   useEffect(() => () => { if (gifUrl) URL.revokeObjectURL(gifUrl); }, [gifUrl]);
 
@@ -332,7 +323,7 @@ export function SpriteCanvas({
                 className="h-7 w-14 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
               />
             </label>
-            <span className="text-text-muted/70">셀 {cellW}×{cellH} · {frameCount}프레임</span>
+            <span className="text-text-muted/70">셀 {cellW}×{cellH} · 출력 {exportW}×{exportH} · {frameCount}프레임</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="w-12 text-text-muted">순서</span>
@@ -391,7 +382,7 @@ export function SpriteCanvas({
             </div>
           </div>
           <p className="text-[11px] text-text-muted/60">
-            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 점선 사각형이 실제 출력 경계입니다 (±{dragPad}px 여유).
+            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
           </p>
           {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
           <div
