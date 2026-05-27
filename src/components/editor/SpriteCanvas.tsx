@@ -37,7 +37,6 @@ export function SpriteCanvas({
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const [chromaThreshold, setChromaThreshold] = useState(40);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
@@ -210,29 +209,84 @@ export function SpriteCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIdx]);
 
-  // 선택된 셀에 chroma-key 재처리 — 캔버스 픽셀을 in-place 수정
+  // 선택된 셀에서 인접 셀로부터 넘어온 작은 픽셀 덩어리(=잔재) 제거.
+  // connected components 분석으로 가장 큰 덩어리의 10% 미만 크기인 컴포넌트만 알파 0.
   function cleanSelectedCell() {
     if (selectedIdx === null) return;
     const frame = frames[selectedIdx];
     if (!frame) return;
     const ctx = frame.getContext("2d");
     if (!ctx) return;
-    const img = ctx.getImageData(0, 0, frame.width, frame.height);
+    const W = frame.width;
+    const H = frame.height;
+    const img = ctx.getImageData(0, 0, W, H);
     const d = img.data;
-    const t = chromaThreshold;
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i + 1], b = d[i + 2];
-      if (g > r + t && g > b + t && g > 100) {
-        d[i + 3] = 0;
-      } else if (d[i + 3] > 0 && g > r + 15 && g > b + 15) {
-        d[i + 1] = Math.max(r, b);
+    const N = W * H;
+
+    // alpha > 10 픽셀 마스크
+    const mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      if (d[i * 4 + 3] > 10) mask[i] = 1;
+    }
+
+    // 4-connectivity flood fill 로 컴포넌트 라벨링 + 크기 집계
+    const labels = new Int32Array(N);
+    const sizes: number[] = [0];
+    let next = 1;
+    const stack: number[] = [];
+    for (let start = 0; start < N; start++) {
+      if (mask[start] === 0 || labels[start] !== 0) continue;
+      labels[start] = next;
+      let size = 0;
+      stack.push(start);
+      while (stack.length > 0) {
+        const p = stack.pop()!;
+        size++;
+        const x = p % W;
+        const y = (p - x) / W;
+        if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
+          labels[p - 1] = next;
+          stack.push(p - 1);
+        }
+        if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
+          labels[p + 1] = next;
+          stack.push(p + 1);
+        }
+        if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
+          labels[p - W] = next;
+          stack.push(p - W);
+        }
+        if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
+          labels[p + W] = next;
+          stack.push(p + W);
+        }
+      }
+      sizes.push(size);
+      next++;
+    }
+
+    if (sizes.length <= 2) return; // 컴포넌트 1개 이하 → 잔재 없음
+
+    let maxSize = 0;
+    for (let l = 1; l < sizes.length; l++) {
+      if (sizes[l] > maxSize) maxSize = sizes[l];
+    }
+    const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
+
+    let removed = 0;
+    for (let i = 0; i < N; i++) {
+      const l = labels[i];
+      if (l > 0 && sizes[l] < minKeep) {
+        d[i * 4 + 3] = 0;
+        removed++;
       }
     }
+    if (removed === 0) return;
+
     ctx.putImageData(img, 0, 0);
-    // 새 캔버스 인스턴스로 교체해야 React가 변화 감지
     const clone = document.createElement("canvas");
-    clone.width = frame.width;
-    clone.height = frame.height;
+    clone.width = W;
+    clone.height = H;
     clone.getContext("2d")?.drawImage(frame, 0, 0);
     setFrames(prev => prev.map((f, i) => (i === selectedIdx ? clone : f)));
   }
@@ -453,20 +507,13 @@ export function SpriteCanvas({
           {selectedIdx !== null && (
             <div className="flex items-center gap-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
               <span className="text-text-primary">셀 #{selectedIdx}</span>
-              <span className="text-text-muted/60">잔재 임계값</span>
-              <input
-                type="range"
-                min={10}
-                max={80}
-                value={chromaThreshold}
-                onChange={e => setChromaThreshold(Number(e.target.value))}
-                className="flex-1 accent-[color:var(--accent)]"
-              />
-              <span className="w-6 text-right tabular-nums text-text-muted/80">{chromaThreshold}</span>
+              <span className="flex-1 text-text-muted/70">
+                인접 셀에서 넘어온 작은 픽셀 덩어리만 제거합니다.
+              </span>
               <button
                 onClick={cleanSelectedCell}
                 className="flex h-6 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
-                title="이 셀에 chroma-key 재처리 적용"
+                title="메인 콘텐츠 외 작은 잔재 픽셀(메인의 10% 미만 크기) 자동 제거"
               >
                 <Eraser size={10} /> 잔재 제거
               </button>
