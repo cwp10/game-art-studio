@@ -23,7 +23,13 @@ type Mode = "a" | "b" | "c";
 export type ReskinSubmit =
   | { mode: "a"; prompt: string }
   | { mode: "b"; prompt: string }
-  | { mode: "c"; styleReferenceId: string; extra: string };
+  | { mode: "c"; styleReferenceId: string; extra: string }
+  | {
+      /** 모드 b 정밀 — codex 없이 sharp 픽셀 색교체. 형태 100% 보존. */
+      mode: "b-precise";
+      mappings: Array<{ from: string; to: string }>;
+      includeGrays: boolean;
+    };
 
 type Props = {
   /** 리스킨 대상 generationId. */
@@ -66,6 +72,12 @@ export function ReskinPanel({
   const [refs, setRefs] = useState<Generation[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 모드 b 하위: "ai"=codex img2img(자연어), "precise"=sharp 픽셀 색교체(팔레트→타깃).
+  const [bMode, setBMode] = useState<"ai" | "precise">("ai");
+  const [palette, setPalette] = useState<string[] | null>(null);
+  const [targets, setTargets] = useState<Record<string, string>>({});
+  const [includeGrays, setIncludeGrays] = useState(false);
+  const [extracting, setExtracting] = useState(false);
 
   // 참조 전이 탭: 사용자가 외부 이미지를 업로드해 참조로 사용.
   async function handleUploadRef(file: File) {
@@ -101,16 +113,42 @@ export function ReskinPanel({
       .catch(() => setRefs([]));
   }, [mode, refs, sessionId, generationId]);
 
+  // 정밀 토글 진입 — 최초 1회 원본에서 주요 색 추출(클라이언트 canvas, 동일 출처라 taint 없음).
+  function enterPrecise() {
+    setBMode("precise");
+    if (palette !== null) return;
+    setExtracting(true);
+    extractPalette(imageUrl)
+      .then(cols => {
+        setPalette(cols);
+        setTargets(Object.fromEntries(cols.map(c => [c, c]))); // 기본 타깃 = 원본색(변경 없음)
+      })
+      .catch(() => setPalette([]))
+      .finally(() => setExtracting(false));
+  }
+
+  // 정밀 모드에서 실제로 바뀌는 매핑(타깃 ≠ 원본).
+  const preciseMappings = useMemo(
+    () =>
+      (palette ?? [])
+        .filter(c => (targets[c] ?? c).toLowerCase() !== c.toLowerCase())
+        .map(c => ({ from: c, to: targets[c]! })),
+    [palette, targets],
+  );
+
   const canSubmit = useMemo(() => {
-    if (mode === "a" || mode === "b") return prompt.trim().length > 0;
+    if (mode === "a") return prompt.trim().length > 0;
+    if (mode === "b") return bMode === "ai" ? prompt.trim().length > 0 : preciseMappings.length > 0;
     return styleRefId !== null;
-  }, [mode, prompt, styleRefId]);
+  }, [mode, bMode, prompt, preciseMappings, styleRefId]);
 
   function submit() {
     if (!canSubmit) return;
     if (mode === "a") onSubmit({ mode: "a", prompt: prompt.trim() });
-    else if (mode === "b") onSubmit({ mode: "b", prompt: prompt.trim() });
-    else if (styleRefId) onSubmit({ mode: "c", styleReferenceId: styleRefId, extra: extra.trim() });
+    else if (mode === "b") {
+      if (bMode === "ai") onSubmit({ mode: "b", prompt: prompt.trim() });
+      else onSubmit({ mode: "b-precise", mappings: preciseMappings, includeGrays });
+    } else if (styleRefId) onSubmit({ mode: "c", styleReferenceId: styleRefId, extra: extra.trim() });
   }
 
   const styleRefUrl = styleRefId ? `/api/images/${styleRefId}` : null;
@@ -186,19 +224,99 @@ export function ReskinPanel({
         )}
 
         {mode === "b" && (
-          <div className="shrink-0 space-y-1">
-            <label className="text-xs text-text-muted">원하는 색 팔레트</label>
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
-              rows={3}
-              className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
-            />
-            <p className="text-[11px] text-text-muted/70">형태·선은 그대로 두고 색 팔레트만 바꿉니다.</p>
-            <p className="text-[11px] text-[color:var(--danger)]/90">
-              ⚠ img2img 특성상 형태가 미세하게 틀어질 수 있어요.
-            </p>
+          <div className="shrink-0 space-y-2">
+            {/* AI(codex) vs 정밀(sharp) 하위 토글 */}
+            <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
+              {(["ai", "precise"] as const).map(bm => (
+                <button
+                  key={bm}
+                  onClick={() => (bm === "precise" ? enterPrecise() : setBMode("ai"))}
+                  className={`flex h-7 flex-1 items-center justify-center rounded border px-2 ${
+                    bMode === bm
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-transparent text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {bm === "ai" ? "AI 변경" : "정밀 (픽셀)"}
+                </button>
+              ))}
+            </div>
+
+            {bMode === "ai" ? (
+              <div className="space-y-1">
+                <label className="text-xs text-text-muted">원하는 색 팔레트</label>
+                <textarea
+                  value={prompt}
+                  onChange={e => setPrompt(e.target.value)}
+                  placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
+                  rows={3}
+                  className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
+                />
+                <p className="text-[11px] text-text-muted/70">형태·선은 그대로 두고 색 팔레트만 바꿉니다.</p>
+                <p className="text-[11px] text-[color:var(--danger)]/90">
+                  ⚠ img2img 특성상 형태가 미세하게 틀어질 수 있어요.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs text-text-muted">원본 색 → 바꿀 색</label>
+                {extracting && (
+                  <p className="flex items-center gap-1 text-[11px] text-text-muted/60">
+                    <Loader2 size={12} className="animate-spin" /> 팔레트 추출 중…
+                  </p>
+                )}
+                {!extracting && palette && palette.length === 0 && (
+                  <p className="text-[11px] text-text-muted/60">추출된 색이 없습니다(채도가 낮은 이미지).</p>
+                )}
+                {!extracting && palette && palette.length > 0 && (
+                  <div className="space-y-1.5">
+                    {palette.map(c => {
+                      const t = targets[c] ?? c;
+                      const changed = t.toLowerCase() !== c.toLowerCase();
+                      return (
+                        <div key={c} className="flex items-center gap-2 text-xs">
+                          <span
+                            className="h-6 w-6 shrink-0 rounded border border-border"
+                            style={{ background: c }}
+                          />
+                          <span className="w-16 font-mono text-text-muted">{c}</span>
+                          <span className="text-text-muted">→</span>
+                          <input
+                            type="color"
+                            value={t}
+                            onChange={e => setTargets(p => ({ ...p, [c]: e.target.value }))}
+                            className="h-6 w-9 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+                          />
+                          <span className="flex-1 font-mono text-text-muted/70">
+                            {changed ? t : "(변경 안 함)"}
+                          </span>
+                          {changed && (
+                            <button
+                              onClick={() => setTargets(p => ({ ...p, [c]: c }))}
+                              className="rounded px-1 text-[10px] text-text-muted hover:text-text-primary"
+                              title="원래 색으로"
+                            >
+                              초기화
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <label className="flex items-center gap-2 pt-1 text-[11px] text-text-muted">
+                      <input
+                        type="checkbox"
+                        checked={includeGrays}
+                        onChange={e => setIncludeGrays(e.target.checked)}
+                      />
+                      회색·흑백 영역도 포함 (기본: 외곽선 보호 위해 제외)
+                    </label>
+                  </div>
+                )}
+                <p className="text-[11px] text-text-muted/70">
+                  형태·음영을 100% 보존하고 색조만 교체합니다 (codex 미사용, 즉시 처리).
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -344,4 +462,58 @@ function detectSpriteGrid(width: number, height: number): { rows: number; cols: 
 
 function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b);
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = url;
+  });
+}
+
+/**
+ * 원본 이미지에서 주요 색(채도 있는) maxColors 개를 빈도순으로 추출.
+ * 작은 캔버스로 다운스케일 후 4-bit/채널 양자화 히스토그램 → 빈별 평균색.
+ * 저채도(회색·흑백)는 제외 — 정밀 색교체의 기본 대상이 chromatic 이므로.
+ */
+async function extractPalette(url: string, maxColors = 6): Promise<string[]> {
+  const img = await loadImage(url);
+  const W = Math.min(96, img.width || 96);
+  const H = Math.max(1, Math.round((img.height / Math.max(1, img.width)) * W));
+  const cvs = document.createElement("canvas");
+  cvs.width = W;
+  cvs.height = H;
+  const ctx = cvs.getContext("2d");
+  if (!ctx) return [];
+  ctx.drawImage(img, 0, 0, W, H);
+  const { data } = ctx.getImageData(0, 0, W, H);
+  const bins = new Map<string, { count: number; r: number; g: number; b: number }>();
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue; // 투명 제외
+    const r = data[i],
+      g = data[i + 1],
+      b = data[i + 2];
+    const mx = Math.max(r, g, b),
+      mn = Math.min(r, g, b);
+    const sat = mx === 0 ? 0 : (mx - mn) / mx;
+    if (sat < 0.15) continue; // 저채도 제외
+    const key = `${r >> 4}-${g >> 4}-${b >> 4}`;
+    const e = bins.get(key) ?? { count: 0, r: 0, g: 0, b: 0 };
+    e.count++;
+    e.r += r;
+    e.g += g;
+    e.b += b;
+    bins.set(key, e);
+  }
+  return [...bins.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, maxColors)
+    .map(e => rgbToHex(Math.round(e.r / e.count), Math.round(e.g / e.count), Math.round(e.b / e.count)));
 }

@@ -20,6 +20,7 @@ import {
   listMessages,
   listPresets,
   listSessions,
+  recolorImage,
   renameSession,
   streamChat,
   suggestPrompts,
@@ -471,10 +472,32 @@ export function ChatLayout() {
   //  - (b) "색 팔레트만 …로 바꿔줘. 형태는 그대로 유지." → paletteOnly 인식
   //  - (c) 첫=inputGenerationId, 둘째=styleReferenceId — route.ts 가 첨부 순서대로 [reference] 주입.
   const handleReskin = useCallback(
-    (payload: ReskinSubmit) => {
+    async (payload: ReskinSubmit) => {
       if (!editing || editing.mode !== "reskin") return;
       const genId = editing.generationId;
       setEditing(null);
+      if (payload.mode === "b-precise") {
+        // 결정적 색교체 — codex/Claude 우회, 전용 API 직접 호출 후 합성 결과 카드 삽입.
+        try {
+          const res = await recolorImage({
+            parentGenerationId: genId,
+            mappings: payload.mappings,
+            includeGrays: payload.includeGrays,
+          });
+          dispatch({
+            type: "add_result_card",
+            tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+            userText: "🎨 정밀 색교체",
+            generationId: res.generationId,
+            width: res.width,
+            height: res.height,
+            kind: "reskin",
+          });
+        } catch (e) {
+          console.error("[reskin-precise]", e);
+        }
+        return;
+      }
       if (payload.mode === "a") {
         handleSend(`이 이미지를 ${payload.prompt} 로 리스킨해줘.`, {
           attachmentGenerationIds: [genId],

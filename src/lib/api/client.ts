@@ -115,6 +115,27 @@ export async function uploadLayers(
   return out;
 }
 
+/**
+ * 결정적 색교체(리스킨 정밀 모드) — codex 없이 sharp 로 픽셀 단위 색 매핑.
+ * 형태 100% 보존. 결과는 kind='reskin' generation.
+ */
+export async function recolorImage(args: {
+  parentGenerationId: string;
+  mappings: Array<{ from: string; to: string; tolerance?: number }>;
+  includeGrays?: boolean;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await fetch("/api/reskin/recolor", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(`recolorImage failed: ${error ?? r.statusText}`);
+  }
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
 export type Suggestion = { label: string; body: string };
 
 /**

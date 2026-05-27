@@ -85,6 +85,17 @@ export type ChatAction =
       width: number;
       height: number;
     }
+  | {
+      /** 결정적 연산(정밀 색교체 등) 결과를 합성 assistant 카드로 chat 에 표시.
+       *  external_upload 과 동일하게 message_id 없는 generation 이라 재로드 시엔 라이브러리에만 남음. */
+      type: "add_result_card";
+      tempId: string;
+      userText: string;
+      generationId: string;
+      width: number;
+      height: number;
+      kind?: string;
+    }
   | { type: "suggestions_requested"; userTempId: string; suggestId: string; text: string }
   | { type: "suggestions_received"; suggestId: string; items: Array<{ label: string; body: string }> }
   | { type: "suggestions_failed"; suggestId: string; error: string }
@@ -362,6 +373,38 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                   imageUrl: `/api/images/${action.generationId}`,
                   width: action.width,
                   height: action.height,
+                },
+              },
+            ],
+          },
+        ],
+      };
+    }
+    case "add_result_card": {
+      // 결정적 연산 결과 → 합성 assistant turn (external_upload 과 동일 패턴).
+      const fakeToolCallId = "res-" + action.generationId;
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "user", id: action.tempId, text: action.userText },
+          {
+            kind: "assistant",
+            id: "res-msg-" + action.generationId,
+            finished: true,
+            toolCalls: [
+              {
+                toolCallId: fakeToolCallId,
+                name: "recolor_image",
+                args: {},
+                status: "succeeded",
+                progress: [{ stage: "done" }],
+                result: {
+                  generationId: action.generationId,
+                  imageUrl: `/api/images/${action.generationId}`,
+                  width: action.width,
+                  height: action.height,
+                  kind: action.kind,
                 },
               },
             ],
