@@ -20,7 +20,7 @@ export const runtime = "nodejs";
  *   { layers: [{ generationId, colorLabel, width, height }, ...] }
  */
 
-type LayerInput = { colorLabel?: string; dataUrl?: string };
+type LayerInput = { colorLabel?: string; name?: string; dataUrl?: string };
 type LayersBody = { parentGenerationId?: string; layers?: LayerInput[] };
 
 const PNG_PREFIX = "data:image/png;base64,";
@@ -53,8 +53,15 @@ export async function POST(req: NextRequest) {
   ensureDataDirs();
   await fs.mkdir(IMAGES_DIR, { recursive: true });
 
-  const out: Array<{ generationId: string; colorLabel: string; width: number; height: number }> = [];
+  const out: Array<{
+    generationId: string;
+    colorLabel: string;
+    name?: string;
+    width: number;
+    height: number;
+  }> = [];
   for (const l of body.layers) {
+    const name = l.name?.trim() || undefined;
     const buf = Buffer.from(l.dataUrl!.slice(PNG_PREFIX.length), "base64");
     if (buf.length === 0) {
       return Response.json({ error: `empty PNG body for ${l.colorLabel}` }, { status: 400 });
@@ -70,15 +77,15 @@ export async function POST(req: NextRequest) {
       session_id: parent.session_id,
       message_id: null,
       kind: "layer",
-      prompt: `layer:${l.colorLabel}`,
+      prompt: `layer:${name ?? l.colorLabel}`,
       input_image_ids: [parent.id],
-      params: { colorLabel: l.colorLabel },
+      params: { colorLabel: l.colorLabel, ...(name ? { name } : {}) },
       image_path: toRelative(destPath),
       width,
       height,
       backend: "external",
     });
-    out.push({ generationId: gen.id, colorLabel: l.colorLabel!, width, height });
+    out.push({ generationId: gen.id, colorLabel: l.colorLabel!, name, width, height });
   }
 
   return Response.json({ layers: out });

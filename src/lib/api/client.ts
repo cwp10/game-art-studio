@@ -82,8 +82,10 @@ export async function uploadImage(args: {
  */
 export async function uploadLayers(
   parentGenerationId: string,
-  layers: Array<{ colorLabel: string; dataUrl: string }>,
-): Promise<Array<{ generationId: string; colorLabel: string; width: number; height: number }>> {
+  layers: Array<{ colorLabel: string; name?: string; dataUrl: string }>,
+): Promise<
+  Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>
+> {
   const r = await fetch("/api/layers", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -94,7 +96,13 @@ export async function uploadLayers(
     throw new Error(`uploadLayers failed: ${error ?? r.statusText}`);
   }
   const { layers: out } = (await r.json()) as {
-    layers: Array<{ generationId: string; colorLabel: string; width: number; height: number }>;
+    layers: Array<{
+      generationId: string;
+      colorLabel: string;
+      name?: string;
+      width: number;
+      height: number;
+    }>;
   };
   return out;
 }

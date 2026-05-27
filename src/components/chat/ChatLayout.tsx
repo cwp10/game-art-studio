@@ -329,7 +329,7 @@ export function ChatLayout() {
       layers,
     }: {
       mode: "crop" | "inpaint";
-      layers: Array<{ colorLabel: string; dataUrl: string }>;
+      layers: Array<{ colorLabel: string; name: string; dataUrl: string }>;
     }) => {
       if (!editing || editing.mode !== "layer") return [];
       if (mode === "crop") {
@@ -338,10 +338,11 @@ export function ChatLayout() {
       const parentId = editing.generationId;
       setEditing(null); // 패널 닫고 chat 으로 시선 이동
       for (const layer of layers) {
+        const part = layer.name?.trim() || colorKo(layer.colorLabel);
         try {
           const maskId = await uploadMask(parentId, layer.dataUrl);
           await handleSend(
-            `${colorKo(layer.colorLabel)} 영역만 남기고 빨간색으로 표시된 다른 부위 영역을 원본의 자연스러운 연속(같은 색·질감)으로 복원해줘.`,
+            `${part} 영역만 남기고 빨간색으로 표시된 다른 부위 영역을 ${part}의 자연스러운 연속(같은 색·질감)으로 복원해줘.`,
             { attachmentGenerationIds: [parentId], maskGenerationId: maskId },
           );
         } catch (e) {

@@ -56,14 +56,21 @@ type Stroke = {
   points: { x: number; y: number }[];
 };
 
-type LayerResult = { generationId: string; colorLabel: string; width: number; height: number };
+type LayerResult = {
+  generationId: string;
+  colorLabel: string;
+  name?: string;
+  width: number;
+  height: number;
+};
 
 type SubmitMode = "crop" | "inpaint";
 type SubmitArgs = {
   mode: SubmitMode;
   /** crop: 원본 × binary mask 합성 PNG (alpha 보존).
-   *  inpaint: codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존). */
-  layers: Array<{ colorLabel: ColorKey; dataUrl: string }>;
+   *  inpaint: codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존).
+   *  name: 사용자가 입력한 부위명 (없으면 색 ko fallback). */
+  layers: Array<{ colorLabel: ColorKey; name: string; dataUrl: string }>;
 };
 
 type Props = {
@@ -99,12 +106,17 @@ export function LayerCanvas({
   const [color, setColor] = useState<ColorKey>("red");
   const [brushSize, setBrushSize] = useState(40);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  // 색별 사용자 부위 라벨. 비어있으면 export 시 ko fallback.
+  const [labels, setLabels] = useState<Record<ColorKey, string>>(
+    () => Object.fromEntries(COLOR_KEYS.map(k => [k, ""])) as Record<ColorKey, string>,
+  );
   const [mode, setMode] = useState<SubmitMode>("crop");
   const [phase, setPhase] = useState<"draw" | "result">("draw");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<LayerResult[]>([]);
   const drawingRef = useRef<Stroke | null>(null);
+  const recompRef = useRef<HTMLCanvasElement>(null);
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
@@ -174,6 +186,30 @@ export function LayerCanvas({
     }
   }, [strokes, displayW, displayH]);
 
+  // 3. 재합성 미리보기 — result phase 에서 모든 crop 레이어 PNG 를 순서대로 alpha 합성.
+  //    각 레이어가 원본 위치를 보존하므로 단순 겹쳐 그리면 원본 복원 여부를 육안 확인 가능.
+  useEffect(() => {
+    if (phase !== "result" || results.length === 0) return;
+    const c = recompRef.current;
+    if (!c) return;
+    c.width = imageWidth;
+    c.height = imageHeight;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, imageWidth, imageHeight);
+    let cancelled = false;
+    (async () => {
+      for (const r of results) {
+        const img = await loadImage(`/api/images/${r.generationId}`);
+        if (cancelled || !img) continue;
+        ctx.drawImage(img, 0, 0, imageWidth, imageHeight);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, results, imageWidth, imageHeight]);
+
   // ── pointer events ─────────────────────────────────────────────────────────
   const startStroke = useCallback(
     (x: number, y: number) => {
@@ -230,11 +266,16 @@ export function LayerCanvas({
     return maskC;
   }
 
+  // 색의 effective name — 사용자 라벨 trim, 없으면 ko fallback.
+  function nameOf(colorKey: ColorKey): string {
+    return labels[colorKey].trim() || COLORS[colorKey].ko;
+  }
+
   // crop 모드: 색별로 원본 × binary mask 합성 PNG (alpha 보존).
-  function exportCropLayers(): Array<{ colorLabel: ColorKey; dataUrl: string }> {
+  function exportCropLayers(): Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> {
     const img = imgRef.current;
     if (!img) return [];
-    const out: Array<{ colorLabel: ColorKey; dataUrl: string }> = [];
+    const out: Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> = [];
     for (const colorKey of COLOR_KEYS) {
       const maskC = buildColorMask(colorKey);
       if (!maskC) continue;
@@ -246,7 +287,7 @@ export function LayerCanvas({
       octx.drawImage(img, 0, 0, imageWidth, imageHeight);
       octx.globalCompositeOperation = "destination-in";
       octx.drawImage(maskC, 0, 0);
-      out.push({ colorLabel: colorKey, dataUrl: outC.toDataURL("image/png") });
+      out.push({ colorLabel: colorKey, name: nameOf(colorKey), dataUrl: outC.toDataURL("image/png") });
     }
     return out;
   }
@@ -254,8 +295,8 @@ export function LayerCanvas({
   // inpaint 모드: 색별로 codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존).
   // 복원 영역 = "다른 색으로 칠해진 모든 곳" (= 그 부위를 가리는 다른 부위). 안 칠한 영역은
   // 검정 (보존) — 원본 그대로. 따라서 사용자가 모든 픽셀을 칠하지 않아도 부분 복원 가능.
-  function exportInpaintMasks(): Array<{ colorLabel: ColorKey; dataUrl: string }> {
-    const out: Array<{ colorLabel: ColorKey; dataUrl: string }> = [];
+  function exportInpaintMasks(): Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> {
+    const out: Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> = [];
     for (const colorKey of COLOR_KEYS) {
       const selfMask = buildColorMask(colorKey);
       if (!selfMask) continue;
@@ -294,12 +335,16 @@ export function LayerCanvas({
       rctx.globalCompositeOperation = "destination-out";
       rctx.drawImage(selfMask, 0, 0);
       fctx.drawImage(redC, 0, 0);
-      out.push({ colorLabel: colorKey, dataUrl: finalC.toDataURL("image/png") });
+      out.push({ colorLabel: colorKey, name: nameOf(colorKey), dataUrl: finalC.toDataURL("image/png") });
     }
     return out;
   }
 
   const hasStrokes = strokes.length > 0;
+  // 실제 brush stroke 가 있는 색만 — 라벨 입력 대상.
+  const paintedColors = COLOR_KEYS.filter(k =>
+    strokes.some(s => s.color === k && s.tool === "brush"),
+  );
 
   async function submit() {
     if (!hasStrokes || submitting || busy) return;
@@ -331,7 +376,10 @@ export function LayerCanvas({
   function downloadResult(r: LayerResult) {
     const a = document.createElement("a");
     a.href = `/api/images/${r.generationId}`;
-    a.download = `${r.generationId}.png`;
+    const base = (r.name ?? COLORS[r.colorLabel as ColorKey]?.ko ?? r.colorLabel)
+      .trim()
+      .replace(/[\\/:*?"<>|\s]+/g, "_");
+    a.download = `${base || r.colorLabel}.png`;
     a.click();
   }
 
@@ -436,6 +484,26 @@ export function LayerCanvas({
                   <Eraser size={12} /> 지우개
                 </button>
               </div>
+              {/* 칠해진 색에만 부위명 입력 — inpaint 복원 프롬프트·crop 결과 라벨에 반영. */}
+              {paintedColors.length > 0 && (
+                <div className="space-y-1">
+                  {paintedColors.map(k => (
+                    <div key={k} className="flex items-center gap-1.5">
+                      <span
+                        className="inline-block size-3 shrink-0 rounded-full"
+                        style={{ background: COLORS[k].hex }}
+                      />
+                      <input
+                        type="text"
+                        value={labels[k]}
+                        onChange={e => setLabels(prev => ({ ...prev, [k]: e.target.value }))}
+                        placeholder={`${COLORS[k].ko} 부위명 (예: 머리띠)`}
+                        className="h-6 flex-1 rounded border border-border bg-bg-app px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <span className="w-12 text-text-muted">크기</span>
                 <input
@@ -486,34 +554,49 @@ export function LayerCanvas({
             <p className="text-xs text-text-muted">
               {results.length}개 레이어가 생성되었습니다. 각 레이어는 결과 카드처럼 세션에도 저장돼요.
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              {results.map(r => {
+
+            {/* 재합성 미리보기 — 모든 레이어를 겹쳐 원본 복원 여부 확인. */}
+            <div className="shrink-0">
+              <p className="mb-1 text-[11px] font-medium text-text-muted">재합성 미리보기</p>
+              <canvas
+                ref={recompRef}
+                className="mx-auto block w-full max-w-[280px] rounded-lg border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]"
+                style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
+              />
+            </div>
+
+            {/* exploded 레이어 스택 — 각 레이어를 이름과 함께 세로로 분리 표시. */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium text-text-muted">레이어 ({results.length})</p>
+              {results.map((r, i) => {
                 const c = COLORS[r.colorLabel as ColorKey];
+                const name = r.name?.trim() || c?.ko || r.colorLabel;
                 return (
                   <div
                     key={r.generationId}
-                    className="overflow-hidden rounded-lg border border-border bg-bg-card"
+                    className="flex items-center gap-2 rounded-lg border border-border bg-bg-card p-2"
+                    style={{ marginLeft: i * 8 }}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`/api/images/${r.generationId}`}
-                      alt={r.colorLabel}
-                      className="block aspect-square w-full bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]"
+                      alt={name}
+                      className="size-14 shrink-0 rounded bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] object-contain"
                     />
-                    <div className="flex items-center gap-2 px-2 py-1.5 text-xs">
-                      <span
-                        className="inline-block size-3 shrink-0 rounded-full"
-                        style={{ background: c?.hex ?? "#888" }}
-                      />
-                      <span className="flex-1 text-text-muted">{c?.ko ?? r.colorLabel}</span>
-                      <button
-                        onClick={() => downloadResult(r)}
-                        className="rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                        title="PNG 다운로드"
-                      >
-                        <Download size={12} />
-                      </button>
-                    </div>
+                    <span
+                      className="inline-block size-3 shrink-0 rounded-full"
+                      style={{ background: c?.hex ?? "#888" }}
+                    />
+                    <span className="flex-1 truncate text-xs text-text-primary" title={name}>
+                      {name}
+                    </span>
+                    <button
+                      onClick={() => downloadResult(r)}
+                      className="rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="PNG 다운로드"
+                    >
+                      <Download size={12} />
+                    </button>
                   </div>
                 );
               })}
@@ -565,6 +648,17 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(m[2], 16);
   const b = parseInt(m[3], 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** src 를 로드해 HTMLImageElement 반환 (실패 시 null). 재합성 미리보기용. */
+function loadImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
 }
 
 /** mask 캔버스에 alpha > 0 픽셀이 하나라도 있는지. (전체 스캔 — 4MP 캔버스에 ~수십 ms) */
