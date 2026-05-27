@@ -369,10 +369,12 @@ export function SpriteCanvas({
           quality: 10,
           width: exportW,
           height: exportH,
-          transparent: 0x000000 as unknown as string,
+          // GIF 은 1비트 투명만 지원 → 스프라이트에 거의 없는 마젠타를 키 색으로.
+          // 검정(0x000000)을 키로 쓰면 어두운 스프라이트 내부가 투명 구멍이 된다.
+          transparent: 0xff00ff as unknown as string,
         });
         const delay = Math.max(20, Math.round(1000 / fps));
-        for (const f of gifFrames) gif.addFrame(f, { delay });
+        for (const f of gifFrames) gif.addFrame(toGifFrame(f), { delay });
         const blob: Blob = await new Promise((resolve, reject) => {
           gif.on("finished", (b: Blob) => resolve(b));
           gif.on("abort", () => reject(new Error("aborted")));
@@ -504,15 +506,6 @@ export function SpriteCanvas({
               <ArrowDown size={12} /> 세로
             </button>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="w-12 text-text-muted">FPS</span>
-            <input
-              type="range" min={1} max={30} value={fps}
-              onChange={e => setFps(Number(e.target.value))}
-              className="flex-1 accent-[color:var(--accent)]"
-            />
-            <span className="w-10 text-right tabular-nums text-text-muted/80">{fps}</span>
-          </div>
         </div>
 
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
@@ -630,6 +623,15 @@ export function SpriteCanvas({
             })}
           </div>
           <div className="flex items-center gap-2 pt-1">
+            <span className="w-12 text-text-muted">FPS</span>
+            <input
+              type="range" min={1} max={30} value={fps}
+              onChange={e => setFps(Number(e.target.value))}
+              className="flex-1 accent-[color:var(--accent)]"
+            />
+            <span className="w-10 text-right tabular-nums text-text-muted/80">{fps}</span>
+          </div>
+          <div className="flex items-center gap-2">
             <span className="text-text-muted">GIF</span>
             <div className="flex h-64 flex-1 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
               {gifBusy ? (
@@ -676,6 +678,31 @@ export function SpriteCanvas({
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+// GIF 투명 처리용 — 알파 채널을 마젠타(0xff00ff) 1비트 키로 변환.
+// 반투명 픽셀은 GIF 특성상 표현 불가하므로 임계값(128)으로 이진화한다.
+function toGifFrame(src: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = src.width;
+  c.height = src.height;
+  const ctx = c.getContext("2d");
+  if (!ctx) return src;
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) {
+      d[i] = 0xff;
+      d[i + 1] = 0x00;
+      d[i + 2] = 0xff;
+      d[i + 3] = 255;
+    } else {
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
 }
 
 function triggerDownload(blob: Blob, name: string): void {

@@ -381,6 +381,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               await chromaKeyGreenFile(filePath);
               log(`make_spritesheet chroma-keyed gen=${genId}`);
             }
+            // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 발 라인/가로
+            // 중심 정렬. 격자 경계를 넘어 그려진 캐릭터의 이탈·잔재를 후처리로 흡수한다.
+            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
+            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols})`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
@@ -558,9 +562,10 @@ async function generateGridTemplate(
 }
 
 /**
- * #00ff00 chroma-key 처리 (in-place). 2-pass:
- *   1. 명확한 키 픽셀 → alpha 0
- *   2. 잔여 그린 spill (anti-alias fringe) → 그린 채널을 max(r,b) 로 클램프해서 탈채도화
+ * #00ff00 chroma-key 처리 (in-place). greenness(= g - max(r,b)) 기반 feather:
+ *   - greenness 강함 → alpha 0 (완전 키)
+ *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
+ * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
  */
 async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const { data, info } = await sharp(filePath)
@@ -570,16 +575,18 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const ch = info.channels;
   for (let i = 0; i < data.length; i += ch) {
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    // Pass 1: 키 픽셀 (그린이 R/B 둘 다보다 확실히 큰 경우)
-    if (g > r + 40 && g > b + 40 && g > 100) {
+    const greenness = g - Math.max(r, b);
+    // 확실한 키 픽셀 → 완전 투명
+    if (greenness > 40 && g > 90) {
       data[i + 3] = 0;
       continue;
     }
-    // Pass 2: spill 제거 — 그린 톤이 살짝이라도 우세하면 g 채널을 max(r,b) 로 클램프.
-    // 화염/이펙트 가장자리의 미묘한 그린 틴트까지 제거. 캐릭터에 의도된 녹색이
-    // 있으면 같이 영향받지만 게임 캐릭터에서는 드물고, 잔재 제거 효과가 큼.
-    if (data[i + 3] > 0 && g > r + 5 && g > b + 5) {
+    // fringe — 탈채도 후 greenness(5~40)를 알파 감쇠(1→0)로 매핑.
+    // 캐릭터에 의도된 녹색이 있으면 같이 영향받지만 게임 캐릭터에서는 드물다.
+    if (data[i + 3] > 0 && greenness > 5) {
       data[i + 1] = Math.max(r, b);
+      const fade = 1 - Math.min(1, (greenness - 5) / 35);
+      data[i + 3] = Math.round(data[i + 3] * fade);
     }
   }
   const tmpPath = filePath + ".chroma.tmp";
