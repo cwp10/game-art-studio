@@ -48,6 +48,7 @@ export type ChatState = {
 export type ChatAction =
   | { type: "set_sessions"; sessions: Session[] }
   | { type: "set_active"; sessionId: string | null }
+  | { type: "rename_session"; id: string; title: string }
   | { type: "load_messages"; messages: Message[] }
   | { type: "user_send"; tempId: string; text: string }
   | { type: "set_generating"; generating: boolean }
@@ -161,6 +162,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "set_sessions":
       return { ...state, sessions: action.sessions };
+    case "rename_session":
+      return {
+        ...state,
+        sessions: state.sessions.map(s =>
+          s.id === action.id ? { ...s, title: action.title } : s,
+        ),
+      };
     case "set_active":
       return { ...state, activeSessionId: action.sessionId, items: [], generating: false };
     case "load_messages":

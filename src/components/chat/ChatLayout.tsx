@@ -19,6 +19,7 @@ import {
   listMessages,
   listPresets,
   listSessions,
+  renameSession,
   streamChat,
   suggestPrompts,
   uploadImage,
@@ -125,6 +126,18 @@ export function ChatLayout() {
     },
     [state.activeSessionId],
   );
+
+  // 세션 제목 변경 — 낙관적 업데이트 후 PATCH. 실패 시 listSessions 로 롤백/refresh.
+  const handleRename = useCallback(async (id: string, title: string) => {
+    dispatch({ type: "rename_session", id, title });
+    try {
+      await renameSession(id, title);
+    } catch (e) {
+      console.error("[rename-session]", e);
+      const next = await listSessions();
+      dispatch({ type: "set_sessions", sessions: next });
+    }
+  }, []);
 
   // 메시지 전송. attachmentGenerationIds / maskGenerationId 가 있으면 라우트가
   // user 메시지 본문에 [reference: <id>] / [mask: <id>] marker 로 prefix → Claude 가
@@ -478,6 +491,7 @@ export function ChatLayout() {
         onNew={handleNew}
         onSelect={handleSelect}
         onDelete={handleDelete}
+        onRename={handleRename}
         onOpenGallery={() => setGalleryOpen(true)}
       />
       {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.

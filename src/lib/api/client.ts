@@ -26,6 +26,14 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/sessions/${id}`, { method: "DELETE" });
 }
 
+export async function renameSession(id: string, title: string): Promise<void> {
+  await fetch(`/api/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+}
+
 export async function listMessages(sessionId: string, signal?: AbortSignal): Promise<Message[]> {
   const r = await fetch(`/api/sessions/${sessionId}/messages`, { signal });
   const { messages } = (await r.json()) as { messages: Message[] };

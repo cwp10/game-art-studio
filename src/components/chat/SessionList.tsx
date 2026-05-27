@@ -1,6 +1,7 @@
 "use client";
 
-import { Image as ImageIcon, MessageSquare, Plus, Search, Trash2 } from "lucide-react";
+import { Image as ImageIcon, MessageSquare, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useState } from "react";
 import type { Session } from "@/types/db";
 
 type Props = {
@@ -11,10 +12,24 @@ type Props = {
   onNew: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => void;
   onOpenGallery: () => void;
 };
 
-export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onOpenGallery }: Props) {
+export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onRename, onOpenGallery }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  function startEdit(s: Session) {
+    setEditingId(s.id);
+    setDraft(s.title || "");
+  }
+  function commitEdit(s: Session) {
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== s.title) onRename(s.id, trimmed);
+    setEditingId(null);
+  }
+
   return (
     <aside className="flex h-full w-[260px] flex-col border-r border-border bg-bg-panel/50">
       <div className="space-y-2 border-b border-border p-3">
@@ -48,6 +63,7 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
         <ul className="space-y-1">
           {sessions.map(s => {
             const active = s.id === activeId;
+            const editing = editingId === s.id;
             return (
               <li key={s.id}>
                 <div
@@ -55,22 +71,54 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
                     active ? "bg-bg-card text-text-primary" : "text-text-muted hover:bg-bg-card/60 hover:text-text-primary"
                   }`}
                 >
-                  <button
-                    onClick={() => onSelect(s.id)}
-                    className="flex flex-1 items-center gap-2 truncate text-left"
-                  >
-                    <MessageSquare size={12} className="shrink-0" />
-                    <span className="truncate">{s.title || "(제목 없음)"}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm(`"${s.title}" 세션을 삭제할까요?`)) onDelete(s.id);
-                    }}
-                    className="opacity-0 transition-opacity group-hover:opacity-100"
-                    title="삭제"
-                  >
-                    <Trash2 size={12} className="text-text-muted hover:text-[color:var(--danger)]" />
-                  </button>
+                  {editing ? (
+                    <input
+                      autoFocus
+                      value={draft}
+                      onChange={e => setDraft(e.target.value)}
+                      onFocus={e => e.target.select()}
+                      onBlur={() => commitEdit(s)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitEdit(s);
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setEditingId(null);
+                        }
+                      }}
+                      className="flex-1 rounded border border-[color:var(--accent)]/60 bg-bg-app px-1.5 py-0.5 text-sm text-text-primary focus:outline-none"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => onSelect(s.id)}
+                      onDoubleClick={() => startEdit(s)}
+                      className="flex flex-1 items-center gap-2 truncate text-left"
+                    >
+                      <MessageSquare size={12} className="shrink-0" />
+                      <span className="truncate">{s.title || "(제목 없음)"}</span>
+                    </button>
+                  )}
+                  {!editing && (
+                    <>
+                      <button
+                        onClick={() => startEdit(s)}
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        title="제목 수정"
+                      >
+                        <Pencil size={12} className="text-text-muted hover:text-text-primary" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`"${s.title}" 세션을 삭제할까요?`)) onDelete(s.id);
+                        }}
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        title="삭제"
+                      >
+                        <Trash2 size={12} className="text-text-muted hover:text-[color:var(--danger)]" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </li>
             );

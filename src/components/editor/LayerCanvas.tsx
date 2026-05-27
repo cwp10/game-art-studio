@@ -115,6 +115,10 @@ export function LayerCanvas({
   // 각 색 L 보다 앞에 있는 색들만 "가린다" 고 보고 그 union ∖ self 를 복원 영역으로 삼는다.
   const [zOrder, setZOrder] = useState<ColorKey[]>([]);
   const [mode, setMode] = useState<SubmitMode>("crop");
+  // crop 모드 전용 — 비투명 bbox 로 크롭해 분리 영역 크기로 저장. 켜면 원위치 정보를
+  // 잃어 result phase 의 재합성 미리보기를 생략한다 (제출 시점 값 보존).
+  const [trimToContent, setTrimToContent] = useState(false);
+  const [trimmedResult, setTrimmedResult] = useState(false);
   const [phase, setPhase] = useState<"draw" | "result">("draw");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -218,7 +222,7 @@ export function LayerCanvas({
   // 3. 재합성 미리보기 — result phase 에서 모든 crop 레이어 PNG 를 순서대로 alpha 합성.
   //    각 레이어가 원본 위치를 보존하므로 단순 겹쳐 그리면 원본 복원 여부를 육안 확인 가능.
   useEffect(() => {
-    if (phase !== "result" || results.length === 0) return;
+    if (phase !== "result" || results.length === 0 || trimmedResult) return;
     const c = recompRef.current;
     if (!c) return;
     c.width = imageWidth;
@@ -241,7 +245,7 @@ export function LayerCanvas({
     };
     // orderedResults 는 results+zOrder 파생 — 둘만 의존성으로 두면 충분.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, results, zOrder, imageWidth, imageHeight]);
+  }, [phase, results, zOrder, imageWidth, imageHeight, trimmedResult]);
 
   // ── pointer events ─────────────────────────────────────────────────────────
   const startStroke = useCallback(
@@ -340,7 +344,19 @@ export function LayerCanvas({
       octx.drawImage(img, 0, 0, imageWidth, imageHeight);
       octx.globalCompositeOperation = "destination-in";
       octx.drawImage(maskC, 0, 0);
-      out.push({ colorLabel: colorKey, name: nameOf(colorKey), dataUrl: outC.toDataURL("image/png") });
+      if (trimToContent) {
+        const box = contentBBox(octx, imageWidth, imageHeight);
+        if (!box) continue; // 비투명 픽셀 없음 — 스킵
+        const cropC = document.createElement("canvas");
+        cropC.width = box.w;
+        cropC.height = box.h;
+        const cctx = cropC.getContext("2d");
+        if (!cctx) continue;
+        cctx.drawImage(outC, box.x, box.y, box.w, box.h, 0, 0, box.w, box.h);
+        out.push({ colorLabel: colorKey, name: nameOf(colorKey), dataUrl: cropC.toDataURL("image/png") });
+      } else {
+        out.push({ colorLabel: colorKey, name: nameOf(colorKey), dataUrl: outC.toDataURL("image/png") });
+      }
     }
     return out;
   }
@@ -422,6 +438,7 @@ export function LayerCanvas({
       // inpaint 모드는 chat 으로 결과 흐름 — result phase 진입 안 함.
       if (mode === "crop") {
         setResults(res);
+        setTrimmedResult(trimToContent); // 제출 시점 값 보존 — result 렌더가 참조.
         setPhase("result");
       }
     } catch (e) {
@@ -652,6 +669,20 @@ export function LayerCanvas({
                     codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
                   </span>
                 </label>
+                {mode === "crop" && (
+                  <label className="mt-2 flex items-start gap-2 text-text-muted">
+                    <input
+                      type="checkbox"
+                      checked={trimToContent}
+                      onChange={e => setTrimToContent(e.target.checked)}
+                      className="mt-0.5 size-3.5 accent-[color:var(--accent)]"
+                    />
+                    <span className="flex-1 leading-tight">
+                      <span className="text-text-primary">✂️ 여백 잘라내기</span> — 분리 영역
+                      크기로 저장.
+                    </span>
+                  </label>
+                )}
               </div>
               {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
             </div>
@@ -662,15 +693,22 @@ export function LayerCanvas({
               {results.length}개 레이어가 생성되었습니다. 각 레이어는 결과 카드처럼 세션에도 저장돼요.
             </p>
 
-            {/* 재합성 미리보기 — 모든 레이어를 겹쳐 원본 복원 여부 확인. */}
-            <div className="shrink-0">
-              <p className="mb-1 text-[11px] font-medium text-text-muted">재합성 미리보기</p>
-              <canvas
-                ref={recompRef}
-                className="mx-auto block w-full max-w-[280px] rounded-lg border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]"
-                style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
-              />
-            </div>
+            {/* 재합성 미리보기 — 모든 레이어를 겹쳐 원본 복원 여부 확인.
+                여백을 잘라내 저장한 경우 원위치 정보가 없어 미리보기를 생략한다. */}
+            {trimmedResult ? (
+              <p className="shrink-0 rounded-lg border border-border bg-bg-card p-2 text-[11px] leading-tight text-text-muted">
+                여백을 잘라내 저장해 재합성 미리보기는 생략됩니다.
+              </p>
+            ) : (
+              <div className="shrink-0">
+                <p className="mb-1 text-[11px] font-medium text-text-muted">재합성 미리보기</p>
+                <canvas
+                  ref={recompRef}
+                  className="mx-auto block w-full max-w-[280px] rounded-lg border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]"
+                  style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
+                />
+              </div>
+            )}
 
             {/* exploded 레이어 스택 — 각 레이어를 이름과 함께 세로로 분리 표시. */}
             <div className="space-y-2">
@@ -775,4 +813,26 @@ function hasAnyPixel(ctx: CanvasRenderingContext2D, w: number, h: number): boole
     if (data[i] > 0) return true;
   }
   return false;
+}
+
+/** alpha > 0 픽셀의 bounding box (x/y/w/h). 비투명 픽셀이 없으면 null. */
+function contentBBox(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+): { x: number; y: number; w: number; h: number } | null {
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
