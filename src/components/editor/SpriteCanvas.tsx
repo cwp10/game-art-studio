@@ -44,7 +44,6 @@ export function SpriteCanvas({
     startY: number;
     origX: number;
     origY: number;
-    moved: boolean;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -162,31 +161,19 @@ export function SpriteCanvas({
     [adjustedFrames],
   );
 
-  // 드래그 — window 이벤트로 썸네일 밖에서도 추적
+  // 드래그 — window 이벤트로 썸네일 밖에서도 추적. 선택은 mouseDown 시점에 끝났음.
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: MouseEvent) => {
       const dx = e.clientX - dragging.startX;
       const dy = e.clientY - dragging.startY;
-      if (!dragging.moved && Math.abs(dx) + Math.abs(dy) >= 3) {
-        // 3px 이상 움직여야 드래그로 인정 (그 미만은 클릭으로 처리)
-        setDragging({ ...dragging, moved: true });
-      }
       setOffsets(prev =>
         prev.map((o, i) =>
           i === dragging.idx ? { x: dragging.origX + dx, y: dragging.origY + dy } : o,
         ),
       );
     };
-    const onUp = () => {
-      // 드래그가 아니라 단순 클릭이었으면 선택 토글 (오프셋은 그대로)
-      if (!dragging.moved) {
-        setSelectedIdx(prev => (prev === dragging.idx ? null : dragging.idx));
-      } else {
-        setSelectedIdx(dragging.idx);
-      }
-      setDragging(null);
-    };
+    const onUp = () => setDragging(null);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
@@ -513,7 +500,8 @@ export function SpriteCanvas({
                   style={{ aspectRatio: `${padW}/${padH}` }}
                   onMouseDown={e => {
                     e.preventDefault();
-                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y, moved: false });
+                    setSelectedIdx(i);
+                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
