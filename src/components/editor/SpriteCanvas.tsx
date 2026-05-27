@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, RefreshCw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
@@ -36,6 +36,7 @@ export function SpriteCanvas({
   const [gifError, setGifError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
@@ -150,7 +151,7 @@ export function SpriteCanvas({
     [adjustedFrames],
   );
 
-  // 드래그 — window 이벤트로 썸네일 밖에서도 추적
+  // 드래그 — window 이벤트로 썸네일 밖에서도 추적. 선택은 mouseDown 시점에 끝났음.
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: MouseEvent) => {
@@ -170,6 +171,161 @@ export function SpriteCanvas({
       window.removeEventListener("mouseup", onUp);
     };
   }, [dragging]);
+
+  // 키보드 — selectedIdx 가 있을 때 화살표 키로 위치 미세 조정
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      // 입력 필드 포커스 시 무시
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      let dx = 0, dy = 0;
+      if (e.key === "ArrowLeft") dx = -1;
+      else if (e.key === "ArrowRight") dx = 1;
+      else if (e.key === "ArrowUp") dy = -1;
+      else if (e.key === "ArrowDown") dy = 1;
+      else if (e.key === "Escape") {
+        setSelectedIdx(null);
+        return;
+      } else return;
+      const step = e.shiftKey ? 10 : 1;
+      e.preventDefault();
+      setOffsets(prev =>
+        prev.map((o, i) =>
+          i === selectedIdx ? { x: o.x + dx * step, y: o.y + dy * step } : o,
+        ),
+      );
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIdx]);
+
+  // 선택된 셀에서 인접 셀로부터 넘어온 작은 픽셀 덩어리(=잔재) 제거.
+  // connected components 분석으로 가장 큰 덩어리의 10% 미만 크기인 컴포넌트만 알파 0.
+  function cleanSelectedCell() {
+    if (selectedIdx === null) return;
+    const frame = frames[selectedIdx];
+    if (!frame) return;
+    const ctx = frame.getContext("2d");
+    if (!ctx) return;
+    const W = frame.width;
+    const H = frame.height;
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    const N = W * H;
+
+    // alpha > 10 픽셀 마스크
+    const mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      if (d[i * 4 + 3] > 10) mask[i] = 1;
+    }
+
+    // 4-connectivity flood fill 로 컴포넌트 라벨링 + 크기 집계
+    const labels = new Int32Array(N);
+    const sizes: number[] = [0];
+    let next = 1;
+    const stack: number[] = [];
+    for (let start = 0; start < N; start++) {
+      if (mask[start] === 0 || labels[start] !== 0) continue;
+      labels[start] = next;
+      let size = 0;
+      stack.push(start);
+      while (stack.length > 0) {
+        const p = stack.pop()!;
+        size++;
+        const x = p % W;
+        const y = (p - x) / W;
+        if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
+          labels[p - 1] = next;
+          stack.push(p - 1);
+        }
+        if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
+          labels[p + 1] = next;
+          stack.push(p + 1);
+        }
+        if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
+          labels[p - W] = next;
+          stack.push(p - W);
+        }
+        if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
+          labels[p + W] = next;
+          stack.push(p + W);
+        }
+      }
+      sizes.push(size);
+      next++;
+    }
+
+    if (sizes.length <= 2) return; // 컴포넌트 1개 이하 → 잔재 없음
+
+    // 가장 큰 컴포넌트 = 메인 콘텐츠
+    let maxSize = 0;
+    let mainLabel = 0;
+    for (let l = 1; l < sizes.length; l++) {
+      if (sizes[l] > maxSize) {
+        maxSize = sizes[l];
+        mainLabel = l;
+      }
+    }
+
+    // 메인 컴포넌트의 bounding box + 5% margin
+    // → 메인 영역 주변의 작은 디테일(불꽃 튀기 등)은 보존, 멀리 떨어진 침범 픽셀만 제거
+    let minX = W, minY = H, maxX = -1, maxY = -1;
+    for (let i = 0; i < N; i++) {
+      if (labels[i] !== mainLabel) continue;
+      const x = i % W;
+      const y = (i - x) / W;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    const margin = Math.round(Math.min(W, H) * 0.05);
+    const exMinX = Math.max(0, minX - margin);
+    const exMinY = Math.max(0, minY - margin);
+    const exMaxX = Math.min(W - 1, maxX + margin);
+    const exMaxY = Math.min(H - 1, maxY + margin);
+
+    // 각 컴포넌트의 centroid (중심점) — 컴포넌트가 메인 영역 안인지 밖인지 결정
+    const cxSum = new Float64Array(sizes.length);
+    const cySum = new Float64Array(sizes.length);
+    for (let i = 0; i < N; i++) {
+      const l = labels[i];
+      if (l === 0) continue;
+      const x = i % W;
+      const y = (i - x) / W;
+      cxSum[l] += x;
+      cySum[l] += y;
+    }
+
+    // 작은 컴포넌트(메인의 10% 미만) 중 centroid 가 메인 bbox+margin 밖인 것만 제거
+    const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
+    const remove = new Uint8Array(sizes.length);
+    for (let l = 1; l < sizes.length; l++) {
+      if (l === mainLabel || sizes[l] >= minKeep) continue;
+      const cx = cxSum[l] / sizes[l];
+      const cy = cySum[l] / sizes[l];
+      if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) {
+        remove[l] = 1;
+      }
+    }
+
+    let removed = 0;
+    for (let i = 0; i < N; i++) {
+      if (remove[labels[i]] === 1) {
+        d[i * 4 + 3] = 0;
+        removed++;
+      }
+    }
+    if (removed === 0) return;
+
+    ctx.putImageData(img, 0, 0);
+    const clone = document.createElement("canvas");
+    clone.width = W;
+    clone.height = H;
+    clone.getContext("2d")?.drawImage(frame, 0, 0);
+    setFrames(prev => prev.map((f, i) => (i === selectedIdx ? clone : f)));
+  }
 
   // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
   function autoAlign() {
@@ -382,8 +538,23 @@ export function SpriteCanvas({
             </div>
           </div>
           <p className="text-[11px] text-text-muted/60">
-            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
+            드래그 또는 클릭으로 셀 선택 후 화살표 키(Shift = 10px)로 미세 조정. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
           </p>
+          {selectedIdx !== null && (
+            <div className="flex items-center gap-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
+              <span className="text-text-primary">셀 #{selectedIdx}</span>
+              <span className="flex-1 text-text-muted/70">
+                인접 셀에서 넘어온 작은 픽셀 덩어리만 제거합니다.
+              </span>
+              <button
+                onClick={cleanSelectedCell}
+                className="flex h-6 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
+                title="메인 콘텐츠 외 작은 잔재 픽셀(메인의 10% 미만 크기) 자동 제거"
+              >
+                <Eraser size={10} /> 잔재 제거
+              </button>
+            </div>
+          )}
           {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
           <div
             className="grid gap-1"
@@ -402,12 +573,17 @@ export function SpriteCanvas({
               return (
                 <div
                   key={i}
-                  className={`relative rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
-                    dragging?.idx === i ? "cursor-grabbing ring-1 ring-[color:var(--accent)]" : "cursor-grab"
+                  className={`relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                    dragging?.idx === i
+                      ? "cursor-grabbing ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                      : selectedIdx === i
+                        ? "cursor-grab ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                        : "cursor-grab border-border"
                   }`}
                   style={{ aspectRatio: `${padW}/${padH}` }}
                   onMouseDown={e => {
                     e.preventDefault();
+                    setSelectedIdx(i);
                     setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
                   }}
                 >
