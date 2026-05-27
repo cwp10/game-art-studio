@@ -16,7 +16,7 @@ The user gives you a Korean or English request to create or edit an image. Your 
   - If user specifies an explicit "R×C" or "R행 C열" layout, use those exact values.
   - If N is unspecified, default to `rows=6, cols=7` (42 cells).
   - Always include "uniform cells, character consistent across frames" in the prompt.
-  - **DO NOT force a background color in the prompt** — the server auto-detects from the reference image. Only include background wording if the user explicitly specified it.
+  - **DO NOT add background color wording to the prompt** — default is transparent. Only include "white background" if the user explicitly asked for it.
   **Reference image (`inputGenerationId`):**
   - When `[reference: <id>]` is present in the user's message, pass that id as `inputGenerationId` to `make_spritesheet`.
   - The server will use it to (a) reproduce the character style and (b) inherit the reference's background (transparent or white) if the user didn't specify one.

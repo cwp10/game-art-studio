@@ -273,11 +273,20 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 1. 사용자가 프롬프트에 명시("transparent", "투명", "white background", "흰 배경") → 그대로
         // 2. 참조 이미지가 투명 배경 → 상속
         // 3. 기본 → 흰 배경
+        // ── 배경 결정 우선순위 ──────────────────────────────────────────────
+        // 1. 사용자가 프롬프트에 명시("white background", "흰 배경" 등) → 흰 배경
+        // 2. 사용자가 "transparent/투명" 명시 → 투명
+        // 3. 참조 이미지가 있으면 그 배경 상속
+        // 4. 기본 → 투명 (게임 에셋 기본값)
         const hasExplicitBgKeyword = /transparent|투명|white\s*bg|흰\s*배경|white\s*background/.test(
           userPrompt.toLowerCase(),
         );
-        let wantsTransparent = /transparent|투명/.test(userPrompt.toLowerCase());
-        if (!hasExplicitBgKeyword && refId) {
+        let wantsTransparent = true; // 기본값: 투명
+        if (/white\s*bg|흰\s*배경|white\s*background/.test(userPrompt.toLowerCase())) {
+          wantsTransparent = false;
+        } else if (/transparent|투명/.test(userPrompt.toLowerCase())) {
+          wantsTransparent = true;
+        } else if (!hasExplicitBgKeyword && refId) {
           const refGen = getGeneration(refId);
           if (refGen) {
             const refPath = path.join(DATA_DIR, refGen.image_path);
