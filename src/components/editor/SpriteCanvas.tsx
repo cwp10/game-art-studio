@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, RefreshCw, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
@@ -36,12 +36,15 @@ export function SpriteCanvas({
   const [gifError, setGifError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [chromaThreshold, setChromaThreshold] = useState(40);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
     startY: number;
     origX: number;
     origY: number;
+    moved: boolean;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -165,13 +168,25 @@ export function SpriteCanvas({
     const onMove = (e: MouseEvent) => {
       const dx = e.clientX - dragging.startX;
       const dy = e.clientY - dragging.startY;
+      if (!dragging.moved && Math.abs(dx) + Math.abs(dy) >= 3) {
+        // 3px 이상 움직여야 드래그로 인정 (그 미만은 클릭으로 처리)
+        setDragging({ ...dragging, moved: true });
+      }
       setOffsets(prev =>
         prev.map((o, i) =>
           i === dragging.idx ? { x: dragging.origX + dx, y: dragging.origY + dy } : o,
         ),
       );
     };
-    const onUp = () => setDragging(null);
+    const onUp = () => {
+      // 드래그가 아니라 단순 클릭이었으면 선택 토글 (오프셋은 그대로)
+      if (!dragging.moved) {
+        setSelectedIdx(prev => (prev === dragging.idx ? null : dragging.idx));
+      } else {
+        setSelectedIdx(dragging.idx);
+      }
+      setDragging(null);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => {
@@ -179,6 +194,61 @@ export function SpriteCanvas({
       window.removeEventListener("mouseup", onUp);
     };
   }, [dragging]);
+
+  // 키보드 — selectedIdx 가 있을 때 화살표 키로 위치 미세 조정
+  useEffect(() => {
+    if (selectedIdx === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      // 입력 필드 포커스 시 무시
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
+      let dx = 0, dy = 0;
+      if (e.key === "ArrowLeft") dx = -1;
+      else if (e.key === "ArrowRight") dx = 1;
+      else if (e.key === "ArrowUp") dy = -1;
+      else if (e.key === "ArrowDown") dy = 1;
+      else if (e.key === "Escape") {
+        setSelectedIdx(null);
+        return;
+      } else return;
+      const step = e.shiftKey ? 10 : 1;
+      e.preventDefault();
+      setOffsets(prev =>
+        prev.map((o, i) =>
+          i === selectedIdx ? { x: o.x + dx * step, y: o.y + dy * step } : o,
+        ),
+      );
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIdx]);
+
+  // 선택된 셀에 chroma-key 재처리 — 캔버스 픽셀을 in-place 수정
+  function cleanSelectedCell() {
+    if (selectedIdx === null) return;
+    const frame = frames[selectedIdx];
+    if (!frame) return;
+    const ctx = frame.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.getImageData(0, 0, frame.width, frame.height);
+    const d = img.data;
+    const t = chromaThreshold;
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      if (g > r + t && g > b + t && g > 100) {
+        d[i + 3] = 0;
+      } else if (d[i + 3] > 0 && g > r + 15 && g > b + 15) {
+        d[i + 1] = Math.max(r, b);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    // 새 캔버스 인스턴스로 교체해야 React가 변화 감지
+    const clone = document.createElement("canvas");
+    clone.width = frame.width;
+    clone.height = frame.height;
+    clone.getContext("2d")?.drawImage(frame, 0, 0);
+    setFrames(prev => prev.map((f, i) => (i === selectedIdx ? clone : f)));
+  }
 
   // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
   function autoAlign() {
@@ -391,8 +461,30 @@ export function SpriteCanvas({
             </div>
           </div>
           <p className="text-[11px] text-text-muted/60">
-            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 점선 사각형이 실제 출력 경계입니다 (±{dragPad}px 여유).
+            드래그 또는 클릭으로 셀 선택 후 화살표 키(Shift = 10px)로 미세 조정. 점선 사각형이 실제 출력 경계입니다 (±{dragPad}px 여유).
           </p>
+          {selectedIdx !== null && (
+            <div className="flex items-center gap-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
+              <span className="text-text-primary">셀 #{selectedIdx}</span>
+              <span className="text-text-muted/60">잔재 임계값</span>
+              <input
+                type="range"
+                min={10}
+                max={80}
+                value={chromaThreshold}
+                onChange={e => setChromaThreshold(Number(e.target.value))}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+              <span className="w-6 text-right tabular-nums text-text-muted/80">{chromaThreshold}</span>
+              <button
+                onClick={cleanSelectedCell}
+                className="flex h-6 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
+                title="이 셀에 chroma-key 재처리 적용"
+              >
+                <Eraser size={10} /> 잔재 제거
+              </button>
+            </div>
+          )}
           {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
           <div
             className="grid gap-1"
@@ -411,13 +503,17 @@ export function SpriteCanvas({
               return (
                 <div
                   key={i}
-                  className={`relative rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
-                    dragging?.idx === i ? "cursor-grabbing ring-1 ring-[color:var(--accent)]" : "cursor-grab"
+                  className={`relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                    dragging?.idx === i
+                      ? "cursor-grabbing ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                      : selectedIdx === i
+                        ? "cursor-grab ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                        : "cursor-grab border-border"
                   }`}
                   style={{ aspectRatio: `${padW}/${padH}` }}
                   onMouseDown={e => {
                     e.preventDefault();
-                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
+                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y, moved: false });
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
