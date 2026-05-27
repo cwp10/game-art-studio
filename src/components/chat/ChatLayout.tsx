@@ -8,6 +8,7 @@ import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
+import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { GallerySheet } from "@/components/library/GallerySheet";
 import { LogsPanel } from "@/components/library/LogsPanel";
@@ -47,6 +48,7 @@ type Editing =
   | ({ mode: "inpaint" } & EditTarget)
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
+  | ({ mode: "reskin" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -204,6 +206,7 @@ export function ChatLayout() {
         | "edit"
         | "layer_split"
         | "sprite_split"
+        | "reskin"
         | "reference",
       payload: {
         prompt?: string;
@@ -232,13 +235,22 @@ export function ChatLayout() {
           attachmentGenerationIds: [payload.generationId],
         });
       } else if (
-        (action === "edit" || action === "layer_split" || action === "sprite_split") &&
+        (action === "edit" ||
+          action === "layer_split" ||
+          action === "sprite_split" ||
+          action === "reskin") &&
         payload.generationId &&
         payload.width &&
         payload.height
       ) {
         const mode =
-          action === "edit" ? "inpaint" : action === "layer_split" ? "layer" : "sprite";
+          action === "edit"
+            ? "inpaint"
+            : action === "layer_split"
+              ? "layer"
+              : action === "sprite_split"
+                ? "sprite"
+                : "reskin";
         setEditing({
           mode,
           generationId: payload.generationId,
@@ -269,6 +281,34 @@ export function ChatLayout() {
           type: "sse",
           event: { type: "error", message: (e as Error).message },
         });
+      }
+    },
+    [editing, handleSend],
+  );
+
+  // ReskinPanel 이 submit 한 payload → 모드별 자연어 메시지 + attachments 로 handleSend.
+  // 자연어 문구·첨부 순서는 system-orchestrator.md 의 reskin_image 라우팅과 정합:
+  //  - (a) "…로 리스킨해줘"           → prompt 모드
+  //  - (b) "색 팔레트만 …로 바꿔줘. 형태는 그대로 유지." → paletteOnly 인식
+  //  - (c) 첫=inputGenerationId, 둘째=styleReferenceId — route.ts 가 첨부 순서대로 [reference] 주입.
+  const handleReskin = useCallback(
+    (payload: ReskinSubmit) => {
+      if (!editing || editing.mode !== "reskin") return;
+      const genId = editing.generationId;
+      setEditing(null);
+      if (payload.mode === "a") {
+        handleSend(`이 이미지를 ${payload.prompt} 로 리스킨해줘.`, {
+          attachmentGenerationIds: [genId],
+        });
+      } else if (payload.mode === "b") {
+        handleSend(`이 이미지의 색 팔레트만 ${payload.prompt} 로 바꿔줘. 형태는 그대로 유지.`, {
+          attachmentGenerationIds: [genId],
+        });
+      } else {
+        handleSend(
+          `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`,
+          { attachmentGenerationIds: [genId, payload.styleReferenceId] },
+        );
       }
     },
     [editing, handleSend],
@@ -526,6 +566,19 @@ export function ChatLayout() {
             imageWidth={editing.width}
             imageHeight={editing.height}
             onCancel={() => setEditing(null)}
+          />
+        </div>
+      )}
+      {editing?.mode === "reskin" && (
+        <div className="fixed inset-0 z-40">
+          <ReskinPanel
+            generationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            width={editing.width}
+            height={editing.height}
+            sessionId={state.activeSessionId}
+            onSubmit={handleReskin}
+            onClose={() => setEditing(null)}
           />
         </div>
       )}

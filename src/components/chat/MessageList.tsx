@@ -17,6 +17,7 @@ type Props = {
       | "edit"
       | "layer_split"
       | "sprite_split"
+      | "reskin"
       | "reference",
     payload: {
       prompt?: string;

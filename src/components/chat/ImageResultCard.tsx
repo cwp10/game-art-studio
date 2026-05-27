@@ -10,6 +10,7 @@ import {
   Link2,
   Loader2,
   Maximize2,
+  Palette,
   RotateCw,
   Scissors,
   X,
@@ -25,6 +26,7 @@ type Action =
   | "edit"
   | "layer_split"
   | "sprite_split"
+  | "reskin"
   | "reference";
 
 type Props = {
@@ -241,6 +243,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
               title="스프라이트 시트 분할 + GIF 미리보기 + 프레임 zip / GIF 다운로드"
             >
               <Film size={12} /> 스프라이트
+            </button>
+            <button
+              onClick={() => onAction?.("reskin")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경 / 참조 전이)"
+            >
+              <Palette size={12} /> 리스킨
             </button>
             <button
               onClick={() => onAction?.("reference")}
