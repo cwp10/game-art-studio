@@ -558,8 +558,9 @@ async function generateGridTemplate(
 }
 
 /**
- * #00ff00 chroma-key 픽셀을 알파 0 으로 치환 (in-place).
- * remove_bg 도구와 동일한 keying — anti-alias fringe 까지 잡으려고 넉넉한 threshold.
+ * #00ff00 chroma-key 처리 (in-place). 2-pass:
+ *   1. 명확한 키 픽셀 → alpha 0
+ *   2. 잔여 그린 spill (anti-alias fringe) → 그린 채널을 max(r,b) 로 클램프해서 탈채도화
  */
 async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const { data, info } = await sharp(filePath)
@@ -569,8 +570,14 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const ch = info.channels;
   for (let i = 0; i < data.length; i += ch) {
     const r = data[i], g = data[i + 1], b = data[i + 2];
-    if (r < 80 && g > 180 && b < 80) {
+    // Pass 1: 키 픽셀 (그린이 R/B 둘 다보다 확실히 큰 경우)
+    if (g > r + 40 && g > b + 40 && g > 100) {
       data[i + 3] = 0;
+      continue;
+    }
+    // Pass 2: spill 제거 — 그린 톤만 살짝 우세한 경계 픽셀에서 g 채널을 desaturate
+    if (data[i + 3] > 0 && g > r + 15 && g > b + 15) {
+      data[i + 1] = Math.max(r, b);
     }
   }
   const tmpPath = filePath + ".chroma.tmp";
@@ -585,16 +592,15 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
 /**
  * 스프라이트 시트의 각 셀에 대해:
  *   1. 셀 내부 콘텐츠의 bounding box 를 탐지
- *   2. inner safe-zone (셀 사방 20% 인셋, 60% 면적) 에 맞춰 균등 스케일다운
- *   3. 셀 중앙에 재배치
- * → 모델이 셀 밖으로 그림을 빠뜨리거나 패딩을 무시해도 후처리로 강제 정렬.
+ *   2. 원본 크기 그대로 (축소 없음) 셀 하단 기준선에 정렬 (bottom-align, 가로는 중앙)
+ * → 모든 셀의 캐릭터 발 위치가 동일한 y 라인에 오도록 강제.
+ *
+ * 축소를 하지 않으므로 큰 이펙트 셀이 무리하게 줄어들지 않는다.
+ * (모델이 셀 밖으로 빠뜨린 픽셀은 이미 탐지 단계에서 셀 경계 안만 보므로 자동 클리핑.)
  *
  * 콘텐츠 탐지:
  *   - wantsTransparent: alpha > 10 픽셀
  *   - 흰 배경: not (R>240 && G>240 && B>240)
- *
- * 셀 경계를 가로지른 픽셀은 어느 한 셀에만 속하므로 자동으로 양분된다 (이상적이진
- * 않지만 sprite sheet 의 본질상 각 프레임은 독립이므로 cross-cell content 는 버그).
  */
 async function normalizeSpritesheetCells(
   filePath: string,
@@ -611,15 +617,13 @@ async function normalizeSpritesheetCells(
   const ch = info.channels;
   const cellW = Math.floor(W / cols);
   const cellH = Math.floor(H / rows);
-  const innerW = Math.round(cellW * 0.6);
-  const innerH = Math.round(cellH * 0.6);
+  const paddingBottom = Math.round(cellH * 0.03);
 
   const isContent = (i: number) => {
     if (wantsTransparent) return data[i + 3] > 10;
     return !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
   };
 
-  // 각 셀별로 bbox 추출 → resize → 합성용 버퍼 수집
   type Layer = { input: Buffer; top: number; left: number };
   const layers: Layer[] = [];
 
@@ -627,7 +631,6 @@ async function normalizeSpritesheetCells(
     for (let c = 0; c < cols; c++) {
       const cellX0 = c * cellW;
       const cellY0 = r * cellH;
-      // bbox 탐색 (셀 내부 좌표)
       let minX = cellW, minY = cellH, maxX = -1, maxY = -1;
       for (let y = 0; y < cellH; y++) {
         for (let x = 0; x < cellW; x++) {
@@ -644,7 +647,6 @@ async function normalizeSpritesheetCells(
 
       const bbW = maxX - minX + 1;
       const bbH = maxY - minY + 1;
-      // bbox 픽셀을 RGBA 버퍼로 추출
       const bbBuf = Buffer.alloc(bbW * bbH * 4);
       for (let y = 0; y < bbH; y++) {
         for (let x = 0; x < bbW; x++) {
@@ -657,23 +659,13 @@ async function normalizeSpritesheetCells(
         }
       }
 
-      // inner zone 안에 맞도록 균등 스케일 (확대는 금지 — 작은 캐릭터는 그대로)
-      const sx = innerW / bbW;
-      const sy = innerH / bbH;
-      const scale = Math.min(sx, sy, 1);
-      const newW = Math.max(1, Math.round(bbW * scale));
-      const newH = Math.max(1, Math.round(bbH * scale));
-
-      // sharp 로 리샘플 (lanczos3 = 일반 아트, 픽셀아트도 무난)
-      const resized = await sharp(bbBuf, { raw: { width: bbW, height: bbH, channels: 4 } })
-        .resize(newW, newH, { kernel: "lanczos3" })
+      const layerPng = await sharp(bbBuf, { raw: { width: bbW, height: bbH, channels: 4 } })
         .png()
         .toBuffer();
 
-      // 셀 중앙 배치
-      const left = cellX0 + Math.round((cellW - newW) / 2);
-      const top = cellY0 + Math.round((cellH - newH) / 2);
-      layers.push({ input: resized, top, left });
+      const left = cellX0 + Math.round((cellW - bbW) / 2);
+      const top = cellY0 + Math.max(0, cellH - bbH - paddingBottom);
+      layers.push({ input: layerPng, top, left });
     }
   }
 
