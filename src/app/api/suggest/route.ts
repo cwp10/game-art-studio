@@ -15,10 +15,11 @@ export const maxDuration = 120;
  */
 
 // 단축 system prompt — 1차 ~1KB → ~250자. 응답 토큰 절감 + 빠름.
+// 배경(배경/background)은 절대 포함하지 않음 — 서버가 자동으로 투명 배경을 적용함.
 const SYSTEM_PROMPT = `한국어 게임 에셋 prompt 제안. JSON 배열만 출력.
-[{"label":"<8-15자 한글 제목>","body":"<60-120자 한글 prompt — 주제/주요 시각요소/색감 포함, 스타일·방향·참조는 제외. 배경은 항상 '투명 배경'으로 끝낼 것.>"}, ...]
+[{"label":"<8-15자 한글 제목>","body":"<60-120자 한글 prompt — 주제/주요 시각요소/색감 포함. 스타일·방향·참조·배경은 절대 포함하지 말 것.>"}, ...]
 3-4개. 각 컨셉은 mood·theme 다르게. 예 캐릭터 코스튬:
-[{"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 빛나는 룬, 보라·금색, 투명 배경"},{"label":"모험가 여행 코스튬","body":"의상 모험가 여행 코스튬, 가벼운 재킷과 바지, 주머니·벨트, 낡은 천, 올리브·베이지, 투명 배경"}]`;
+[{"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 빛나는 룬, 보라·금색"},{"label":"모험가 여행 코스튬","body":"의상 모험가 여행 코스튬, 가벼운 재킷과 바지, 주머니·벨트, 낡은 천, 올리브·베이지"}]`;
 
 type Suggestion = { label: string; body: string };
 
@@ -42,10 +43,10 @@ export async function POST(req: NextRequest) {
   if (!input) return Response.json({ error: "input required" }, { status: 400 });
 
   // 캐시 적중 — 같은 input + TTL 내 → 즉시 응답.
-  // 기존 캐시에 "흰 배경" 으로 저장된 항목도 normalizeBg 로 일괄 보정.
+  // 기존 캐시에 배경 키워드가 남아있을 수 있으니 stripBg 로 보정.
   const cached = cache.get(input);
   if (cached && Date.now() - cached.ts < TTL_MS) {
-    const fixed = cached.suggestions.map((s: Suggestion) => ({ label: s.label, body: normalizeBg(s.body) }));
+    const fixed = cached.suggestions.map((s: Suggestion) => ({ label: s.label, body: stripBg(s.body) }));
     return Response.json({ suggestions: fixed, cached: true });
   }
 
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
       .filter((x): x is Suggestion =>
         !!x && typeof x === "object" && typeof (x as Suggestion).label === "string" && typeof (x as Suggestion).body === "string",
       )
-      .map(s => ({ label: s.label.trim(), body: normalizeBg(s.body.trim()) }))
+      .map(s => ({ label: s.label.trim(), body: stripBg(s.body.trim()) }))
       .filter(s => s.label && s.body);
     if (cleaned.length === 0) {
       return Response.json({ error: "no valid suggestions", raw: raw.slice(0, 400) }, { status: 502 });
@@ -76,18 +77,17 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * 모델이 가끔 "흰 배경" / "white background" 를 반환하므로 일괄 치환.
- * 어떤 배경 키워드도 없으면 끝에 "투명 배경" 을 덧붙임.
+ * 제안 프롬프트에서 배경 관련 구절을 제거.
+ * 서버(ensureTransparentDefault)가 자동으로 transparent background 를 적용하므로
+ * 제안 카드에는 배경 지시가 없어야 깔끔하다.
+ * 패턴: ", 투명 배경" / ", 흰 배경" / "transparent background" 등 — 쉼표·공백 포함 제거.
  */
-function normalizeBg(body: string): string {
-  let out = body
-    .replace(/흰\s*배경/g, "투명 배경")
-    .replace(/하얀\s*배경/g, "투명 배경")
-    .replace(/white\s*background/gi, "transparent background");
-  if (!/투명\s*배경|transparent\s*background/i.test(out)) {
-    out = out.replace(/[.,]?\s*$/, "") + ", 투명 배경";
-  }
-  return out;
+function stripBg(body: string): string {
+  return body
+    .replace(/,?\s*(투명|흰|하얀)\s*배경/g, "")
+    .replace(/,?\s*(transparent|white)\s*background/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function extractJsonArray(raw: string): unknown[] | null {
