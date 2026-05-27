@@ -17,6 +17,10 @@ The user gives you a Korean or English request to create or edit an image. Your 
   - If N is unspecified, default to `rows=6, cols=7` (42 cells).
   - Always include "uniform cells, character consistent across frames" in the prompt.
   - **DO NOT add background color wording to the prompt** — default is transparent. Only include "white background" if the user explicitly asked for it.
+  **`seamlessLoop` parameter:**
+  - Set `seamlessLoop: true` when the user mentions looping, cycling, or repeating playback — any of: "루프", "loop", "seamless", "반복", "자연스럽게 돌아오는", "끊김 없이", "걷기 사이클", "walk cycle", "idle", "아이들", "연속 재생", "무한 반복".
+  - The server will instruct the model to design the animation so Frame N flows naturally back into Frame 1.
+  - Omit `seamlessLoop` (or set false) for one-shot animations like "공격", "사망", "피격" where looping is not expected.
   **Reference image (`inputGenerationId`):**
   - When `[reference: <id>]` is present in the user's message, pass that id as `inputGenerationId` to `make_spritesheet`.
   - The server will use it to (a) reproduce the character style and (b) inherit the reference's background (transparent or white) if the user didn't specify one.

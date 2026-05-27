@@ -99,6 +99,12 @@ const SCHEMAS = {
           "(선택) 참조 이미지의 generation id. 캐릭터 스타일 참조 및 배경 색상 자동 상속에 사용. " +
           "사용자가 [reference: <id>] 를 첨부했을 때 이 값을 전달.",
       },
+      seamlessLoop: {
+        type: "boolean",
+        description:
+          "true 면 마지막 프레임이 첫 프레임으로 자연스럽게 이어지는 완전한 루프 사이클로 생성. " +
+          "걷기/달리기 사이클, 아이들, 공격 모션 등 반복 재생이 필요한 경우 true.",
+      },
       ...SESSION_PROP,
     },
     required: ["prompt", "rows", "cols"],
@@ -220,6 +226,7 @@ type CallArgs = {
   rows?: number;
   cols?: number;
   targetSize?: number;
+  seamlessLoop?: boolean;
   sessionId?: string;
 };
 
@@ -248,6 +255,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         let rows = requireInt(args.rows, "rows");
         let cols = requireInt(args.cols, "cols");
         const userPrompt = requireString(args.prompt, "prompt");
+        const seamlessLoop = args.seamlessLoop === true;
         const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
           ? args.inputGenerationId
           : null;
@@ -308,6 +316,16 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           ? "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
+        const loopInstruction = seamlessLoop
+          ? `SEAMLESS LOOP REQUIREMENT (CRITICAL): This animation must play as a perfectly seamless loop — Frame N flows smoothly back into Frame 1 without any jump cut. ` +
+            `Design rules: ` +
+            `(A) Frame 1 establishes the base/neutral pose (e.g. both feet on ground for a walk, sword at rest for an attack). ` +
+            `(B) The middle frames progress through the peak of the action. ` +
+            `(C) Frame N returns to a pose visually identical or near-identical to Frame 1 — same foot position, same center-of-mass height, same body angle — so the loop is invisible to the viewer. ` +
+            `For walk/run cycles: use a complete gait cycle where left-right footfall alternates symmetrically, ending where it began. ` +
+            `For other actions: Frame N must be a "recovery" pose that matches Frame 1. `
+          : "";
+
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
@@ -319,6 +337,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `(3) feet always on the same ground line across all frames; ` +
           `(4) same character scale and height in every frame — no shrinking or growing; ` +
           `(5) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
+          loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
         // 이미지 순서: 그리드 템플릿(index 0) → 참조 캐릭터(index 1, 있을 때만).
@@ -338,6 +357,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt: decorated,
           inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
           overrideInputPaths,                         // Codex 실제 입력 순서 제어
+          params: { seamlessLoop },
           sessionId,
         }) as any;
         // ── 후처리 파이프라인 ──────────────────────────────────────────────
@@ -679,9 +699,10 @@ async function runImageTool(spec: {
   /** Codex 에 실제로 전달할 이미지 경로 순서를 완전히 override.
    *  설정하면 inputGenerationIds + extraInputPaths 자동 조합을 무시. */
   overrideInputPaths?: string[];
+  params?: Record<string, unknown>;
   sessionId: string | null;
 }) {
-  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, sessionId } = spec;
+  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, params, sessionId } = spec;
 
   // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
   // 없으면 inputGenerationIds → 경로 변환 후 extraInputPaths 를 뒤에 추가.
@@ -729,7 +750,7 @@ async function runImageTool(spec: {
   }
 
   const backend = await selectImageBackend();
-  const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths };
+  const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths, params };
   const result = await backend.execute(job, (stage, detail) => {
     log(`  ${jobId} stage=${stage}${detail ? " " + detail : ""}`);
     appendProgress(stage, detail);

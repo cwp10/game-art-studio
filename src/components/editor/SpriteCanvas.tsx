@@ -4,6 +4,7 @@ import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "luci
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
+type LoopMode = "forward" | "pingpong";
 
 type Props = {
   parentGenerationId: string;
@@ -31,6 +32,7 @@ export function SpriteCanvas({
   const [cols, setCols] = useState(detected?.cols ?? 7);
   const [order, setOrder] = useState<Order>("row");
   const [fps, setFps] = useState(12);
+  const [loopMode, setLoopMode] = useState<LoopMode>("forward");
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
@@ -88,6 +90,8 @@ export function SpriteCanvas({
   const cellW = Math.floor(imageWidth / cols);
   const cellH = Math.floor(imageHeight / rows);
   const frameCount = rows * cols;
+  // 드래그 여유 공간: 셀 최소 치수의 25%. 이 범위 안에서 드래그해도 콘텐츠가 잘리지 않음.
+  const dragPad = Math.round(Math.min(cellW, cellH) * 0.25);
 
   const [frames, setFrames] = useState<HTMLCanvasElement[]>([]);
   useEffect(() => {
@@ -116,21 +120,46 @@ export function SpriteCanvas({
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
   }, [imgLoaded, rows, cols, order, cellW, cellH]);
 
-  // offset 적용된 프레임 — GIF·zip·썸네일 공통 사용
+  // 썸네일용 — 패딩 캔버스에 프레임을 중앙+오프셋으로 배치.
+  // dragPad 만큼 여유가 있어 드래그 시 이미지 짤림 없음.
   const adjustedFrames = useMemo(() => {
     if (frames.length === 0 || offsets.length !== frames.length) return frames;
+    const padW = cellW + 2 * dragPad;
+    const padH = cellH + 2 * dragPad;
     return frames.map((frame, i) => {
       const off = offsets[i] ?? { x: 0, y: 0 };
-      if (off.x === 0 && off.y === 0) return frame;
+      const c = document.createElement("canvas");
+      c.width = padW;
+      c.height = padH;
+      const ctx = c.getContext("2d");
+      if (!ctx) return c;
+      ctx.drawImage(frame, dragPad + off.x, dragPad + off.y);
+      return c;
+    });
+  }, [frames, offsets, cellW, cellH, dragPad]);
+
+  // 내보내기용 — 패딩 캔버스를 원본 cellW×cellH 로 센터 크롭.
+  // GIF/zip 은 이 exportFrames 를 사용.
+  const exportFrames = useMemo(() => {
+    return adjustedFrames.map(f => {
+      if (f.width === cellW && f.height === cellH) return f; // 패딩 없는 fallback 프레임
       const c = document.createElement("canvas");
       c.width = cellW;
       c.height = cellH;
       const ctx = c.getContext("2d");
-      if (!ctx) return frame;
-      ctx.drawImage(frame, off.x, off.y);
+      if (!ctx) return c;
+      ctx.drawImage(f, dragPad, dragPad, cellW, cellH, 0, 0, cellW, cellH);
       return c;
     });
-  }, [frames, offsets, cellW, cellH]);
+  }, [adjustedFrames, cellW, cellH, dragPad]);
+
+  // ping-pong: [0..N-1, N-2..1] — 루프 시 마지막→첫 프레임이 자연스럽게 연결
+  const gifFrames = useMemo(() => {
+    if (loopMode === "pingpong" && exportFrames.length > 2) {
+      return [...exportFrames, ...[...exportFrames].reverse().slice(1, -1)];
+    }
+    return exportFrames;
+  }, [exportFrames, loopMode]);
 
   const thumbs = useMemo(
     () => adjustedFrames.map(f => f.toDataURL("image/png")),
@@ -187,7 +216,7 @@ export function SpriteCanvas({
 
   // GIF 빌드
   useEffect(() => {
-    if (adjustedFrames.length === 0) return;
+    if (gifFrames.length === 0) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       setGifBusy(true);
@@ -203,7 +232,7 @@ export function SpriteCanvas({
           transparent: 0x000000 as unknown as string,
         });
         const delay = Math.max(20, Math.round(1000 / fps));
-        for (const f of adjustedFrames) gif.addFrame(f, { delay });
+        for (const f of gifFrames) gif.addFrame(f, { delay });
         const blob: Blob = await new Promise((resolve, reject) => {
           gif.on("finished", (b: Blob) => resolve(b));
           gif.on("abort", () => reject(new Error("aborted")));
@@ -224,18 +253,18 @@ export function SpriteCanvas({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [adjustedFrames, fps, cellW, cellH]);
+  }, [gifFrames, fps, cellW, cellH]);
 
   useEffect(() => () => { if (gifUrl) URL.revokeObjectURL(gifUrl); }, [gifUrl]);
 
   async function downloadZip() {
-    if (adjustedFrames.length === 0 || downloading) return;
+    if (exportFrames.length === 0 || downloading) return;
     setDownloading("zip");
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      const pad = String(adjustedFrames.length - 1).length;
-      adjustedFrames.forEach((c, i) => {
+      const pad = String(exportFrames.length - 1).length;
+      exportFrames.forEach((c, i) => {
         const dataUrl = c.toDataURL("image/png");
         const base64 = dataUrl.slice("data:image/png;base64,".length);
         zip.file(
@@ -344,6 +373,31 @@ export function SpriteCanvas({
             />
             <span className="w-10 text-right tabular-nums text-text-muted/80">{fps}</span>
           </div>
+          <div className="flex items-center gap-1">
+            <span className="w-12 text-text-muted">루프</span>
+            <button
+              onClick={() => setLoopMode("forward")}
+              className={`h-7 flex-1 rounded border px-2 ${
+                loopMode === "forward"
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                  : "border-border text-text-muted hover:text-text-primary"
+              }`}
+              title="순방향 반복 (1→2→…→N→1)"
+            >
+              순방향
+            </button>
+            <button
+              onClick={() => setLoopMode("pingpong")}
+              className={`h-7 flex-1 rounded border px-2 ${
+                loopMode === "pingpong"
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                  : "border-border text-text-muted hover:text-text-primary"
+              }`}
+              title="핑퐁 반복 (1→…→N→…→1) — 처음↔마지막이 자연스럽게 이어짐"
+            >
+              핑퐁
+            </button>
+          </div>
         </div>
 
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
@@ -369,7 +423,7 @@ export function SpriteCanvas({
             </div>
           </div>
           <p className="text-[11px] text-text-muted/60">
-            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 십자선 기준으로 맞추면 프레임 간 정렬이 됩니다.
+            썸네일을 드래그해서 캐릭터 위치를 조정하세요. 점선 사각형이 실제 출력 경계입니다 (±{dragPad}px 여유).
           </p>
           {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
           <div
@@ -378,13 +432,21 @@ export function SpriteCanvas({
           >
             {thumbs.map((src, i) => {
               const off = offsets[i] ?? { x: 0, y: 0 };
+              // 패딩 캔버스(cellW+2*dragPad × cellH+2*dragPad) 에서
+              // 원본 셀 경계는 dragPad/(padW) ~ (padW-dragPad)/padW 구간.
+              const padW = cellW + 2 * dragPad;
+              const padH = cellH + 2 * dragPad;
+              const cropPctX = (dragPad / padW) * 100;
+              const cropPctY = (dragPad / padH) * 100;
+              const cropW = (cellW / padW) * 100;
+              const cropH = (cellH / padH) * 100;
               return (
                 <div
                   key={i}
-                  className={`relative overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                  className={`relative rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
                     dragging?.idx === i ? "cursor-grabbing ring-1 ring-[color:var(--accent)]" : "cursor-grab"
                   }`}
-                  style={{ aspectRatio: `${cellW}/${cellH}` }}
+                  style={{ aspectRatio: `${padW}/${padH}` }}
                   onMouseDown={e => {
                     e.preventDefault();
                     setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
@@ -394,24 +456,32 @@ export function SpriteCanvas({
                   <img
                     src={src}
                     alt={`frame ${i}`}
-                    className="absolute inset-0 h-full w-full object-contain"
+                    className="absolute inset-0 h-full w-full object-fill"
                     draggable={false}
                   />
-                  {/* 십자 점선 — 중앙 기준선 */}
                   <svg
                     className="pointer-events-none absolute inset-0 h-full w-full"
                     viewBox="0 0 100 100"
                     preserveAspectRatio="none"
                   >
-                    <line
-                      x1="50" y1="0" x2="50" y2="100"
-                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.8"
+                    {/* 출력 경계 점선 사각형 */}
+                    <rect
+                      x={cropPctX} y={cropPctY}
+                      width={cropW} height={cropH}
+                      fill="none"
+                      stroke="rgba(251,191,36,0.8)" strokeWidth="0.8"
                       strokeDasharray="3 2" vectorEffect="non-scaling-stroke"
                     />
+                    {/* 중앙 십자선 */}
                     <line
-                      x1="0" y1="50" x2="100" y2="50"
-                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.8"
-                      strokeDasharray="3 2" vectorEffect="non-scaling-stroke"
+                      x1="50" y1={cropPctY} x2="50" y2={cropPctY + cropH}
+                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.6"
+                      strokeDasharray="2 2" vectorEffect="non-scaling-stroke"
+                    />
+                    <line
+                      x1={cropPctX} y1="50" x2={cropPctX + cropW} y2="50"
+                      stroke="rgba(168,85,247,0.6)" strokeWidth="0.6"
+                      strokeDasharray="2 2" vectorEffect="non-scaling-stroke"
                     />
                   </svg>
                   {/* offset 수치 표시 */}

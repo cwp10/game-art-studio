@@ -129,6 +129,15 @@ function buildNaturalPrompt(job: ImageJob): string {
       //   inputCount === 1 → [0] = 그리드 템플릿
       // Codex 는 image[0] 을 primary 로 인식 → 그리드를 먼저 넣어 캔버스 구조를 강제.
       const inputCount = job.inputImagePaths?.length ?? 0;
+      const seamlessLoop = job.params?.seamlessLoop === true;
+
+      // 루프 사이클 규칙 — seamlessLoop=true 일 때만 삽입.
+      // "Frame N → Frame 1" 이 끊김 없이 이어지도록 AI 에게 명시적 설계 지침 전달.
+      const loopRule = seamlessLoop
+        ? `SEAMLESS LOOP (CRITICAL): Frame N must flow back into Frame 1 without any visible jump cut. ` +
+          `Frame 1 = neutral/ready pose. Middle frames = peak of action. Frame N = recovery pose matching Frame 1. ` +
+          `For walk/run: complete gait cycle — left-right footfall must return to exact Frame 1 foot position. `
+        : "";
 
       if (inputCount >= 2) {
         // [0] 그리드 템플릿, [1] 참조 캐릭터
@@ -144,7 +153,8 @@ function buildNaturalPrompt(job: ImageJob): string {
           `Task: ${job.prompt}\n\n` +
           `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
           `Each frame contains the reference character (image 2) performing a different step of the animation. ` +
-          `Each character must be fully contained within its own cell.`
+          `Each character must be fully contained within its own cell. ` +
+          loopRule
         );
       }
       if (inputCount === 1) {
@@ -155,14 +165,16 @@ function buildNaturalPrompt(job: ImageJob): string {
           `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
           `Task: ${job.prompt}\n` +
           `Draw one sequential animation frame inside each cell of the grid. ` +
-          `Each character must be fully contained within its own cell.`
+          `Each character must be fully contained within its own cell. ` +
+          loopRule
         );
       }
       // 그리드 템플릿 없음 (fallback)
       return (
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
-        `Uniform cell size, evenly spaced grid, one animation frame per cell.`
+        `Uniform cell size, evenly spaced grid, one animation frame per cell. ` +
+        loopRule
       );
     }
   }
