@@ -112,6 +112,9 @@ export function SpriteCanvas({
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.drawImage(img, cx * cellW - dragPad, cy * cellH - dragPad, padW, padH, 0, 0, padW, padH);
+      // 밴드에 끌려온 이웃 셀 조각 제거 — 셀 내부 콘텐츠에 4-연결로 이어진 픽셀만 보존.
+      // 캐릭터 자신의 오버플로(발/로브)는 본체와 연결돼 살아남고, 동떨어진 이웃 조각만 투명화.
+      maskToCellComponent(ctx, padW, padH, dragPad, cellW, cellH);
       out.push(c);
     };
     if (order === "row") {
@@ -682,6 +685,53 @@ export function SpriteCanvas({
 function clamp(n: number, min: number, max: number): number {
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+// 패딩 밴드의 이웃 셀 잔재 제거 — 셀 내부(중앙 영역) 콘텐츠에서 4-연결 flood fill 로
+// 도달하는 픽셀만 남기고, 밴드에 동떨어진 이웃 조각은 알파 0. (in-place)
+function maskToCellComponent(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  pad: number,
+  cellW: number,
+  cellH: number,
+): void {
+  const img = ctx.getImageData(0, 0, W, H);
+  const d = img.data;
+  const N = W * H;
+  const content = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (d[i * 4 + 3] > 10) content[i] = 1;
+
+  const keep = new Uint8Array(N);
+  const stack: number[] = [];
+  // seed: 셀 내부 영역의 콘텐츠 픽셀
+  for (let y = pad; y < pad + cellH; y++) {
+    for (let x = pad; x < pad + cellW; x++) {
+      const i = y * W + x;
+      if (content[i] === 1 && keep[i] === 0) {
+        keep[i] = 1;
+        stack.push(i);
+      }
+    }
+  }
+  while (stack.length > 0) {
+    const p = stack.pop()!;
+    const x = p % W;
+    if (x > 0 && content[p - 1] === 1 && keep[p - 1] === 0) { keep[p - 1] = 1; stack.push(p - 1); }
+    if (x < W - 1 && content[p + 1] === 1 && keep[p + 1] === 0) { keep[p + 1] = 1; stack.push(p + 1); }
+    if (p - W >= 0 && content[p - W] === 1 && keep[p - W] === 0) { keep[p - W] = 1; stack.push(p - W); }
+    if (p + W < N && content[p + W] === 1 && keep[p + W] === 0) { keep[p + W] = 1; stack.push(p + W); }
+  }
+
+  let changed = false;
+  for (let i = 0; i < N; i++) {
+    if (content[i] === 1 && keep[i] === 0) {
+      d[i * 4 + 3] = 0;
+      changed = true;
+    }
+  }
+  if (changed) ctx.putImageData(img, 0, 0);
 }
 
 // GIF 투명 처리용 — 알파 채널을 마젠타(0xff00ff) 1비트 키로 변환.
