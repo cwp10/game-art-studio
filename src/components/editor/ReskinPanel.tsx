@@ -1,8 +1,8 @@
 "use client";
 
-import { Palette, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { listGenerations } from "@/lib/api/client";
+import { Loader2, Palette, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 
 /**
@@ -64,6 +64,28 @@ export function ReskinPanel({
   const [extra, setExtra] = useState("");
   const [styleRefId, setStyleRefId] = useState<string | null>(null);
   const [refs, setRefs] = useState<Generation[] | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 참조 전이 탭: 사용자가 외부 이미지를 업로드해 참조로 사용.
+  async function handleUploadRef(file: File) {
+    setUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result as string);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const g = await uploadImage({ dataUrl, sessionId, filename: file.name });
+      setStyleRefId(g.generationId);
+      setRefs(null); // 세션 목록 재조회 → 업로드한 이미지가 그리드에도 포함.
+    } catch (e) {
+      console.error("[reskin-upload]", e);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   // 시트 여부: kind 우선, 없으면 치수에서 grid 감지(SpriteCanvas 와 동일 GCD 역산).
   const isSheet = kind === "spritesheet" || (!kind && detectSpriteGrid(width, height) !== null);
@@ -129,20 +151,20 @@ export function ReskinPanel({
           ))}
         </div>
 
-        {/* 원본 미리보기 + kind 배지 */}
-        <div className="flex shrink-0 items-start gap-3 rounded-lg border border-border bg-bg-card p-2">
-          <div className="h-24 w-24 shrink-0 overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt="원본" className="h-full w-full object-contain" />
-          </div>
-          <div className="flex flex-col gap-1 pt-1 text-xs">
+        {/* 원본 미리보기 + kind 배지 — 크게 표시. */}
+        <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2">
+          <div className="flex items-center gap-2 text-xs">
             <span className="text-text-muted/80">원본</span>
             <span className="text-text-primary">{width}×{height}</span>
             {isSheet && (
-              <span className="inline-flex w-fit items-center rounded bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">
+              <span className="inline-flex items-center rounded bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">
                 스프라이트시트{grid ? ` · ${grid.rows}×${grid.cols}` : ""}
               </span>
             )}
+          </div>
+          <div className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageUrl} alt="원본" className="mx-auto block max-h-[44vh] w-auto object-contain" />
           </div>
         </div>
 
@@ -182,15 +204,32 @@ export function ReskinPanel({
 
         {mode === "c" && (
           <div className="shrink-0 space-y-2">
-            <label className="text-xs text-text-muted">스타일 참조 이미지</label>
+            <label className="text-xs text-text-muted">스타일 참조 이미지 — 세션 이미지 선택 또는 업로드</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleUploadRef(f);
+                e.target.value = "";
+              }}
+            />
             {refs === null ? (
               <p className="text-[11px] text-text-muted/60">세션 이미지를 불러오는 중…</p>
-            ) : refs.length === 0 ? (
-              <p className="text-[11px] text-text-muted/60">
-                이 세션에 참조로 쓸 다른 이미지가 없어요. 먼저 이미지를 생성/업로드하세요.
-              </p>
             ) : (
               <div className="grid grid-cols-4 gap-1">
+                {/* 업로드 타일 — 세션 이미지가 없어도 항상 노출. */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="flex aspect-square flex-col items-center justify-center gap-1 rounded border border-dashed border-border text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:opacity-50"
+                  title="이미지 업로드해서 참조로 사용"
+                >
+                  {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span className="text-[9px]">{uploading ? "업로드 중" : "업로드"}</span>
+                </button>
                 {refs.map(g => {
                   const sel = styleRefId === g.id;
                   return (
