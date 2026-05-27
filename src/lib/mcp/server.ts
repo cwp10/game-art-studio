@@ -304,14 +304,18 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE showing the exact empty cell layout (${canvasW}×${canvasH} pixels, ${cols} columns × ${rows} rows, each cell ${cellW}×${cellH} pixels). ` +
+          `The template contains TWO sets of guide lines per cell: ` +
+          `(a) GRAY outer borders mark the cell boundary; ` +
+          `(b) BLUE inner rectangle (centered inside each cell, ~60% size) marks the SAFE DRAWING ZONE. ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
-          `Place exactly one animation frame per cell, filling every cell of the grid. ` +
-          `CRITICAL pivot rules: ` +
-          `(1) character's hip/waist is ALWAYS anchored at the exact horizontal and vertical center of every cell — X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
-          `(2) feet always on the same ground line across all frames; ` +
-          `(3) same character scale and height in every frame — no shrinking or growing; ` +
-          `(4) zero positional drift between frames — only limbs and body parts move, not the whole character; ` +
-          `(5) each character fully contained within its cell with 5% margin on all sides. ` +
+          `Place exactly one animation frame per cell. ` +
+          `CRITICAL rules: ` +
+          `(1) Draw each character ENTIRELY INSIDE the blue safe-zone rectangle of its cell — never touch or cross the blue lines; this leaves ~20% padding on all sides within each cell. ` +
+          `(2) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
+          `(3) feet always on the same ground line across all frames; ` +
+          `(4) same character scale and height in every frame — no shrinking or growing; ` +
+          `(5) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
+          `Do NOT include the gray or blue guide lines in the output — they are reference only. ` +
           bgInstruction;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpResult = await runImageTool({
@@ -447,8 +451,12 @@ async function detectTransparentBg(imagePath: string): Promise<boolean> {
 }
 
 /**
- * 스프라이트 시트 레퍼런스용 빈 그리드 PNG 생성 (흰 배경 + 연회색 1px 선).
- * data/templates/sprite-grid-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
+ * 스프라이트 시트 레퍼런스용 그리드 PNG 생성.
+ *   - 외곽 셀 경계: 회색 1px (#cccccc)
+ *   - 내부 안전 영역(safe-zone): 셀 사방 20% 인셋, 청록색 2px (#3399ff)
+ *     → 캐릭터를 이 박스 안에만 그리도록 시각적으로 강제.
+ * data/templates/sprite-grid-v2-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
+ * (v1 → v2: safe-zone 박스 추가로 캐시 키 변경)
  */
 async function generateGridTemplate(
   cols: number,
@@ -461,28 +469,52 @@ async function generateGridTemplate(
   const templatesDir = path.join(DATA_DIR, "templates");
   const cachePath = path.join(
     templatesDir,
-    `sprite-grid-${cols}x${rows}x${cellW}x${cellH}.png`,
+    `sprite-grid-v2-${cols}x${rows}x${cellW}x${cellH}.png`,
   );
   if (fs.existsSync(cachePath)) return cachePath;
 
   // RGB 흰 배경
   const pixels = Buffer.alloc(w * h * 3, 255);
-  const gray = 204; // #cccccc — 레퍼런스 그리드 이미지 색상
+  const grayR = 204, grayG = 204, grayB = 204; // #cccccc — 외곽 셀 경계
+  const safeR = 51, safeG = 153, safeB = 255;  // #3399ff — 내부 safe-zone (청록)
 
-  // 세로선 (각 셀 경계, 1px)
+  const setPx = (x: number, y: number, r: number, g: number, b: number) => {
+    if (x < 0 || x >= w || y < 0 || y >= h) return;
+    const i = (y * w + x) * 3;
+    pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b;
+  };
+
+  // 외곽 셀 경계 (1px)
   for (let col = 0; col <= cols; col++) {
     const px = Math.min(col * cellW, w - 1);
-    for (let y = 0; y < h; y++) {
-      const i = (y * w + px) * 3;
-      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
-    }
+    for (let y = 0; y < h; y++) setPx(px, y, grayR, grayG, grayB);
   }
-  // 가로선 (각 셀 경계, 1px)
   for (let row = 0; row <= rows; row++) {
     const py = Math.min(row * cellH, h - 1);
-    for (let x = 0; x < w; x++) {
-      const i = (py * w + x) * 3;
-      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
+    for (let x = 0; x < w; x++) setPx(x, py, grayR, grayG, grayB);
+  }
+
+  // 내부 safe-zone 박스 — 각 셀의 20% 인셋 (60% 면적), 2px 두께
+  const insetX = Math.round(cellW * 0.2);
+  const insetY = Math.round(cellH * 0.2);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x0 = c * cellW + insetX;
+      const y0 = r * cellH + insetY;
+      const x1 = (c + 1) * cellW - insetX - 1;
+      const y1 = (r + 1) * cellH - insetY - 1;
+      for (const dy of [0, 1]) {
+        for (let x = x0; x <= x1; x++) {
+          setPx(x, y0 + dy, safeR, safeG, safeB);
+          setPx(x, y1 - dy, safeR, safeG, safeB);
+        }
+      }
+      for (const dx of [0, 1]) {
+        for (let y = y0; y <= y1; y++) {
+          setPx(x0 + dx, y, safeR, safeG, safeB);
+          setPx(x1 - dx, y, safeR, safeG, safeB);
+        }
+      }
     }
   }
 
@@ -490,7 +522,7 @@ async function generateGridTemplate(
   await sharp(pixels, { raw: { width: w, height: h, channels: 3 } })
     .png()
     .toFile(cachePath);
-  log(`generateGridTemplate: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
+  log(`generateGridTemplate v2: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
   return cachePath;
 }
 

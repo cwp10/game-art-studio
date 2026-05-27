@@ -128,11 +128,13 @@ function buildNaturalPrompt(job: ImageJob): string {
       const bgLine = wantsTrans
         ? "Transparent background (RGBA PNG, no fill — only the drawn characters are opaque)."
         : "White background.";
-      // 각 셀 사방에 20% 여백 — 캐릭터가 셀 크기의 약 60% 면적 중앙에 위치.
+      // 각 셀의 청록색 safe-zone 박스 안에만 그리도록 강제. 템플릿에 시각 가이드가
+      // 직접 그려져 있으므로 텍스트로도 같은 규칙을 반복해서 강화.
       const paddingLine =
-        "IMPORTANT: Each character must be centered within its cell with ~20% padding " +
-        "on every side (left, right, top, bottom). The character should occupy only the " +
-        "center ~60% of each cell. Never let the character touch or exceed the cell boundary.";
+        "Each cell of the grid template contains a BLUE inner rectangle marking the safe " +
+        "drawing zone (~60% of cell, 20% padding on every side). Draw each character " +
+        "ENTIRELY INSIDE this blue rectangle — never let any part of the character touch " +
+        "or cross the blue lines. Do NOT render the blue or gray guide lines in the output.";
       const inputCount = job.inputImagePaths?.length ?? 0;
 
       if (inputCount >= 2) {
