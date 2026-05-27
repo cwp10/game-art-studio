@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Download, Eraser, Loader2, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Eraser, Layers, Loader2, RotateCcw, Scissors, Sparkles, Trash2, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { suggestLayerParts } from "@/lib/api/client";
 
@@ -462,7 +462,9 @@ export function LayerCanvas({
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="font-medium text-text-primary">🎨 레이어 분리</span>
+        <span className="flex items-center gap-1 font-medium text-text-primary">
+          <Layers size={14} /> 레이어 분리
+        </span>
         <span className="text-xs text-text-muted/60">
           {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
         </span>
@@ -666,7 +668,7 @@ export function LayerCanvas({
                         : "border-border text-text-muted hover:text-text-primary"
                     }`}
                   >
-                    ⚡ AI 복원 {mode === "inpaint" ? "ON" : "OFF"}
+                    <Zap size={12} /> AI 복원 {mode === "inpaint" ? "ON" : "OFF"}
                   </button>
                   <span className="flex-1 leading-tight">
                     가려진 영역을 codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
@@ -683,7 +685,7 @@ export function LayerCanvas({
                     }`}
                     title={mode !== "crop" ? "crop(레이어 분리) 모드 전용" : ""}
                   >
-                    ✂️ 여백 잘라내기 {mode === "crop" && trimToContent ? "ON" : "OFF"}
+                    <Scissors size={12} /> 여백 잘라내기 {mode === "crop" && trimToContent ? "ON" : "OFF"}
                   </button>
                   <span className="flex-1 leading-tight">
                     분리 영역 크기로 저장.{mode !== "crop" && " (crop 모드 전용)"}

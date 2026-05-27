@@ -1,6 +1,6 @@
 "use client";
 
-import { Brush, ChevronDown, Eraser, Loader2, Maximize2, RotateCcw, Scissors, Trash2, X } from "lucide-react";
+import { Brush, ChevronDown, Edit3, Eraser, Loader2, Maximize2, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
@@ -269,7 +269,9 @@ export function MaskCanvas({
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="font-medium text-text-primary">✏ 인페인트</span>
+        <span className="flex items-center gap-1 font-medium text-text-primary">
+          <Edit3 size={14} /> 인페인트
+        </span>
         <span className="text-xs text-text-muted/60">
           {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
         </span>

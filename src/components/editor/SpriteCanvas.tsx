@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, Pause, Play, RefreshCw, SkipBack, SkipForward, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, Film, Pause, Play, RefreshCw, SkipBack, SkipForward, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
@@ -500,7 +500,9 @@ export function SpriteCanvas({
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="font-medium text-text-primary">🎬 스프라이트 분할</span>
+        <span className="flex items-center gap-1 font-medium text-text-primary">
+          <Film size={14} /> 스프라이트 분할
+        </span>
         <span className="text-xs text-text-muted/60">
           {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
         </span>
