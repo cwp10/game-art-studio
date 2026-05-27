@@ -152,6 +152,10 @@ export function ChatLayout() {
         if (p?.prompt_suffix) finalText = `${text}, ${p.prompt_suffix}`;
       }
       const tempId = "tmp-" + Math.random().toString(36).slice(2, 8);
+      // 새 세션 전송: session_started 가 activeSessionId 를 바꾸면 세션 로드 effect 가
+      // 발동해 아직 메시지가 저장되지 않은 빈 세션을 listMessages 로 읽어와 방금 만든
+      // user/assistant 아이템을 덮어쓴다(→ 이후 SSE 이벤트가 전부 드롭). 그 1회 reload 를 skip.
+      if (!state.activeSessionId) skipNextLoadRef.current = true;
       dispatch({ type: "user_send", tempId, text: finalText });
 
       const abort = new AbortController();
