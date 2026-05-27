@@ -1,6 +1,6 @@
 "use client";
 
-import { Brush, Eraser, RotateCcw, Trash2, X } from "lucide-react";
+import { Brush, ChevronDown, Eraser, Loader2, Maximize2, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
@@ -34,12 +34,33 @@ type Props = {
   imageHeight: number;
   /** 캔버스 한 변의 최대 px. 패널이 더 좁으면 부모 폭에 자동 맞춤. 기본 1200. */
   maxDisplayPx?: number;
-  /** 사용자가 prompt 와 마스크를 확정. dataUrl 은 `image/png` base64. */
-  onSubmit: (args: { maskDataUrl: string; prompt: string }) => void;
+  /**
+   * 실행 — 한 번에 통합 적용. 셋 다 선택적이며 args 에 담긴 것만 순차 적용된다:
+   *  - maskDataUrl+prompt: 인페인트 / resizeTarget: 정사각 리사이즈 / removeBg: 배경 제거
+   */
+  onSubmit: (args: {
+    maskDataUrl: string | null;
+    prompt: string;
+    resizeTarget: number | null;
+    removeBg: boolean;
+  }) => void;
   onCancel: () => void;
-  /** 외부 generating 상태 — 인페인트 중이면 실행 버튼 disable. */
+  /** 실행 중인 생성을 취소(abort). busy 일 때 취소 버튼이 이것을 호출. */
+  onCancelGeneration?: () => void;
+  /** 외부 generating 상태 — 실행 중이면 실행 버튼 disable. */
   busy?: boolean;
 };
+
+/** 리사이즈는 무조건 정사각형. label 은 표시용. */
+const RESIZE_OPTIONS: { px: number; label: string }[] = [
+  { px: 64, label: "64" },
+  { px: 256, label: "256" },
+  { px: 512, label: "512" },
+  { px: 1024, label: "1K" },
+  { px: 2048, label: "2K" },
+  { px: 4096, label: "4K" },
+  { px: 8192, label: "8K" },
+];
 
 export function MaskCanvas({
   parentGenerationId,
@@ -49,6 +70,7 @@ export function MaskCanvas({
   maxDisplayPx = 1200,
   onSubmit,
   onCancel,
+  onCancelGeneration,
   busy = false,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
@@ -62,6 +84,10 @@ export function MaskCanvas({
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(40);
+  const [resizeOpen, setResizeOpen] = useState(false);
+  // 실행에 통합 적용될 옵션: 리사이즈 타깃(정사각 px, null=원본 유지) + 배경 제거 토글.
+  const [resizeTarget, setResizeTarget] = useState<number | null>(null);
+  const [removeBg, setRemoveBg] = useState(false);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [prompt, setPrompt] = useState("");
   const drawingRef = useRef<Stroke | null>(null);
@@ -225,10 +251,18 @@ export function MaskCanvas({
   }
 
   const hasStrokes = strokes.length > 0;
+  // 인페인트는 마스크+프롬프트가 둘 다 있어야 적용. 리사이즈/배경제거는 단독으로도 실행 가능.
+  const canInpaint = hasStrokes && prompt.trim().length > 0;
+  const canRun = canInpaint || resizeTarget !== null || removeBg;
 
   function submit() {
-    if (!hasStrokes || !prompt.trim() || busy) return;
-    onSubmit({ maskDataUrl: exportMaskDataUrl(), prompt: prompt.trim() });
+    if (!canRun || busy) return;
+    onSubmit({
+      maskDataUrl: canInpaint ? exportMaskDataUrl() : null,
+      prompt: canInpaint ? prompt.trim() : "",
+      resizeTarget,
+      removeBg,
+    });
   }
 
   // ── render ─────────────────────────────────────────────────────────────────
@@ -284,6 +318,13 @@ export function MaskCanvas({
             onPointerUp={endStroke}
             onPointerCancel={endStroke}
           />
+          {/* 실행 중 오버레이 — 멈춘 게 아니라 생성 중임을 명확히 표시. */}
+          {busy && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/55 text-white">
+              <Loader2 size={28} className="animate-spin" />
+              <span className="text-xs">생성 중…</span>
+            </div>
+          )}
         </div>
 
         {/* 도구 toolbar */}
@@ -340,6 +381,8 @@ export function MaskCanvas({
                 onSubmit({
                   maskDataUrl: exportMaskDataUrl(),
                   prompt: "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there",
+                  resizeTarget: null,
+                  removeBg: false,
                 });
               }}
               disabled={!hasStrokes || busy}
@@ -353,7 +396,7 @@ export function MaskCanvas({
 
         {/* prompt */}
         <div ref={promptRef} className="shrink-0 space-y-1">
-          <label className="text-xs text-text-muted">무엇으로 바꿀까요?</label>
+          <label className="text-xs text-text-muted">무엇으로 바꿀까요? (마스크를 칠하면 인페인트)</label>
           <textarea
             value={prompt}
             onChange={e => setPrompt(e.target.value)}
@@ -363,23 +406,77 @@ export function MaskCanvas({
             className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
         </div>
+
+        {/* 실행 시 함께 적용 — 리사이즈(긴 변 기준) 선택 + 배경 제거 토글. 프롬프트 아래·실행 버튼 근처. */}
+        <div className="flex shrink-0 flex-wrap items-center gap-2 text-xs">
+          <span className="tabular-nums text-text-muted/70">
+            현재 {imageWidth}×{imageHeight}
+          </span>
+          <div className="relative">
+            <button
+              onClick={() => setResizeOpen(o => !o)}
+              disabled={busy}
+              className="flex h-8 items-center gap-1 rounded-lg border border-border px-3 text-text-muted hover:text-text-primary disabled:opacity-40"
+              title="실행 시 정사각형으로 리사이즈"
+            >
+              <Maximize2 size={12} /> 긴 변: {resizeTarget ? RESIZE_OPTIONS.find(o => o.px === resizeTarget)?.label : "원본"} <ChevronDown size={10} />
+            </button>
+            {resizeOpen && (
+              <div className="absolute bottom-full left-0 z-50 mb-1 flex min-w-[88px] flex-col gap-0.5 rounded-lg border border-border bg-bg-panel p-1 shadow-lg">
+                <button
+                  onClick={() => { setResizeTarget(null); setResizeOpen(false); }}
+                  className="rounded px-2 py-1.5 text-left text-text-muted hover:bg-bg-card hover:text-text-primary"
+                >
+                  원본
+                </button>
+                {RESIZE_OPTIONS.map(o => (
+                  <button
+                    key={o.px}
+                    onClick={() => { setResizeTarget(o.px); setResizeOpen(false); }}
+                    className="rounded px-2 py-1.5 text-left text-text-muted hover:bg-bg-card hover:text-text-primary"
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setRemoveBg(v => !v)}
+            disabled={busy}
+            className={`flex h-8 items-center gap-1 rounded-lg border px-3 disabled:opacity-40 ${
+              removeBg
+                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                : "border-border text-text-muted hover:text-text-primary"
+            }`}
+            title="실행 시 배경 제거 적용"
+          >
+            <Scissors size={12} /> 배경 제거 {removeBg ? "ON" : "OFF"}
+          </button>
+        </div>
       </div>
 
       <footer className="flex gap-2 border-t border-border p-3">
+        {/* 실행 중에는 생성 취소(abort), 평소에는 패널 닫기. */}
         <button
-          onClick={onCancel}
-          disabled={busy}
-          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary disabled:opacity-40"
+          onClick={busy ? (onCancelGeneration ?? onCancel) : onCancel}
+          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:border-[color:var(--danger)]/60 hover:text-text-primary"
         >
-          ✕ 취소
+          {busy ? "■ 생성 취소" : "✕ 취소"}
         </button>
         <button
           onClick={submit}
-          disabled={!hasStrokes || !prompt.trim() || busy}
-          className="h-9 flex-[2] rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          title={!hasStrokes ? "마스크가 비어있음" : !prompt.trim() ? "프롬프트 입력 필요" : ""}
+          disabled={!canRun || busy}
+          className="flex h-9 flex-[2] items-center justify-center gap-2 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+          title={!canRun ? "마스크+프롬프트, 리사이즈, 배경제거 중 하나는 설정해야 함" : ""}
         >
-          {busy ? "실행 중..." : "✓ 인페인트 실행"}
+          {busy ? (
+            <>
+              <Loader2 size={14} className="animate-spin" /> 실행 중…
+            </>
+          ) : (
+            "✓ 실행"
+          )}
         </button>
       </footer>
     </aside>

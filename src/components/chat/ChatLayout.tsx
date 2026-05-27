@@ -152,8 +152,8 @@ export function ChatLayout() {
         maskGenerationId?: string;
         presetId?: string;
       },
-    ) => {
-      if (state.generating) return;
+    ): Promise<{ generationId: string; width: number; height: number } | null> => {
+      if (state.generating) return null;
       let finalText = text;
       if (opts?.presetId) {
         let p = presetCache.current.get(opts.presetId);
@@ -171,6 +171,8 @@ export function ChatLayout() {
       if (!state.activeSessionId) skipNextLoadRef.current = true;
       dispatch({ type: "user_send", tempId, text: finalText });
 
+      // 생성 결과(generationId/치수)를 캡처해 호출자에 반환 — 편집 패널의 연속 편집에 사용.
+      let sendResult: { generationId: string; width: number; height: number } | null = null;
       const abort = new AbortController();
       abortRef.current = abort;
       try {
@@ -186,6 +188,13 @@ export function ChatLayout() {
             // 새 세션이 만들어지는 즉시(생성 시작 시점) 사이드바 갱신 — 응답 완료까지 기다리지 않음.
             if (event.type === "session_started") {
               listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
+            }
+            if (event.type === "tool_call_finished" && "generationId" in event.result) {
+              sendResult = {
+                generationId: event.result.generationId,
+                width: event.result.width,
+                height: event.result.height,
+              };
             }
           },
           abort.signal,
@@ -207,6 +216,7 @@ export function ChatLayout() {
         dispatch({ type: "set_generating", generating: false });
         abortRef.current = null;
       }
+      return sendResult;
     },
     [state.generating, state.activeSessionId],
   );
@@ -289,20 +299,62 @@ export function ChatLayout() {
     [handleSend],
   );
 
-  // MaskCanvas 가 submit 한 마스크 PNG → /api/upload → /api/chat 으로 inpaint 호출.
+  // 편집 패널 '실행' — 인페인트 / 리사이즈(긴 변 기준, 비율 유지) / 배경 제거를 설정된 것만
+  // 순차 적용한다. 각 단계 결과를 다음 단계 입력으로 이어받고, 최종 결과를 패널의 새 베이스로
+  // 띄워 연속 편집. 각 단계는 handleSend 를 거쳐 채팅 타임라인에 그대로 누적된다.
   const handleInpaint = useCallback(
-    async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
+    async ({
+      maskDataUrl,
+      prompt,
+      resizeTarget,
+      removeBg,
+    }: {
+      maskDataUrl: string | null;
+      prompt: string;
+      resizeTarget: number | null;
+      removeBg: boolean;
+    }) => {
       if (!editing || editing.mode !== "inpaint") return;
-      const { generationId } = editing;
+      let curId = editing.generationId;
+      let curW = editing.width;
+      let curH = editing.height;
       try {
-        const maskId = await uploadMask(generationId, maskDataUrl);
-        setEditing(null);
-        await handleSend(prompt, {
-          attachmentGenerationIds: [generationId],
-          maskGenerationId: maskId,
-        });
+        // 1. 인페인트 (마스크 + 프롬프트가 있을 때만)
+        if (maskDataUrl && prompt) {
+          const maskId = await uploadMask(curId, maskDataUrl);
+          const r = await handleSend(prompt, {
+            attachmentGenerationIds: [curId],
+            maskGenerationId: maskId,
+          });
+          if (r) ({ generationId: curId, width: curW, height: curH } = r);
+        }
+        // 2. 리사이즈 — 긴 변(가로·세로 중 큰 쪽)을 선택 크기로, 비율 유지.
+        if (resizeTarget) {
+          const r = await handleSend(
+            `이 이미지의 긴 변(가로·세로 중 큰 쪽)을 ${resizeTarget}px 로 리사이즈해줘. 가로세로 비율은 그대로 유지.`,
+            { attachmentGenerationIds: [curId] },
+          );
+          if (r) ({ generationId: curId, width: curW, height: curH } = r);
+        }
+        // 3. 배경 제거
+        if (removeBg) {
+          const r = await handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
+            attachmentGenerationIds: [curId],
+          });
+          if (r) ({ generationId: curId, width: curW, height: curH } = r);
+        }
+        // 최종 결과를 새 베이스로 (변경이 있었을 때만)
+        if (curId !== editing.generationId) {
+          setEditing({
+            mode: "inpaint",
+            generationId: curId,
+            imageUrl: `/api/images/${curId}`,
+            width: curW,
+            height: curH,
+          });
+        }
       } catch (e) {
-        console.error("[inpaint]", e);
+        console.error("[edit]", e);
         dispatch({
           type: "sse",
           event: { type: "error", message: (e as Error).message },
@@ -563,6 +615,7 @@ export function ChatLayout() {
       {editing?.mode === "inpaint" && (
         <div className="fixed inset-0 z-40">
           <MaskCanvas
+            key={editing.generationId}
             parentGenerationId={editing.generationId}
             imageUrl={editing.imageUrl}
             imageWidth={editing.width}
@@ -570,6 +623,7 @@ export function ChatLayout() {
             busy={state.generating}
             onSubmit={handleInpaint}
             onCancel={() => setEditing(null)}
+            onCancelGeneration={handleCancel}
           />
         </div>
       )}

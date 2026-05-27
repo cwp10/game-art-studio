@@ -48,7 +48,7 @@ import {
 } from "../util/paths.js";
 import type { GenerationKind } from "../../types/db.js";
 
-const RESIZE_TARGET_SIZES = [64, 128, 256, 512, 1024, 2048] as const;
+const RESIZE_TARGET_SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192] as const;
 
 ensureDataDirs();
 const logPath = path.join(LOGS_DIR, "mcp-server.log");
@@ -127,7 +127,7 @@ const SCHEMAS = {
         type: "integer",
         enum: [...RESIZE_TARGET_SIZES],
         description:
-          "결과 PNG 의 가로·세로 픽셀 (정사각). 원본보다 작으면 다운스케일, 크면 업스케일.",
+          "긴 변(가로·세로 중 큰 쪽)을 맞출 픽셀. 비율 유지 (정사각 아님). 작으면 다운스케일, 크면 업스케일.",
       },
       ...SESSION_PROP,
     },
@@ -214,9 +214,9 @@ const TOOLS = [
   {
     name: "resize_image",
     description:
-      "기존 이미지를 명시적 픽셀 해상도로 리사이즈 (정사각). sharp lanczos 보간법. " +
-      "codex 호출 X, 1초 이내, 결정적. 사용자가 64/128/256/512/1024/2048 같은 숫자를 " +
-      "직접 지정했거나 [리사이즈 N×N] 버튼을 누른 경우.",
+      "기존 이미지를 긴 변(가로·세로 중 큰 쪽) 기준 픽셀로 리사이즈 (비율 유지, 정사각 아님). sharp lanczos 보간법. " +
+      "codex 호출 X, 1초 이내, 결정적. 사용자가 64/256/512/1024/2048/4096/8192 같은 숫자를 " +
+      "직접 지정했거나 리사이즈를 요청한 경우.",
     inputSchema: SCHEMAS.resize_image,
   },
   {
@@ -1155,7 +1155,7 @@ async function runImageTool(spec: {
 
 /**
  * sharp lanczos 기반 결정적 리사이즈 — codex 호출 X. ImageBackend 우회.
- * 정사각 fit=fill. 알파 보존. backend='direct' 로 generation 행 작성.
+ * 긴 변 기준 비율 유지(fit=inside). 알파 보존. backend='direct' 로 generation 행 작성.
  */
 async function runResizeTool(spec: {
   inputGenerationId: string;
@@ -1189,10 +1189,14 @@ async function runResizeTool(spec: {
 
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
   const startedAt = performance.now();
-  await sharp(inputPath)
-    .resize(spec.targetSize, spec.targetSize, { kernel: "lanczos3", fit: "fill" })
+  // 긴 변(가로·세로 중 큰 쪽)을 targetSize 로 맞추고 비율 유지 — fit:"inside" + 양변 targetSize.
+  // 실제 출력 치수는 sharp 가 반환하는 info 에서 받는다(정사각 아님).
+  const info = await sharp(inputPath)
+    .resize(spec.targetSize, spec.targetSize, { kernel: "lanczos3", fit: "inside" })
     .png()
     .toFile(destPath);
+  const outW = info.width;
+  const outH = info.height;
   const elapsedMs = Math.round(performance.now() - startedAt);
 
   // generations.kind CHECK 제약: text2img|img2img|upscale|remove_bg|inpaint|spritesheet|mask|layer|external.
@@ -1203,11 +1207,11 @@ async function runResizeTool(spec: {
     session_id: spec.sessionId,
     message_id: null,
     kind: "upscale",
-    prompt: `Resize to ${spec.targetSize}×${spec.targetSize}`,
+    prompt: `Resize longest side to ${spec.targetSize}px (→ ${outW}×${outH}, aspect preserved)`,
     input_image_ids: [spec.inputGenerationId],
     image_path: toRelative(destPath),
-    width: spec.targetSize,
-    height: spec.targetSize,
+    width: outW,
+    height: outH,
     backend: "direct",
   });
   updateJob(jobId, {
@@ -1216,22 +1220,22 @@ async function runResizeTool(spec: {
     ended_at: Date.now(),
   });
 
-  log(`resize_image done job=${jobId} gen=${gen.id} ${spec.targetSize}x${spec.targetSize} ${elapsedMs}ms`);
+  log(`resize_image done job=${jobId} gen=${gen.id} ${outW}x${outH} (longest=${spec.targetSize}) ${elapsedMs}ms`);
 
   return {
     content: [
       {
         type: "text",
         text:
-          `Resized image ${gen.id} (${spec.targetSize}×${spec.targetSize}, ${elapsedMs}ms). ` +
+          `Resized image ${gen.id} (${outW}×${outH}, longest side ${spec.targetSize}px, ${elapsedMs}ms). ` +
           `Show it with image ref id "${gen.id}".`,
       },
     ],
     structuredContent: {
       generationId: gen.id,
       imagePath: `/api/images/${gen.id}`,
-      width: spec.targetSize,
-      height: spec.targetSize,
+      width: outW,
+      height: outH,
       elapsedMs,
     },
   };
