@@ -603,11 +603,12 @@ export function ChatLayout() {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+// 카테고리별 예시 1개씩: 캐릭터 / 배경 / 이펙트 / UI.
 const SEED_PROMPTS = [
-  "도트 스타일 검사 캐릭터, 정면, 투명 배경",
-  "8x8 픽셀 아이콘 세트, 검·방패·포션·코인",
-  "보스 몬스터 컨셉 아트, 다크판타지, 풀 바디",
+  "도트 스타일 마법사 캐릭터, 정면, 투명 배경",
+  "초원 테마 게임 배경, 픽셀 아트, 횡스크롤",
   "평타 이펙트 4프레임, 슬래시, 투명 배경",
+  "RPG 인벤토리 슬롯 UI 세트, 픽셀 아트, 투명 배경",
 ];
 
 function EmptyState({
@@ -655,7 +656,7 @@ function EmptyState({
           <button
             key={p}
             onClick={() => onPick(p)}
-            className="rounded-xl border border-border bg-bg-card px-4 py-3 text-left text-sm text-text-muted transition-colors hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+            className="rounded-xl border border-border bg-bg-card px-4 py-3 text-left text-xs text-text-muted transition-colors hover:border-[color:var(--accent)]/40 hover:text-text-primary"
           >
             {p}
           </button>
