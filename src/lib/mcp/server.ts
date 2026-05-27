@@ -234,10 +234,20 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         });
 
       case "make_spritesheet": {
-        const rows = requireInt(args.rows, "rows");
-        const cols = requireInt(args.cols, "cols");
+        let rows = requireInt(args.rows, "rows");
+        let cols = requireInt(args.cols, "cols");
         const userPrompt = requireString(args.prompt, "prompt");
-        // cellHeight: 2048 기준 정사각형. rows=1(가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
+
+        // rows=1 이고 cols > 4 인 경우: 다행 그리드로 자동 변환.
+        // (시스템 프롬프트가 잘못 지시하거나 사용자가 명시해도 방어)
+        if (rows === 1 && cols > 4) {
+          const n = cols;
+          rows = Math.round(Math.sqrt(n));
+          cols = Math.ceil(n / rows);
+          log(`make_spritesheet auto-reshape: 1×${n} → ${rows}×${cols}`);
+        }
+
+        // cellHeight: 2048 기준 정사각형. rows=1(4프레임 이하 가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
         const cellH = rows === 1
           ? 768
           : Math.min(512, Math.floor(2048 / Math.max(rows, cols)));

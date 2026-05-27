@@ -106,8 +106,10 @@ export function spawnClaude(opts: ClaudeSpawnOptions): ClaudeRunHandle {
   const stdout = child.stdout as Readable;
   const stderr = child.stderr as Readable;
 
-  // 로그 파일에 args 기록
+  // 로그 파일에 args 기록. stdout 도 덤프 (tool_result content 파싱 분석용)
+  const stdoutLogFile = logFile.replace(".log", "-stdout.log");
   fs.writeFileSync(logFile, `# claude args:\n${JSON.stringify(args, null, 2)}\n\n# stderr:\n`);
+  fs.writeFileSync(stdoutLogFile, "");
   stderr.on("data", chunk => {
     fs.appendFileSync(logFile, chunk);
   });
@@ -149,7 +151,9 @@ export function spawnClaude(opts: ClaudeSpawnOptions): ClaudeRunHandle {
   }
 
   stdout.on("data", (chunk: Buffer) => {
-    lineBuf += chunk.toString("utf8");
+    const raw = chunk.toString("utf8");
+    fs.appendFileSync(stdoutLogFile, raw); // stdout 전체 덤프
+    lineBuf += raw;
     let idx: number;
     while ((idx = lineBuf.indexOf("\n")) !== -1) {
       const line = lineBuf.slice(0, idx).trim();
