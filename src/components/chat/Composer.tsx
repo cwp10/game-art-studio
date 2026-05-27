@@ -7,6 +7,7 @@ import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
 
 const FRAME_COUNTS = [4, 9, 16, 25] as const;
+const BATCH_COUNTS = [1, 2, 4] as const;
 
 const DIRECTIONS: Array<{ key: string; label: string }> = [
   { key: "auto", label: "자유" },
@@ -23,7 +24,7 @@ type Props = {
   disabled: boolean;
   onSend: (
     message: string,
-    opts?: { presetId?: string; attachmentGenerationIds?: string[] },
+    opts?: { presetId?: string; attachmentGenerationIds?: string[]; count?: number },
   ) => void;
   onCancel?: () => void;
   generating: boolean;
@@ -52,6 +53,8 @@ export function Composer({
   const [presetName, setPresetName] = useState<string | null>(null);
   const [direction, setDirection] = useState<string>("auto");
   const [frames, setFrames] = useState<number | null>(null);
+  // 배치 생성 장수 (×1/×2/×4). attached/frames 사용 시엔 단일 생성만 — count 무시(강제 1).
+  const [count, setCount] = useState<number>(1);
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -106,7 +109,7 @@ export function Composer({
     // 방향이 'auto' 아니면 메시지 끝에 결합 (preset suffix 결합 흐름과 같은 패턴).
     // 이미 사용자가 직접 "정면" 같은 단어 입력했어도 중복 무해.
     const withDir = direction === "auto" ? t : `${t}, ${direction}`;
-    const opts: { presetId?: string; attachmentGenerationIds?: string[] } = {};
+    const opts: { presetId?: string; attachmentGenerationIds?: string[]; count?: number } = {};
     if (presetId) opts.presetId = presetId;
     if (attached) opts.attachmentGenerationIds = [attached.id];
     // attached 있고 frames 선택 시 sprite sheet suffix 결합.
@@ -114,6 +117,8 @@ export function Composer({
       attached && frames !== null
         ? `${withDir}, ${frames}프레임 sprite sheet, 1×${frames} grid`
         : withDir;
+    // 배치: 첨부/스프라이트가 아니고 count>1 일 때만. 그 외엔 단일 생성 흐름 유지.
+    if (!attached && frames === null && count > 1) opts.count = count;
     onSend(withFrames, Object.keys(opts).length ? opts : undefined);
     setText("");
     // attachment 는 일회용 — submit 후 자동 해제. 다시 reference 하고 싶으면 사용자가 카드의
@@ -126,7 +131,7 @@ export function Composer({
     "mod+enter",
     () => submit(),
     { enableOnFormTags: ["TEXTAREA", "INPUT"], preventDefault: true },
-    [text, disabled, presetId, attached, frames],
+    [text, disabled, presetId, attached, frames, count],
   );
 
   return (
@@ -197,6 +202,27 @@ export function Composer({
                 ))}
               </select>
             </label>
+            {!attached && (
+              <div
+                className="flex h-7 items-center overflow-hidden rounded-md border border-border text-xs"
+                title="배치 생성 — 같은 프롬프트로 N장을 한 번에"
+              >
+                {BATCH_COUNTS.map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setCount(n)}
+                    className={`flex h-full items-center px-2 leading-none transition-colors ${
+                      count === n
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    ×{n}
+                  </button>
+                ))}
+              </div>
+            )}
             {attached && (
               <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="sprite sheet 프레임 수">
                 <LayoutGrid size={12} />

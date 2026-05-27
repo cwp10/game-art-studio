@@ -139,6 +139,89 @@ export function ChatLayout() {
     }
   }, []);
 
+  // 배치 생성 — 같은 프롬프트로 N장을 순차 생성해 하나의 batch 그리드로 모음.
+  // 핵심: 첫 생성이 만든 세션 id 를 캡처해 나머지 N-1 개를 같은 세션으로 보낸다(흩어짐 방지).
+  // 일반 sse 리듀서를 거치지 않고 streamChat 을 직접 호출 — 콜백에서 session_started.sessionId 와
+  // tool_call_finished.result 만 캡처해 batch_result 로 dispatch.
+  const handleBatch = useCallback(
+    async (text: string, count: number, presetId?: string) => {
+      let finalText = text;
+      if (presetId) {
+        let p = presetCache.current.get(presetId);
+        if (!p) {
+          const all = await listPresets();
+          for (const x of all) presetCache.current.set(x.id, x);
+          p = presetCache.current.get(presetId);
+        }
+        if (p?.prompt_suffix) finalText = `${text}, ${p.prompt_suffix}`;
+      }
+      const userTempId = "tmp-" + Math.random().toString(36).slice(2, 8);
+      const batchId = "batch-" + Math.random().toString(36).slice(2, 8);
+      dispatch({ type: "batch_start", userTempId, text: finalText, batchId, total: count });
+
+      // 첫 회 새 세션이면 session_started 후의 listMessages reload race 를 1회 skip.
+      let curSession = state.activeSessionId;
+      if (!curSession) skipNextLoadRef.current = true;
+      let refreshedSessions = false;
+
+      const abort = new AbortController();
+      abortRef.current = abort;
+      try {
+        for (let i = 0; i < count; i++) {
+          let result:
+            | { generationId: string; imageUrl: string; width: number; height: number }
+            | { error: string }
+            | null = null;
+          try {
+            await streamChat(
+              { sessionId: curSession ?? undefined, message: finalText },
+              event => {
+                if (event.type === "session_started") {
+                  curSession = event.sessionId;
+                  if (!refreshedSessions) {
+                    refreshedSessions = true;
+                    listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
+                  }
+                } else if (event.type === "tool_call_finished") {
+                  if ("error" in event.result) {
+                    result = { error: event.result.error };
+                  } else {
+                    result = {
+                      generationId: event.result.generationId,
+                      imageUrl: `/api/images/${event.result.generationId}`,
+                      width: event.result.width,
+                      height: event.result.height,
+                    };
+                  }
+                } else if (event.type === "error") {
+                  result = { error: event.message };
+                }
+              },
+              abort.signal,
+            );
+          } catch (e) {
+            if ((e as Error).name === "AbortError") {
+              dispatch({ type: "batch_result", batchId, result: { error: "취소되었습니다." } });
+              break;
+            }
+            result = { error: (e as Error).message };
+          }
+          dispatch({
+            type: "batch_result",
+            batchId,
+            result: result ?? { error: "결과를 받지 못했어요." },
+          });
+        }
+      } finally {
+        dispatch({ type: "set_generating", generating: false });
+        abortRef.current = null;
+        const next = await listSessions();
+        dispatch({ type: "set_sessions", sessions: next });
+      }
+    },
+    [state.activeSessionId],
+  );
+
   // 메시지 전송. attachmentGenerationIds / maskGenerationId 가 있으면 라우트가
   // user 메시지 본문에 [reference: <id>] / [mask: <id>] marker 로 prefix → Claude 가
   // inputGenerationId / maskGenerationId 로 사용.
@@ -151,9 +234,15 @@ export function ChatLayout() {
         attachmentGenerationIds?: string[];
         maskGenerationId?: string;
         presetId?: string;
+        count?: number;
       },
     ): Promise<{ generationId: string; width: number; height: number } | null> => {
       if (state.generating) return null;
+      // 배치(count>1): preset suffix 결합까지 포함해 전용 순차 흐름으로 위임. 단일 생성 회귀 없음.
+      if (opts?.count && opts.count > 1) {
+        await handleBatch(text, opts.count, opts.presetId);
+        return null;
+      }
       let finalText = text;
       if (opts?.presetId) {
         let p = presetCache.current.get(opts.presetId);
@@ -218,7 +307,7 @@ export function ChatLayout() {
       }
       return sendResult;
     },
-    [state.generating, state.activeSessionId],
+    [state.generating, state.activeSessionId, handleBatch],
   );
 
   const handleCancel = useCallback(() => {

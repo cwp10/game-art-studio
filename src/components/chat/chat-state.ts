@@ -36,6 +36,17 @@ export type ChatItem =
       items: Array<{ label: string; body: string }>;
       pickedBody?: string;
       error?: string;
+    }
+  | {
+      /** ×N 배치 생성 — 같은 프롬프트로 N장을 순차 생성해 한 그리드로 모음.
+       *  results 는 순차로 append (성공/에러 슬롯). 영속 안 함(세션 재로드 시 사라짐 — v1). */
+      kind: "batch";
+      id: string;
+      prompt: string;
+      total: number;
+      results: Array<
+        { generationId: string; imageUrl: string; width: number; height: number } | { error: string }
+      >;
     };
 
 export type ChatState = {
@@ -51,6 +62,14 @@ export type ChatAction =
   | { type: "rename_session"; id: string; title: string }
   | { type: "load_messages"; messages: Message[] }
   | { type: "user_send"; tempId: string; text: string }
+  | { type: "batch_start"; userTempId: string; text: string; batchId: string; total: number }
+  | {
+      type: "batch_result";
+      batchId: string;
+      result:
+        | { generationId: string; imageUrl: string; width: number; height: number }
+        | { error: string };
+    }
   | { type: "set_generating"; generating: boolean }
   | { type: "sse"; event: ChatEvent }
   | {
@@ -182,6 +201,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           { kind: "assistant", id: "__pending__", toolCalls: [], finished: false },
         ],
         generating: true,
+      };
+    case "batch_start":
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "user", id: action.userTempId, text: action.text },
+          { kind: "batch", id: action.batchId, prompt: action.text, total: action.total, results: [] },
+        ],
+        generating: true,
+      };
+    case "batch_result":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "batch" && it.id === action.batchId
+            ? { ...it, results: [...it.results, action.result] }
+            : it,
+        ),
       };
     case "set_generating":
       return { ...state, generating: action.generating };

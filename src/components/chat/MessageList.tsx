@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ChatItem } from "./chat-state";
 import { ToolCallBlock } from "./ToolCallBlock";
@@ -92,6 +93,59 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                   })}
                 </div>
               )}
+            </div>
+          );
+        }
+        if (it.kind === "batch") {
+          return (
+            <div key={`${it.id}-${i}`} className="space-y-2">
+              <div className="font-mono text-[11px] leading-relaxed text-text-muted">
+                ×{it.total} 배치 · {it.prompt}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {Array.from({ length: it.total }).map((_, j) => {
+                  const r = it.results[j];
+                  if (!r) {
+                    return (
+                      <div
+                        key={j}
+                        className="flex aspect-square items-center justify-center rounded-xl border border-border bg-bg-card"
+                      >
+                        <Loader2 size={20} className="animate-spin text-text-muted/60" />
+                      </div>
+                    );
+                  }
+                  if ("error" in r) {
+                    return (
+                      <div
+                        key={j}
+                        className="flex aspect-square items-center justify-center rounded-xl border border-[color:var(--danger)]/40 bg-[color:var(--danger)]/10 px-3 text-center text-[11px] text-[color:var(--danger)]"
+                      >
+                        {r.error}
+                      </div>
+                    );
+                  }
+                  return (
+                    <ImageResultCard
+                      key={r.generationId}
+                      generationId={r.generationId}
+                      imageUrl={r.imageUrl}
+                      width={r.width}
+                      height={r.height}
+                      prompt={it.prompt}
+                      onAction={(a, opts) =>
+                        onAction?.(a, {
+                          prompt: it.prompt,
+                          generationId: r.generationId,
+                          width: r.width,
+                          height: r.height,
+                          targetSize: opts?.targetSize,
+                        })
+                      }
+                    />
+                  );
+                })}
+              </div>
             </div>
           );
         }
