@@ -4,20 +4,6 @@ import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "luci
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
-type GuideKey = "head" | "hip" | "feet";
-type VGuideKey = "left" | "center" | "right";
-
-const GUIDE_CONFIG: Record<GuideKey, { color: string; label: string; defaultPct: number }> = {
-  head: { color: "#60a5fa", label: "머리", defaultPct: 0.15 },
-  hip:  { color: "#4ade80", label: "골반", defaultPct: 0.50 },
-  feet: { color: "#fb923c", label: "발끝", defaultPct: 0.85 },
-};
-
-const V_GUIDE_CONFIG: Record<VGuideKey, { color: string; label: string; defaultPct: number }> = {
-  left:   { color: "#f472b6", label: "좌",  defaultPct: 0.20 },
-  center: { color: "#fde047", label: "중",  defaultPct: 0.50 },
-  right:  { color: "#f472b6", label: "우",  defaultPct: 0.80 },
-};
 
 type Props = {
   parentGenerationId: string;
@@ -38,7 +24,6 @@ export function SpriteCanvas({
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   // 이미지 크기에서 GCD로 셀 크기를 역산해 rows/cols 자동 감지. 감지 실패 시 기본값 6×7.
   const detected = detectSpriteGrid(imageWidth, imageHeight);
@@ -58,21 +43,6 @@ export function SpriteCanvas({
     origX: number;
     origY: number;
   } | null>(null);
-
-  // 가이드선 상태
-  const [showGuides, setShowGuides] = useState(true);
-  const [guidePcts, setGuidePcts] = useState<Record<GuideKey, number>>(
-    Object.fromEntries(
-      Object.entries(GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
-    ) as Record<GuideKey, number>,
-  );
-  const [dragGuide, setDragGuide] = useState<GuideKey | null>(null);
-  const [vGuidePcts, setVGuidePcts] = useState<Record<VGuideKey, number>>(
-    Object.fromEntries(
-      Object.entries(V_GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
-    ) as Record<VGuideKey, number>,
-  );
-  const [dragVGuide, setDragVGuide] = useState<VGuideKey | null>(null);
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
@@ -187,49 +157,6 @@ export function SpriteCanvas({
       window.removeEventListener("mouseup", onUp);
     };
   }, [dragging]);
-
-  // 가이드선 드래그 — 마우스를 누른 채 위아래로 움직여 셀 내 위치(%) 조정
-  useEffect(() => {
-    if (!dragGuide) return;
-    const container = canvasContainerRef.current;
-    if (!container) return;
-    const cellDisplayH = displayH / rows;
-    const onMove = (e: MouseEvent) => {
-      const rect = container.getBoundingClientRect();
-      const relY = e.clientY - rect.top;
-      // 셀 내 상대 위치 (0 ~ 1), 경계에서 약간 여유
-      const pct = Math.max(0.02, Math.min(0.98, (relY % cellDisplayH) / cellDisplayH));
-      setGuidePcts(prev => ({ ...prev, [dragGuide]: pct }));
-    };
-    const onUp = () => setDragGuide(null);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [dragGuide, displayH, rows]);
-
-  // 세로 가이드선 드래그
-  useEffect(() => {
-    if (!dragVGuide) return;
-    const container = canvasContainerRef.current;
-    if (!container) return;
-    const cellDisplayW = displayW / cols;
-    const onMove = (e: MouseEvent) => {
-      const rect = container.getBoundingClientRect();
-      const relX = e.clientX - rect.left;
-      const pct = Math.max(0.02, Math.min(0.98, (relX % cellDisplayW) / cellDisplayW));
-      setVGuidePcts(prev => ({ ...prev, [dragVGuide]: pct }));
-    };
-    const onUp = () => setDragVGuide(null);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [dragVGuide, displayW, cols]);
 
   // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
   function autoAlign() {
@@ -358,19 +285,11 @@ export function SpriteCanvas({
         </p>
 
         <div
-          ref={canvasContainerRef}
           className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
           style={{ width: displayW, height: displayH }}
         >
           <canvas ref={baseRef} className="absolute inset-0" width={displayW} height={displayH} />
           <GridOverlay rows={rows} cols={cols} w={displayW} h={displayH} />
-          {showGuides && (
-            <GuideOverlay
-              rows={rows} cols={cols} w={displayW} h={displayH}
-              guidePcts={guidePcts} onDragStart={setDragGuide}
-              vGuidePcts={vGuidePcts} onVDragStart={setDragVGuide}
-            />
-          )}
         </div>
 
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
@@ -392,37 +311,6 @@ export function SpriteCanvas({
               />
             </label>
             <span className="text-text-muted/70">셀 {cellW}×{cellH} · {frameCount}프레임</span>
-            <button
-              onClick={() => setShowGuides(v => !v)}
-              className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
-                showGuides
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border text-text-muted hover:text-text-primary"
-              }`}
-              title="머리·골반·발끝 가이드선 + 피벗 마커 표시"
-            >
-              가이드
-            </button>
-            {showGuides && (
-              <button
-                onClick={() => {
-                  setGuidePcts(
-                    Object.fromEntries(
-                      Object.entries(GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
-                    ) as Record<GuideKey, number>,
-                  );
-                  setVGuidePcts(
-                    Object.fromEntries(
-                      Object.entries(V_GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
-                    ) as Record<VGuideKey, number>,
-                  );
-                }}
-                className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary"
-                title="가이드선 기본 위치로 초기화"
-              >
-                <RefreshCw size={10} />
-              </button>
-            )}
           </div>
           <div className="flex items-center gap-1">
             <span className="w-12 text-text-muted">순서</span>
@@ -619,126 +507,6 @@ function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: numb
           <line x1={0} y1={y} x2={w} y2={y} stroke="rgba(168, 85, 247, 0.8)" strokeWidth={0.75} />
         </g>
       ))}
-    </svg>
-  );
-}
-
-// ─── 가이드 오버레이 ─────────────────────────────────────────────────────────
-
-/**
- * 머리·골반·발끝 수평 가이드선 + 셀 중심 피벗 마커.
- *
- * 가이드선은 각 셀 행마다 반복되며, 왼쪽 핸들(원형 레이블)을 드래그해서
- * 셀 내 위치(%)를 조정한다.
- * 피벗 마커(+)는 각 셀 중심에 표시 — 캐릭터 골반이 여기에 맞춰져야 한다.
- */
-function GuideOverlay({
-  rows,
-  cols,
-  w,
-  h,
-  guidePcts,
-  onDragStart,
-  vGuidePcts,
-  onVDragStart,
-}: {
-  rows: number;
-  cols: number;
-  w: number;
-  h: number;
-  guidePcts: Record<GuideKey, number>;
-  onDragStart: (key: GuideKey) => void;
-  vGuidePcts: Record<VGuideKey, number>;
-  onVDragStart: (key: VGuideKey) => void;
-}) {
-  const cellH = h / rows;
-  const cellW = w / cols;
-
-  return (
-    <svg
-      className="absolute inset-0"
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      style={{ pointerEvents: "none" }}
-    >
-      {/* 셀 중심 피벗 마커 */}
-      {Array.from({ length: rows }, (_, r) =>
-        Array.from({ length: cols }, (_, c) => {
-          const cx = (c + 0.5) * cellW;
-          const cy = (r + 0.5) * cellH;
-          const s = Math.min(cellW, cellH) * 0.06;
-          return (
-            <g key={`p-${r}-${c}`} opacity={0.55}>
-              <line x1={cx - s} y1={cy} x2={cx + s} y2={cy} stroke="#fff" strokeWidth={1.5} />
-              <line x1={cx} y1={cy - s} x2={cx} y2={cy + s} stroke="#fff" strokeWidth={1.5} />
-              <circle cx={cx} cy={cy} r={s * 0.5} fill="none" stroke="#fff" strokeWidth={1} />
-            </g>
-          );
-        }),
-      )}
-
-      {/* 가로 가이드선: 각 행마다 반복, 첫 행 좌측에 드래그 핸들 */}
-      {(Object.entries(guidePcts) as [GuideKey, number][]).map(([key, pct]) => {
-        const { color, label } = GUIDE_CONFIG[key];
-        return Array.from({ length: rows }, (_, r) => {
-          const y = r * cellH + pct * cellH;
-          const isFirst = r === 0;
-          return (
-            <g key={`g-${key}-${r}`}>
-              <line x1={0} y1={y} x2={w} y2={y}
-                stroke="rgba(0,0,0,0.45)" strokeWidth={2.5} strokeDasharray="7 5" />
-              <line x1={0} y1={y} x2={w} y2={y}
-                stroke={color} strokeWidth={1.5} strokeDasharray="7 5" strokeOpacity={0.9} />
-              {isFirst && (
-                <g
-                  style={{ pointerEvents: "auto", cursor: "ns-resize" }}
-                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onDragStart(key); }}
-                >
-                  <rect x={0} y={y - 8} width={44} height={16} fill="transparent" />
-                  <rect x={2} y={y - 7} width={40} height={14} rx={3} fill={color} fillOpacity={0.9} />
-                  <text x={22} y={y} textAnchor="middle" dominantBaseline="central"
-                    fill="white" fontSize={9} fontWeight="bold"
-                    style={{ pointerEvents: "none", userSelect: "none" }}>
-                    {label}
-                  </text>
-                </g>
-              )}
-            </g>
-          );
-        });
-      })}
-
-      {/* 세로 가이드선: 각 열마다 반복, 첫 열 상단에 드래그 핸들 */}
-      {(Object.entries(vGuidePcts) as [VGuideKey, number][]).map(([key, pct]) => {
-        const { color, label } = V_GUIDE_CONFIG[key];
-        return Array.from({ length: cols }, (_, c) => {
-          const x = c * cellW + pct * cellW;
-          const isFirst = c === 0;
-          return (
-            <g key={`vg-${key}-${c}`}>
-              <line x1={x} y1={0} x2={x} y2={h}
-                stroke="rgba(0,0,0,0.45)" strokeWidth={2.5} strokeDasharray="7 5" />
-              <line x1={x} y1={0} x2={x} y2={h}
-                stroke={color} strokeWidth={1.5} strokeDasharray="7 5" strokeOpacity={0.9} />
-              {isFirst && (
-                <g
-                  style={{ pointerEvents: "auto", cursor: "ew-resize" }}
-                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onVDragStart(key); }}
-                >
-                  <rect x={x - 8} y={0} width={16} height={26} fill="transparent" />
-                  <rect x={x - 7} y={2} width={14} height={20} rx={3} fill={color} fillOpacity={0.9} />
-                  <text x={x} y={12} textAnchor="middle" dominantBaseline="central"
-                    fill="white" fontSize={9} fontWeight="bold"
-                    style={{ pointerEvents: "none", userSelect: "none" }}>
-                    {label}
-                  </text>
-                </g>
-              )}
-            </g>
-          );
-        });
-      })}
     </svg>
   );
 }
