@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Columns2,
   Copy,
   Download,
   Edit3,
@@ -24,7 +25,8 @@ type Action =
   | "layer_split"
   | "sprite_split"
   | "reskin"
-  | "reference";
+  | "reference"
+  | "compare";
 
 type Props = {
   generationId: string;
@@ -183,6 +185,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경 / 참조 전이)"
             >
               <Palette size={12} /> 리스킨
+            </button>
+            <button
+              onClick={() => onAction?.("compare")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
+            >
+              <Columns2 size={12} /> 비교
             </button>
             <button
               onClick={() => onAction?.("reference")}

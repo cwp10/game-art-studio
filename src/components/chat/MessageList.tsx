@@ -19,7 +19,8 @@ type Props = {
       | "layer_split"
       | "sprite_split"
       | "reskin"
-      | "reference",
+      | "reference"
+      | "compare",
     payload: {
       prompt?: string;
       generationId?: string;

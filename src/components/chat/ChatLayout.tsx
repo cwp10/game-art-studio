@@ -10,6 +10,7 @@ import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
+import { CompareSheet } from "@/components/library/CompareSheet";
 import { GallerySheet } from "@/components/library/GallerySheet";
 import { LogsPanel } from "@/components/library/LogsPanel";
 import { PromptLibrarySheet } from "@/components/library/PromptLibrarySheet";
@@ -56,6 +57,8 @@ type Editing =
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const [editing, setEditing] = useState<Editing>(null);
+  // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
+  const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -330,7 +333,8 @@ export function ChatLayout() {
         | "layer_split"
         | "sprite_split"
         | "reskin"
-        | "reference",
+        | "reference"
+        | "compare",
       payload: {
         prompt?: string;
         generationId?: string;
@@ -340,7 +344,9 @@ export function ChatLayout() {
         targetSize?: number;
       },
     ) => {
-      if (action === "duplicate" && payload.prompt) {
+      if (action === "compare" && payload.generationId) {
+        setComparing({ afterId: payload.generationId });
+      } else if (action === "duplicate" && payload.prompt) {
         handleSend(payload.prompt);
       } else if (action === "reference" && payload.generationId) {
         // 이 결과를 다음 메시지의 reference 로 attach.
@@ -764,6 +770,14 @@ export function ChatLayout() {
         onClose={() => setGalleryOpen(false)}
         onAction={handleAction}
       />
+      {comparing && (
+        <CompareSheet
+          open
+          afterId={comparing.afterId}
+          sessionId={state.activeSessionId}
+          onClose={() => setComparing(null)}
+        />
+      )}
       <LogsPanel open={logsOpen} onClose={() => setLogsOpen(false)} />
     </div>
   );
