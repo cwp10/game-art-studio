@@ -5,11 +5,18 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
 type GuideKey = "head" | "hip" | "feet";
+type VGuideKey = "left" | "center" | "right";
 
 const GUIDE_CONFIG: Record<GuideKey, { color: string; label: string; defaultPct: number }> = {
   head: { color: "#60a5fa", label: "머리", defaultPct: 0.15 },
   hip:  { color: "#4ade80", label: "골반", defaultPct: 0.50 },
   feet: { color: "#fb923c", label: "발끝", defaultPct: 0.85 },
+};
+
+const V_GUIDE_CONFIG: Record<VGuideKey, { color: string; label: string; defaultPct: number }> = {
+  left:   { color: "#f472b6", label: "좌",  defaultPct: 0.20 },
+  center: { color: "#fde047", label: "중",  defaultPct: 0.50 },
+  right:  { color: "#f472b6", label: "우",  defaultPct: 0.80 },
 };
 
 type Props = {
@@ -60,6 +67,12 @@ export function SpriteCanvas({
     ) as Record<GuideKey, number>,
   );
   const [dragGuide, setDragGuide] = useState<GuideKey | null>(null);
+  const [vGuidePcts, setVGuidePcts] = useState<Record<VGuideKey, number>>(
+    Object.fromEntries(
+      Object.entries(V_GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
+    ) as Record<VGuideKey, number>,
+  );
+  const [dragVGuide, setDragVGuide] = useState<VGuideKey | null>(null);
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
@@ -197,6 +210,27 @@ export function SpriteCanvas({
     };
   }, [dragGuide, displayH, rows]);
 
+  // 세로 가이드선 드래그
+  useEffect(() => {
+    if (!dragVGuide) return;
+    const container = canvasContainerRef.current;
+    if (!container) return;
+    const cellDisplayW = displayW / cols;
+    const onMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const relX = e.clientX - rect.left;
+      const pct = Math.max(0.02, Math.min(0.98, (relX % cellDisplayW) / cellDisplayW));
+      setVGuidePcts(prev => ({ ...prev, [dragVGuide]: pct }));
+    };
+    const onUp = () => setDragVGuide(null);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragVGuide, displayW, cols]);
+
   // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
   function autoAlign() {
     if (frames.length === 0) return;
@@ -333,8 +367,8 @@ export function SpriteCanvas({
           {showGuides && (
             <GuideOverlay
               rows={rows} cols={cols} w={displayW} h={displayH}
-              guidePcts={guidePcts}
-              onDragStart={setDragGuide}
+              guidePcts={guidePcts} onDragStart={setDragGuide}
+              vGuidePcts={vGuidePcts} onVDragStart={setDragVGuide}
             />
           )}
         </div>
@@ -371,13 +405,18 @@ export function SpriteCanvas({
             </button>
             {showGuides && (
               <button
-                onClick={() =>
+                onClick={() => {
                   setGuidePcts(
                     Object.fromEntries(
                       Object.entries(GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
                     ) as Record<GuideKey, number>,
-                  )
-                }
+                  );
+                  setVGuidePcts(
+                    Object.fromEntries(
+                      Object.entries(V_GUIDE_CONFIG).map(([k, v]) => [k, v.defaultPct]),
+                    ) as Record<VGuideKey, number>,
+                  );
+                }}
                 className="flex h-7 items-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary"
                 title="가이드선 기본 위치로 초기화"
               >
@@ -600,6 +639,8 @@ function GuideOverlay({
   h,
   guidePcts,
   onDragStart,
+  vGuidePcts,
+  onVDragStart,
 }: {
   rows: number;
   cols: number;
@@ -607,6 +648,8 @@ function GuideOverlay({
   h: number;
   guidePcts: Record<GuideKey, number>;
   onDragStart: (key: GuideKey) => void;
+  vGuidePcts: Record<VGuideKey, number>;
+  onVDragStart: (key: VGuideKey) => void;
 }) {
   const cellH = h / rows;
   const cellW = w / cols;
@@ -624,7 +667,7 @@ function GuideOverlay({
         Array.from({ length: cols }, (_, c) => {
           const cx = (c + 0.5) * cellW;
           const cy = (r + 0.5) * cellH;
-          const s = Math.min(cellW, cellH) * 0.06; // 셀 크기 대비 6%
+          const s = Math.min(cellW, cellH) * 0.06;
           return (
             <g key={`p-${r}-${c}`} opacity={0.55}>
               <line x1={cx - s} y1={cy} x2={cx + s} y2={cy} stroke="#fff" strokeWidth={1.5} />
@@ -635,7 +678,7 @@ function GuideOverlay({
         }),
       )}
 
-      {/* 가이드선: 각 행마다 반복, 첫 행에만 드래그 핸들 표시 */}
+      {/* 가로 가이드선: 각 행마다 반복, 첫 행 좌측에 드래그 핸들 */}
       {(Object.entries(guidePcts) as [GuideKey, number][]).map(([key, pct]) => {
         const { color, label } = GUIDE_CONFIG[key];
         return Array.from({ length: rows }, (_, r) => {
@@ -643,39 +686,51 @@ function GuideOverlay({
           const isFirst = r === 0;
           return (
             <g key={`g-${key}-${r}`}>
-              {/* 그림자 선 (대비) */}
-              <line
-                x1={0} y1={y} x2={w} y2={y}
-                stroke="rgba(0,0,0,0.45)" strokeWidth={2.5}
-                strokeDasharray="7 5"
-              />
-              {/* 색상 선 */}
-              <line
-                x1={0} y1={y} x2={w} y2={y}
-                stroke={color} strokeWidth={1.5}
-                strokeDasharray="7 5" strokeOpacity={0.9}
-              />
-              {/* 첫 행에만 드래그 핸들 */}
+              <line x1={0} y1={y} x2={w} y2={y}
+                stroke="rgba(0,0,0,0.45)" strokeWidth={2.5} strokeDasharray="7 5" />
+              <line x1={0} y1={y} x2={w} y2={y}
+                stroke={color} strokeWidth={1.5} strokeDasharray="7 5" strokeOpacity={0.9} />
               {isFirst && (
                 <g
                   style={{ pointerEvents: "auto", cursor: "ns-resize" }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDragStart(key);
-                  }}
+                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onDragStart(key); }}
                 >
-                  {/* 히트 영역 확장 (투명) */}
                   <rect x={0} y={y - 8} width={44} height={16} fill="transparent" />
-                  {/* 레이블 배지 */}
-                  <rect x={2} y={y - 7} width={40} height={14} rx={3}
-                    fill={color} fillOpacity={0.9} />
-                  <text
-                    x={22} y={y}
-                    textAnchor="middle" dominantBaseline="central"
+                  <rect x={2} y={y - 7} width={40} height={14} rx={3} fill={color} fillOpacity={0.9} />
+                  <text x={22} y={y} textAnchor="middle" dominantBaseline="central"
                     fill="white" fontSize={9} fontWeight="bold"
-                    style={{ pointerEvents: "none", userSelect: "none" }}
-                  >
+                    style={{ pointerEvents: "none", userSelect: "none" }}>
+                    {label}
+                  </text>
+                </g>
+              )}
+            </g>
+          );
+        });
+      })}
+
+      {/* 세로 가이드선: 각 열마다 반복, 첫 열 상단에 드래그 핸들 */}
+      {(Object.entries(vGuidePcts) as [VGuideKey, number][]).map(([key, pct]) => {
+        const { color, label } = V_GUIDE_CONFIG[key];
+        return Array.from({ length: cols }, (_, c) => {
+          const x = c * cellW + pct * cellW;
+          const isFirst = c === 0;
+          return (
+            <g key={`vg-${key}-${c}`}>
+              <line x1={x} y1={0} x2={x} y2={h}
+                stroke="rgba(0,0,0,0.45)" strokeWidth={2.5} strokeDasharray="7 5" />
+              <line x1={x} y1={0} x2={x} y2={h}
+                stroke={color} strokeWidth={1.5} strokeDasharray="7 5" strokeOpacity={0.9} />
+              {isFirst && (
+                <g
+                  style={{ pointerEvents: "auto", cursor: "ew-resize" }}
+                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); onVDragStart(key); }}
+                >
+                  <rect x={x - 8} y={0} width={16} height={26} fill="transparent" />
+                  <rect x={x - 7} y={2} width={14} height={20} rx={3} fill={color} fillOpacity={0.9} />
+                  <text x={x} y={12} textAnchor="middle" dominantBaseline="central"
+                    fill="white" fontSize={9} fontWeight="bold"
+                    style={{ pointerEvents: "none", userSelect: "none" }}>
                     {label}
                   </text>
                 </g>
