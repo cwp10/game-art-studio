@@ -575,8 +575,10 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
       data[i + 3] = 0;
       continue;
     }
-    // Pass 2: spill 제거 — 그린 톤만 살짝 우세한 경계 픽셀에서 g 채널을 desaturate
-    if (data[i + 3] > 0 && g > r + 15 && g > b + 15) {
+    // Pass 2: spill 제거 — 그린 톤이 살짝이라도 우세하면 g 채널을 max(r,b) 로 클램프.
+    // 화염/이펙트 가장자리의 미묘한 그린 틴트까지 제거. 캐릭터에 의도된 녹색이
+    // 있으면 같이 영향받지만 게임 캐릭터에서는 드물고, 잔재 제거 효과가 큼.
+    if (data[i + 3] > 0 && g > r + 5 && g > b + 5) {
       data[i + 1] = Math.max(r, b);
     }
   }
@@ -590,17 +592,16 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
 }
 
 /**
- * 스프라이트 시트의 각 셀에 대해:
- *   1. 4-connectivity flood fill 로 connected components 탐지
- *   2. 가장 큰 컴포넌트 = 메인 콘텐츠 (캐릭터+이펙트)
- *   3. 메인 bbox 밖 + 작은(메인의 10% 미만) 컴포넌트는 자동 제거
- *      → 인접 셀에서 침범한 잔재 픽셀이 bbox 에 끼지 않음
- *   4. 보존된 모든 콘텐츠의 union bbox 를 원본 크기로 추출
- *   5. 가로 중앙 + 세로 하단(bottom-align, paddingBottom 3%) 으로 배치
- *
- * 콘텐츠 탐지:
- *   - wantsTransparent: alpha > 10 픽셀
- *   - 흰 배경: not (R>240 && G>240 && B>240)
+ * 스프라이트 시트 후처리 (글로벌 connected components 기반):
+ *   1. 시트 전체에 대해 4-connectivity flood fill → 컴포넌트 라벨링
+ *   2. 각 컴포넌트를 "가장 많은 픽셀이 있는 셀" 에 통째로 할당
+ *      → 캐릭터가 셀 경계를 넘어 그려져도 발끝/날개 등이 잘리지 않음
+ *   3. 셀별로: 메인 컴포넌트(가장 큰 것) 식별 + 메인 bbox + 5% margin 안의
+ *      보존 대상 작은 컴포넌트 결정. 메인의 10% 미만이면서 bbox 밖이면 제거.
+ *   4. 보존 컴포넌트의 union bbox 영역을 글로벌 좌표로 추출
+ *   5. 가로: 메인 컴포넌트의 무게중심 x 를 셀 가로 중심에 정렬
+ *      세로: 메인 컴포넌트 y 의 95th percentile 을 발 라인으로 추정, 셀 하단 정렬
+ *      (시트 경계 안에 클램프 — 셀 경계 침범은 의도적으로 허용)
  */
 async function normalizeSpritesheetCells(
   filePath: string,
@@ -617,7 +618,7 @@ async function normalizeSpritesheetCells(
   const ch = info.channels;
   const cellW = Math.floor(W / cols);
   const cellH = Math.floor(H / rows);
-  const cellN = cellW * cellH;
+  const N = W * H;
   const paddingBottom = Math.round(cellH * 0.03);
   const margin = Math.round(Math.min(cellW, cellH) * 0.05);
 
@@ -626,139 +627,162 @@ async function normalizeSpritesheetCells(
     return !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
   };
 
+  // 1. 시트 전체 마스크
+  const mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    if (isContent(i * ch)) mask[i] = 1;
+  }
+
+  // 2. 글로벌 4-connectivity 라벨링
+  const labels = new Int32Array(N);
+  const sizes: number[] = [0];
+  let next = 1;
+  const stack: number[] = [];
+  for (let start = 0; start < N; start++) {
+    if (mask[start] === 0 || labels[start] !== 0) continue;
+    labels[start] = next;
+    let size = 0;
+    stack.push(start);
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      size++;
+      const x = p % W;
+      const y = (p - x) / W;
+      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
+        labels[p - 1] = next;
+        stack.push(p - 1);
+      }
+      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
+        labels[p + 1] = next;
+        stack.push(p + 1);
+      }
+      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
+        labels[p - W] = next;
+        stack.push(p - W);
+      }
+      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
+        labels[p + W] = next;
+        stack.push(p + W);
+      }
+    }
+    sizes.push(size);
+    next++;
+  }
+  if (sizes.length <= 1) {
+    log(`normalizeSpritesheetCells: empty sheet, skipping`);
+    return;
+  }
+
+  // 3. 컴포넌트별 픽셀 인덱스 + bbox + 셀별 픽셀 카운트
+  const compPixels: number[][] = Array.from({ length: sizes.length }, () => []);
+  const compCellCount: Map<number, number>[] = Array.from({ length: sizes.length }, () => new Map());
+  const compMinX = new Int32Array(sizes.length).fill(W);
+  const compMinY = new Int32Array(sizes.length).fill(H);
+  const compMaxX = new Int32Array(sizes.length).fill(-1);
+  const compMaxY = new Int32Array(sizes.length).fill(-1);
+  for (let i = 0; i < N; i++) {
+    const l = labels[i];
+    if (l === 0) continue;
+    const x = i % W;
+    const y = (i - x) / W;
+    compPixels[l].push(i);
+    if (x < compMinX[l]) compMinX[l] = x;
+    if (y < compMinY[l]) compMinY[l] = y;
+    if (x > compMaxX[l]) compMaxX[l] = x;
+    if (y > compMaxY[l]) compMaxY[l] = y;
+    const ci = Math.floor(y / cellH) * cols + Math.floor(x / cellW);
+    compCellCount[l].set(ci, (compCellCount[l].get(ci) ?? 0) + 1);
+  }
+
+  // 4. 각 컴포넌트 → 가장 많은 픽셀이 있는 셀에 할당
+  const labelsPerCell = new Map<number, number[]>();
+  for (let l = 1; l < sizes.length; l++) {
+    let maxCount = 0;
+    let assigned = 0;
+    for (const [ci, count] of compCellCount[l]) {
+      if (count > maxCount) {
+        maxCount = count;
+        assigned = ci;
+      }
+    }
+    if (!labelsPerCell.has(assigned)) labelsPerCell.set(assigned, []);
+    labelsPerCell.get(assigned)!.push(l);
+  }
+
   type Layer = { input: Buffer; top: number; left: number };
   const layers: Layer[] = [];
 
-  // 셀당 한 번씩 재사용할 버퍼
-  const mask = new Uint8Array(cellN);
-  const labels = new Int32Array(cellN);
-  const stack: number[] = [];
-
+  // 5. 셀별 처리
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      const cellIdx = r * cols + c;
       const cellX0 = c * cellW;
       const cellY0 = r * cellH;
+      const assigned = labelsPerCell.get(cellIdx);
+      if (!assigned || assigned.length === 0) continue;
 
-      // 1. 셀 마스크
-      mask.fill(0);
-      labels.fill(0);
-      for (let y = 0; y < cellH; y++) {
-        for (let x = 0; x < cellW; x++) {
-          const gi = ((cellY0 + y) * W + (cellX0 + x)) * ch;
-          if (isContent(gi)) mask[y * cellW + x] = 1;
-        }
-      }
-
-      // 2. 4-connectivity flood fill 로 컴포넌트 라벨링
-      const sizes: number[] = [0];
-      let next = 1;
-      for (let start = 0; start < cellN; start++) {
-        if (mask[start] === 0 || labels[start] !== 0) continue;
-        labels[start] = next;
-        let size = 0;
-        stack.push(start);
-        while (stack.length > 0) {
-          const p = stack.pop()!;
-          size++;
-          const lx = p % cellW;
-          const ly = (p - lx) / cellW;
-          if (lx > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
-            labels[p - 1] = next;
-            stack.push(p - 1);
-          }
-          if (lx < cellW - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
-            labels[p + 1] = next;
-            stack.push(p + 1);
-          }
-          if (ly > 0 && mask[p - cellW] === 1 && labels[p - cellW] === 0) {
-            labels[p - cellW] = next;
-            stack.push(p - cellW);
-          }
-          if (ly < cellH - 1 && mask[p + cellW] === 1 && labels[p + cellW] === 0) {
-            labels[p + cellW] = next;
-            stack.push(p + cellW);
-          }
-        }
-        sizes.push(size);
-        next++;
-      }
-      if (sizes.length <= 1) continue; // 빈 셀
-
-      // 3. 메인 컴포넌트 식별 + 메인 bbox 계산
-      let maxSize = 0;
-      let mainLabel = 0;
-      for (let l = 1; l < sizes.length; l++) {
+      // 메인 = 가장 큰 컴포넌트
+      let mainLabel = assigned[0];
+      let maxSize = sizes[mainLabel];
+      for (const l of assigned) {
         if (sizes[l] > maxSize) {
           maxSize = sizes[l];
           mainLabel = l;
         }
       }
-      let mMinX = cellW, mMinY = cellH, mMaxX = -1, mMaxY = -1;
-      for (let i = 0; i < cellN; i++) {
-        if (labels[i] !== mainLabel) continue;
-        const lx = i % cellW;
-        const ly = (i - lx) / cellW;
-        if (lx < mMinX) mMinX = lx;
-        if (ly < mMinY) mMinY = ly;
-        if (lx > mMaxX) mMaxX = lx;
-        if (ly > mMaxY) mMaxY = ly;
-      }
-      const exMinX = Math.max(0, mMinX - margin);
-      const exMinY = Math.max(0, mMinY - margin);
-      const exMaxX = Math.min(cellW - 1, mMaxX + margin);
-      const exMaxY = Math.min(cellH - 1, mMaxY + margin);
 
-      // 4. 작은(메인의 10% 미만) 컴포넌트 중 centroid 가 메인 bbox+margin 밖인 것 제거
-      const cxSum = new Float64Array(sizes.length);
-      const cySum = new Float64Array(sizes.length);
-      for (let i = 0; i < cellN; i++) {
-        const l = labels[i];
-        if (l === 0) continue;
-        const lx = i % cellW;
-        const ly = (i - lx) / cellW;
-        cxSum[l] += lx;
-        cySum[l] += ly;
-      }
+      // 메인 bbox + 5% margin (글로벌 좌표)
+      const exMinX = compMinX[mainLabel] - margin;
+      const exMinY = compMinY[mainLabel] - margin;
+      const exMaxX = compMaxX[mainLabel] + margin;
+      const exMaxY = compMaxY[mainLabel] + margin;
+
+      // 보존할 컴포넌트: 메인 + (큰 컴포넌트 OR 메인 bbox 안의 centroid)
       const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
-      const remove = new Uint8Array(sizes.length);
-      for (let l = 1; l < sizes.length; l++) {
-        if (l === mainLabel || sizes[l] >= minKeep) continue;
-        const cx = cxSum[l] / sizes[l];
-        const cy = cySum[l] / sizes[l];
-        if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) {
-          remove[l] = 1;
+      const keep: number[] = [mainLabel];
+      for (const l of assigned) {
+        if (l === mainLabel) continue;
+        if (sizes[l] >= minKeep) {
+          keep.push(l);
+          continue;
+        }
+        let sx = 0, sy = 0;
+        for (const idx of compPixels[l]) {
+          sx += idx % W;
+          sy += Math.floor(idx / W);
+        }
+        const cx = sx / compPixels[l].length;
+        const cy = sy / compPixels[l].length;
+        if (cx >= exMinX && cx <= exMaxX && cy >= exMinY && cy <= exMaxY) {
+          keep.push(l);
         }
       }
 
-      // 5. 보존된 콘텐츠의 union bbox 계산
-      let bMinX = cellW, bMinY = cellH, bMaxX = -1, bMaxY = -1;
-      for (let i = 0; i < cellN; i++) {
-        const l = labels[i];
-        if (l === 0 || remove[l] === 1) continue;
-        const lx = i % cellW;
-        const ly = (i - lx) / cellW;
-        if (lx < bMinX) bMinX = lx;
-        if (ly < bMinY) bMinY = ly;
-        if (lx > bMaxX) bMaxX = lx;
-        if (ly > bMaxY) bMaxY = ly;
+      // 보존 컴포넌트의 union bbox (글로벌)
+      let bMinX = W, bMinY = H, bMaxX = -1, bMaxY = -1;
+      for (const l of keep) {
+        if (compMinX[l] < bMinX) bMinX = compMinX[l];
+        if (compMinY[l] < bMinY) bMinY = compMinY[l];
+        if (compMaxX[l] > bMaxX) bMaxX = compMaxX[l];
+        if (compMaxY[l] > bMaxY) bMaxY = compMaxY[l];
       }
       if (bMaxX < 0) continue;
 
-      // 6. union bbox 영역의 RGBA 추출 (제거된 컴포넌트 픽셀은 알파 0)
+      const keepSet = new Set(keep);
       const bbW = bMaxX - bMinX + 1;
       const bbH = bMaxY - bMinY + 1;
       const bbBuf = Buffer.alloc(bbW * bbH * 4);
       for (let y = 0; y < bbH; y++) {
         for (let x = 0; x < bbW; x++) {
-          const lx = bMinX + x;
-          const ly = bMinY + y;
-          const li = ly * cellW + lx;
+          const gx = bMinX + x;
+          const gy = bMinY + y;
+          const li = gy * W + gx;
           const di = (y * bbW + x) * 4;
-          if (mask[li] === 0 || remove[labels[li]] === 1) {
+          if (mask[li] === 0 || !keepSet.has(labels[li])) {
             bbBuf[di + 3] = 0;
             continue;
           }
-          const gi = ((cellY0 + ly) * W + (cellX0 + lx)) * ch;
+          const gi = li * ch;
           bbBuf[di] = data[gi];
           bbBuf[di + 1] = data[gi + 1];
           bbBuf[di + 2] = data[gi + 2];
@@ -770,25 +794,52 @@ async function normalizeSpritesheetCells(
         .png()
         .toBuffer();
 
-      // 7. 발 라인 추정 — 메인 컴포넌트 y 좌표의 95th percentile.
-      //    캐릭터 발 아래 짧은 이펙트(파란 화염 등)가 메인의 일부여도, 픽셀 수가
-      //    캐릭터 본체보다 적으면 percentile 은 발 근처에 수렴.
-      //    union bbox bottom (가장 아래 픽셀) 으로 정렬하면 이펙트 길이가 셀마다
-      //    달라질 때 캐릭터 발 위치가 흔들리는 드리프트가 생김.
-      const mainYs: number[] = [];
-      for (let i = 0; i < cellN; i++) {
-        if (labels[i] !== mainLabel) continue;
-        mainYs.push(Math.floor(i / cellW));
+      // Shape-aware 본체 추출 — 메인 컴포넌트의 y행별 픽셀 수 분포 분석.
+      // 캐릭터 본체(어깨~다리)는 일정한 두께로 연속, 이펙트(불꽃 호/검기/폭발)는
+      // 행별 픽셀 수가 적음. row count 가 max 의 일정 비율 이상인 행만 "본체" 로
+      // 간주해 발 라인/가로 중심을 계산. → 이펙트 길이/방향 영향에서 자유로움.
+      const rowCounts = new Int32Array(H);
+      const rowSumX = new Float64Array(H);
+      for (const idx of compPixels[mainLabel]) {
+        const px = idx % W;
+        const py = Math.floor(idx / W);
+        rowCounts[py]++;
+        rowSumX[py] += px;
       }
-      mainYs.sort((a, b) => a - b);
-      const footY = mainYs[Math.min(mainYs.length - 1, Math.floor(mainYs.length * 0.95))];
+      let rowMax = 0;
+      for (let y = 0; y < H; y++) {
+        if (rowCounts[y] > rowMax) rowMax = rowCounts[y];
+      }
+      const bodyThreshold = Math.max(2, Math.floor(rowMax * 0.25));
 
-      // 발 라인을 셀 하단 paddingBottom 위에 맞춤. layer 가 셀 경계를 벗어나면 클램프.
-      const targetFootY = cellH - paddingBottom - 1;
+      // 본체 영역의 가장 아래 y = 발 라인 / 본체 픽셀의 가로 무게중심
+      let footY = compMaxY[mainLabel];
+      let bodySumX = 0;
+      let bodyCount = 0;
+      for (let y = compMaxY[mainLabel]; y >= compMinY[mainLabel]; y--) {
+        if (rowCounts[y] >= bodyThreshold) {
+          if (bodyCount === 0) footY = y; // 가장 처음 발견한 본체 행 = 가장 아래
+          bodySumX += rowSumX[y];
+          bodyCount += rowCounts[y];
+        }
+      }
+      // 본체 검출 실패(전체가 얇은 이펙트) 시 메인 픽셀 전체로 폴백
+      const mainCenterX = bodyCount > 0
+        ? bodySumX / bodyCount
+        : compPixels[mainLabel].reduce((s, idx) => s + (idx % W), 0) / compPixels[mainLabel].length;
+
+      // 가로: 본체 무게중심 x 를 셀 가로 중심에
+      const layerCenterX = mainCenterX - bMinX;
+      const desiredLeft = Math.round(cellX0 + cellW / 2 - layerCenterX);
+
+      // 세로: 본체 발 라인을 셀 하단 paddingBottom 위에
+      const targetFootY = cellY0 + cellH - paddingBottom - 1;
       const layerFootY = footY - bMinY;
       const desiredTop = Math.round(targetFootY - layerFootY);
-      const left = cellX0 + Math.round((cellW - bbW) / 2);
-      const top = cellY0 + Math.max(0, Math.min(cellH - bbH, desiredTop));
+
+      // 시트 경계 안으로 클램프 (셀 경계 침범은 허용 — 크게 그려진 캐릭터/이펙트 보존)
+      const left = Math.max(0, Math.min(W - bbW, desiredLeft));
+      const top = Math.max(0, Math.min(H - bbH, desiredTop));
       layers.push({ input: layerPng, top, left });
     }
   }
