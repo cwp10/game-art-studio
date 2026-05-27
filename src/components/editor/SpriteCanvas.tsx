@@ -50,8 +50,10 @@ export function SpriteCanvas({
     setAvail({ w, h });
   }, []);
 
-  const cap = avail ? Math.min(maxDisplayPx, avail.w, avail.h) : maxDisplayPx;
-  const scale = Math.min(1, cap / Math.max(imageWidth, imageHeight));
+  // 가로폭 기준으로 등비 축소 — 가로로 긴 스프라이트시트에서 세로가 찌그러지지 않도록.
+  const scale = avail
+    ? Math.min(1, avail.w / imageWidth)
+    : Math.min(1, maxDisplayPx / imageWidth);
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
@@ -367,7 +369,11 @@ export function SpriteCanvas({
           <p className="text-[11px] text-text-muted/60">
             썸네일을 드래그해서 캐릭터 위치를 조정하세요. 십자선 기준으로 맞추면 프레임 간 정렬이 됩니다.
           </p>
-          <div className="grid grid-cols-4 gap-1">
+          {/* cols 에 맞춰 동적 열 수 + 셀 비율을 실제 cellW/cellH 로 유지 */}
+          <div
+            className="grid gap-1"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+          >
             {thumbs.map((src, i) => {
               const off = offsets[i] ?? { x: 0, y: 0 };
               return (
@@ -376,6 +382,7 @@ export function SpriteCanvas({
                   className={`relative overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
                     dragging?.idx === i ? "cursor-grabbing ring-1 ring-[color:var(--accent)]" : "cursor-grab"
                   }`}
+                  style={{ aspectRatio: `${cellW}/${cellH}` }}
                   onMouseDown={e => {
                     e.preventDefault();
                     setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
@@ -385,7 +392,7 @@ export function SpriteCanvas({
                   <img
                     src={src}
                     alt={`frame ${i}`}
-                    className="block aspect-square w-full"
+                    className="absolute inset-0 h-full w-full object-contain"
                     draggable={false}
                   />
                   {/* 십자 점선 — 중앙 기준선 */}
