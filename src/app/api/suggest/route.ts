@@ -16,9 +16,9 @@ export const maxDuration = 120;
 
 // 단축 system prompt — 1차 ~1KB → ~250자. 응답 토큰 절감 + 빠름.
 const SYSTEM_PROMPT = `한국어 게임 에셋 prompt 제안. JSON 배열만 출력.
-[{"label":"<8-15자 한글 제목>","body":"<60-120자 한글 prompt — 주제/주요 시각요소/색감/배경 포함, 스타일·방향·참조는 제외>"}, ...]
+[{"label":"<8-15자 한글 제목>","body":"<60-120자 한글 prompt — 주제/주요 시각요소/색감 포함, 스타일·방향·참조는 제외. 배경은 항상 '투명 배경'으로 끝낼 것.>"}, ...]
 3-4개. 각 컨셉은 mood·theme 다르게. 예 캐릭터 코스튬:
-[{"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 빛나는 룬, 보라·금색, 흰 배경"},{"label":"모험가 여행 코스튬","body":"의상 모험가 여행 코스튬, 가벼운 재킷과 바지, 주머니·벨트, 낡은 천, 올리브·베이지, 흰 배경"}]`;
+[{"label":"신비한 의식용 코스튬","body":"의상 영웅 신비한 의식용 코스튬, 긴 로브와 장식용 천이 겹겹이 내려오는 성스러운 복장, 빛나는 룬, 보라·금색, 투명 배경"},{"label":"모험가 여행 코스튬","body":"의상 모험가 여행 코스튬, 가벼운 재킷과 바지, 주머니·벨트, 낡은 천, 올리브·베이지, 투명 배경"}]`;
 
 type Suggestion = { label: string; body: string };
 
@@ -42,9 +42,11 @@ export async function POST(req: NextRequest) {
   if (!input) return Response.json({ error: "input required" }, { status: 400 });
 
   // 캐시 적중 — 같은 input + TTL 내 → 즉시 응답.
+  // 기존 캐시에 "흰 배경" 으로 저장된 항목도 normalizeBg 로 일괄 보정.
   const cached = cache.get(input);
   if (cached && Date.now() - cached.ts < TTL_MS) {
-    return Response.json({ suggestions: cached.suggestions, cached: true });
+    const fixed = cached.suggestions.map((s: Suggestion) => ({ label: s.label, body: normalizeBg(s.body) }));
+    return Response.json({ suggestions: fixed, cached: true });
   }
 
   try {
@@ -61,7 +63,7 @@ export async function POST(req: NextRequest) {
       .filter((x): x is Suggestion =>
         !!x && typeof x === "object" && typeof (x as Suggestion).label === "string" && typeof (x as Suggestion).body === "string",
       )
-      .map(s => ({ label: s.label.trim(), body: s.body.trim() }))
+      .map(s => ({ label: s.label.trim(), body: normalizeBg(s.body.trim()) }))
       .filter(s => s.label && s.body);
     if (cleaned.length === 0) {
       return Response.json({ error: "no valid suggestions", raw: raw.slice(0, 400) }, { status: 502 });
@@ -71,6 +73,21 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 502 });
   }
+}
+
+/**
+ * 모델이 가끔 "흰 배경" / "white background" 를 반환하므로 일괄 치환.
+ * 어떤 배경 키워드도 없으면 끝에 "투명 배경" 을 덧붙임.
+ */
+function normalizeBg(body: string): string {
+  let out = body
+    .replace(/흰\s*배경/g, "투명 배경")
+    .replace(/하얀\s*배경/g, "투명 배경")
+    .replace(/white\s*background/gi, "transparent background");
+  if (!/투명\s*배경|transparent\s*background/i.test(out)) {
+    out = out.replace(/[.,]?\s*$/, "") + ", 투명 배경";
+  }
+  return out;
 }
 
 function extractJsonArray(raw: string): unknown[] | null {
