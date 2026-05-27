@@ -129,6 +129,27 @@ export async function suggestPrompts(input: string, signal?: AbortSignal): Promi
   return ((await r.json()) as { suggestions: Suggestion[] }).suggestions;
 }
 
+/**
+ * 레이어 분리용 "분리 가능한 부위" 라벨 4-6개 제안. generation 의 생성 prompt 를 보고
+ * Claude 가 추론 (이미지 vision 아님). LayerCanvas 의 부위명 chip 에 사용.
+ *
+ * 실패 시 빈 배열 반환 — UI 가 graceful 하게 처리 (throw 안 함).
+ */
+export async function suggestLayerParts(generationId: string, signal?: AbortSignal): Promise<string[]> {
+  try {
+    const r = await fetch("/api/layer-parts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ generationId }),
+      signal,
+    });
+    if (!r.ok) return [];
+    return ((await r.json()) as { parts?: string[] }).parts ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // ── style presets ───────────────────────────────────────────────────────────
 export async function listPresets(): Promise<StylePreset[]> {
   const r = await fetch("/api/presets");

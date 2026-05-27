@@ -1,7 +1,8 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Download, Eraser, RotateCcw, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Eraser, Loader2, RotateCcw, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { suggestLayerParts } from "@/lib/api/client";
 
 /**
  * LayerCanvas — 원본 이미지를 4색 brush 로 칠해 부위별 레이어로 분리.
@@ -120,6 +121,9 @@ export function LayerCanvas({
   const [results, setResults] = useState<LayerResult[]>([]);
   const drawingRef = useRef<Stroke | null>(null);
   const recompRef = useRef<HTMLCanvasElement>(null);
+  // AI 부위 추천 — 라벨 이름 chip 제안 (생성 prompt 기반, 이미지 vision 아님).
+  const [partsSuggesting, setPartsSuggesting] = useState(false);
+  const [suggestedParts, setSuggestedParts] = useState<string[]>([]);
 
   const hasStrokes = strokes.length > 0;
   // 실제 brush stroke 가 있는 색만 — 라벨 입력·z-order 대상.
@@ -298,6 +302,26 @@ export function LayerCanvas({
   // 색의 effective name — 사용자 라벨 trim, 없으면 ko fallback.
   function nameOf(colorKey: ColorKey): string {
     return labels[colorKey].trim() || COLORS[colorKey].ko;
+  }
+
+  // AI 부위 추천 — generation prompt 기반 라벨 chip 가져오기.
+  async function fetchSuggestedParts() {
+    if (partsSuggesting) return;
+    setPartsSuggesting(true);
+    try {
+      setSuggestedParts(await suggestLayerParts(parentGenerationId));
+    } finally {
+      setPartsSuggesting(false);
+    }
+  }
+
+  // chip 클릭 → 라벨 채울 대상 색 결정. 우선순위: 칠해진 + 선택된 색 → 칠해진 색 중 라벨 빈 첫 색.
+  // 채울 대상이 없으면 무시.
+  function applyPartLabel(text: string) {
+    const target =
+      paintedColors.includes(color) ? color : paintedColors.find(k => !labels[k].trim());
+    if (!target) return;
+    setLabels(prev => ({ ...prev, [target]: text }));
   }
 
   // crop 모드: 색별로 원본 × binary mask 합성 PNG (alpha 보존).
@@ -522,6 +546,35 @@ export function LayerCanvas({
                   행 순서 = z-stack (위=앞). 위에 있을수록 앞 레이어. */}
               {orderedColors.length > 0 && (
                 <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={fetchSuggestedParts}
+                      disabled={partsSuggesting}
+                      className="flex h-6 items-center gap-1 rounded border border-border bg-bg-app px-2 text-[11px] text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                      title="생성 프롬프트 기반 부위명 추천"
+                    >
+                      {partsSuggesting ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Sparkles size={12} />
+                      )}
+                      부위 추천
+                    </button>
+                    {suggestedParts.length > 0 && (
+                      <div className="flex flex-1 flex-wrap gap-1">
+                        {suggestedParts.map((p, i) => (
+                          <button
+                            key={`${p}-${i}`}
+                            onClick={() => applyPartLabel(p)}
+                            className="rounded-full border border-border bg-bg-app px-2 py-0.5 text-[10px] text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary"
+                            title="선택한 색 라벨에 채우기"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <p className="text-[10px] leading-tight text-text-muted/70">
                     위에 있을수록 앞 레이어 — 뒤 레이어의 가려진 부분을 복원합니다.
                   </p>
