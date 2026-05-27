@@ -238,6 +238,7 @@ async function runChat(
                 imageUrl: `/api/images/${generationId}`,
                 width: g?.width ?? 0,
                 height: g?.height ?? 0,
+                kind: g?.kind,
               },
             });
           } else {

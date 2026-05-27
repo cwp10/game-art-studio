@@ -15,7 +15,9 @@ export type MessageBlock =
   | { type: "text"; text: string }
   | { type: "image_ref"; generation_id: string }
   | { type: "tool_call"; id: string; name: string; args: unknown }
-  | { type: "tool_result"; tool_call_id: string; result: unknown };
+  // kind 는 영속 필드가 아니라, 메시지 로드 시 API 가 해당 generation 의 실제 kind 로
+  // 채워 넣는 enrichment 용(레거시 메시지의 result 에 kind 가 없을 때 보강).
+  | { type: "tool_result"; tool_call_id: string; result: unknown; kind?: string };
 
 export type Message = {
   id: string;

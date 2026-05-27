@@ -43,6 +43,7 @@ type EditTarget = {
   imageUrl: string;
   width: number;
   height: number;
+  kind?: string;
 };
 type Editing =
   | ({ mode: "inpaint" } & EditTarget)
@@ -213,6 +214,7 @@ export function ChatLayout() {
         generationId?: string;
         width?: number;
         height?: number;
+        kind?: string;
         targetSize?: number;
       },
     ) => {
@@ -257,6 +259,7 @@ export function ChatLayout() {
           imageUrl: `/api/images/${payload.generationId}`,
           width: payload.width,
           height: payload.height,
+          kind: payload.kind,
         });
       }
     },
@@ -576,6 +579,7 @@ export function ChatLayout() {
             imageUrl={editing.imageUrl}
             width={editing.width}
             height={editing.height}
+            kind={editing.kind}
             sessionId={state.activeSessionId}
             onSubmit={handleReskin}
             onClose={() => setEditing(null)}

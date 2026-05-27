@@ -24,6 +24,7 @@ type Props = {
       generationId?: string;
       width?: number;
       height?: number;
+      kind?: string;
       targetSize?: number;
     },
   ) => void;
@@ -117,6 +118,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                     generationId: lastTool.result!.generationId,
                     width: lastTool.result!.width,
                     height: lastTool.result!.height,
+                    kind: lastTool.result!.kind,
                     targetSize: opts?.targetSize,
                   })
                 }

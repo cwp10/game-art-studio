@@ -1138,6 +1138,7 @@ async function runImageTool(spec: {
       imagePath: `/api/images/${gen.id}`,
       width: result.width,
       height: result.height,
+      kind,
       elapsedMs: result.elapsedMs,
     },
   };

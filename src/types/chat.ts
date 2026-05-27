@@ -10,7 +10,7 @@ export type ChatEvent =
   | {
       type: "tool_call_finished";
       toolCallId: string;
-      result: { generationId: string; imageUrl: string; width: number; height: number } | { error: string };
+      result: { generationId: string; imageUrl: string; width: number; height: number; kind?: string } | { error: string };
     }
   | { type: "assistant_text"; text: string }
   | { type: "message_completed"; messageId: string }
