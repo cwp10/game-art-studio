@@ -104,7 +104,9 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                 ×{it.total} 배치 · {it.prompt}
               </div>
               <div className="grid grid-cols-2 gap-3">
-                {Array.from({ length: it.total }).map((_, j) => {
+                {/* stopped(취소/완료/재로드) 면 채워진 결과만, 진행 중이면 total 만큼 슬롯을
+                    그려 미완료 칸에 스피너. */}
+                {Array.from({ length: it.stopped ? it.results.length : it.total }).map((_, j) => {
                   const r = it.results[j];
                   if (!r) {
                     return (

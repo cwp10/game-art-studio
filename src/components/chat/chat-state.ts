@@ -39,11 +39,15 @@ export type ChatItem =
     }
   | {
       /** ×N 배치 생성 — 같은 프롬프트로 N장을 순차 생성해 한 그리드로 모음.
-       *  results 는 순차로 append (성공/에러 슬롯). 영속 안 함(세션 재로드 시 사라짐 — v1). */
+       *  results 는 순차로 append (성공/에러 슬롯). user 메시지 meta.batch 로 영속화되어
+       *  세션 재로드 시 messagesToItems 가 그리드를 복원한다. */
       kind: "batch";
       id: string;
       prompt: string;
       total: number;
+      /** 취소/완료/재로드로 더 이상 슬롯이 추가되지 않는 상태. true 면 MessageList 가
+       *  남은 빈 슬롯에 스피너를 그리지 않고 현재 results 만 렌더. */
+      stopped?: boolean;
       results: Array<
         { generationId: string; imageUrl: string; width: number; height: number } | { error: string }
       >;
@@ -70,6 +74,7 @@ export type ChatAction =
         | { generationId: string; imageUrl: string; width: number; height: number }
         | { error: string };
     }
+  | { type: "batch_stopped"; batchId: string }
   | { type: "set_generating"; generating: boolean }
   | { type: "sse"; event: ChatEvent }
   | {
@@ -110,10 +115,56 @@ function parseToolResult(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/** user 메시지의 meta.batch 를 안전하게 추출. 형태 불일치 시 null. */
+function readBatchMeta(
+  meta: Record<string, unknown> | null,
+): { id: string; index: number; total: number } | null {
+  if (!meta || typeof meta !== "object") return null;
+  const b = (meta as { batch?: unknown }).batch;
+  if (!b || typeof b !== "object") return null;
+  const { id, index, total } = b as { id?: unknown; index?: unknown; total?: unknown };
+  if (typeof id === "string" && typeof index === "number" && typeof total === "number") {
+    return { id, index, total };
+  }
+  return null;
+}
+
+/** batch 멤버 assistant 메시지에서 단일 이미지 결과 1개를 회수. */
+function extractImageResult(
+  m: Message,
+): { generationId: string; imageUrl: string; width: number; height: number } | { error: string } | null {
+  for (const b of m.content) {
+    if (b.type === "tool_result") {
+      const tr = b as Extract<MessageBlock, { type: "tool_result" }>;
+      const parsed = parseToolResult(tr.result);
+      if (parsed && typeof parsed.generationId === "string") {
+        return {
+          generationId: parsed.generationId,
+          imageUrl: `/api/images/${parsed.generationId}`,
+          width: typeof parsed.width === "number" ? parsed.width : 0,
+          height: typeof parsed.height === "number" ? parsed.height : 0,
+        };
+      }
+    } else if (b.type === "image_ref") {
+      const ir = b as Extract<MessageBlock, { type: "image_ref" }>;
+      return {
+        generationId: ir.generation_id,
+        imageUrl: `/api/images/${ir.generation_id}`,
+        width: 0,
+        height: 0,
+      };
+    }
+  }
+  return null;
+}
+
 /** 히스토리 메시지(DB) 를 화면 ChatItem 으로 변환. */
 function messagesToItems(messages: Message[]): ChatItem[] {
   const items: ChatItem[] = [];
   let currentAssistant: Extract<ChatItem, { kind: "assistant" }> | null = null;
+  // batchId → 이미 items 에 push 된 batch 그리드 참조. 바로 다음 assistant 가 결과를 채운다.
+  const batches = new Map<string, Extract<ChatItem, { kind: "batch" }>>();
+  let pendingBatch: Extract<ChatItem, { kind: "batch" }> | null = null;
 
   for (const m of messages) {
     if (m.role === "user") {
@@ -122,8 +173,29 @@ function messagesToItems(messages: Message[]): ChatItem[] {
         currentAssistant = null;
       }
       const text = m.content.find((b): b is Extract<MessageBlock, { type: "text" }> => b.type === "text")?.text ?? "";
-      items.push({ kind: "user", id: m.id, text });
+      const batch = readBatchMeta(m.meta);
+      if (batch) {
+        // 같은 batchId 의 첫 멤버에서만 user 버블 + batch 그리드를 한 번 emit.
+        let bi = batches.get(batch.id);
+        if (!bi) {
+          items.push({ kind: "user", id: m.id, text });
+          bi = { kind: "batch", id: batch.id, prompt: text, total: batch.total, stopped: true, results: [] };
+          batches.set(batch.id, bi);
+          items.push(bi);
+        }
+        pendingBatch = bi; // 다음 assistant 결과가 이 그리드로 들어간다
+      } else {
+        items.push({ kind: "user", id: m.id, text });
+        pendingBatch = null;
+      }
     } else if (m.role === "assistant") {
+      // 직전 user 가 batch 멤버면 결과를 그리드에 채우고 별도 assistant 아이템은 만들지 않는다.
+      if (pendingBatch) {
+        const r = extractImageResult(m);
+        pendingBatch.results.push(r ?? { error: "결과를 받지 못했어요." });
+        pendingBatch = null;
+        continue;
+      }
       currentAssistant = { kind: "assistant", id: m.id, toolCalls: [], finished: true };
       for (const b of m.content) {
         if (b.type === "tool_call") {
@@ -219,6 +291,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           it.kind === "batch" && it.id === action.batchId
             ? { ...it, results: [...it.results, action.result] }
             : it,
+        ),
+      };
+    case "batch_stopped":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "batch" && it.id === action.batchId ? { ...it, stopped: true } : it,
         ),
       };
     case "set_generating":

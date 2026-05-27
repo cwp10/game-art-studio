@@ -177,7 +177,11 @@ export function ChatLayout() {
             | null = null;
           try {
             await streamChat(
-              { sessionId: curSession ?? undefined, message: finalText },
+              {
+                sessionId: curSession ?? undefined,
+                message: finalText,
+                batch: { id: batchId, index: i, total: count },
+              },
               event => {
                 if (event.type === "session_started") {
                   curSession = event.sessionId;
@@ -205,6 +209,8 @@ export function ChatLayout() {
           } catch (e) {
             if ((e as Error).name === "AbortError") {
               dispatch({ type: "batch_result", batchId, result: { error: "취소되었습니다." } });
+              // 남은 슬롯에 스피너가 무한히 도는 것을 막는다(취소된 그리드 확정).
+              dispatch({ type: "batch_stopped", batchId });
               break;
             }
             result = { error: (e as Error).message };

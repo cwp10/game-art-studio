@@ -129,6 +129,8 @@ async function runChat(
     session_id: sessionId,
     role: "user",
     content: [{ type: "text", text: messageText }],
+    // 배치 멤버면 그룹 정보를 meta 로만 저장(본문 미오염). 재로드 시 그리드 복원에 사용.
+    meta: body.batch ? { batch: body.batch } : null,
   });
   send({ type: "session_started", sessionId, messageId: userMsg.id });
 
