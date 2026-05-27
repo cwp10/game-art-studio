@@ -528,6 +528,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const mcpResult = await runImageTool({
           name,
           kind: "reskin",
+          // 시트를 리스킨한 결과는 그 자체가 시트 → 'spritesheet' 로 저장해야 재-리스킨·
+          // 스프라이트 도구가 시트로 인식한다. 단일 입력은 'reskin' 유지. (codex 프롬프트는
+          // 위 kind='reskin' 으로 선택되므로 영향 없음.)
+          storeKind: isSheet ? "spritesheet" : "reskin",
           prompt,
           inputGenerationIds,
           overrideInputPaths,
@@ -1035,7 +1039,11 @@ function gcd(a: number, b: number): number {
 
 async function runImageTool(spec: {
   name: string;
+  /** codex 프롬프트 선택용 kind (buildNaturalPrompt). */
   kind: GenerationKind;
+  /** generation 행에 저장할 kind. 미지정 시 kind 와 동일. 프롬프트 kind 와 저장 kind 가
+   *  달라야 할 때 사용(예: reskin 으로 만든 시트는 프롬프트는 'reskin', 저장은 'spritesheet'). */
+  storeKind?: GenerationKind;
   prompt: string;
   inputGenerationIds: string[];
   extraInputPaths?: string[];
@@ -1049,7 +1057,8 @@ async function runImageTool(spec: {
   params?: Record<string, unknown>;
   sessionId: string | null;
 }) {
-  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId } = spec;
+  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId } = spec;
+  const persistedKind = storeKind ?? kind;
 
   // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
   // 없으면 inputGenerationIds → 경로 변환 후 extraInputPaths 를 뒤에 추가.
@@ -1107,7 +1116,7 @@ async function runImageTool(spec: {
     id: generationId,
     session_id: sessionId,
     message_id: null, // Claude orchestration 경로에서는 message_id 사후 연결.
-    kind,
+    kind: persistedKind,
     prompt,
     input_image_ids: inputGenerationIds,
     image_path: toRelative(result.imagePath),
@@ -1138,7 +1147,7 @@ async function runImageTool(spec: {
       imagePath: `/api/images/${gen.id}`,
       width: result.width,
       height: result.height,
-      kind,
+      kind: persistedKind,
       elapsedMs: result.elapsedMs,
     },
   };
