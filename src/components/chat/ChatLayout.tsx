@@ -91,9 +91,15 @@ export function ChatLayout() {
       skipNextLoadRef.current = false;
       return;
     }
-    listMessages(state.activeSessionId).then(messages =>
-      dispatch({ type: "load_messages", messages }),
-    );
+    // 세션 빠른 연속 전환 race 가드 — 이전 세션 fetch 를 abort 해서 늦게 온 응답이
+    // 현재 세션 items 를 덮어쓰지 못하게 한다.
+    const loadAbort = new AbortController();
+    listMessages(state.activeSessionId, loadAbort.signal)
+      .then(messages => dispatch({ type: "load_messages", messages }))
+      .catch(e => {
+        if ((e as Error).name !== "AbortError") console.error("[load-messages]", e);
+      });
+    return () => loadAbort.abort();
   }, [state.activeSessionId]);
 
   // 새 세션

@@ -26,8 +26,8 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/sessions/${id}`, { method: "DELETE" });
 }
 
-export async function listMessages(sessionId: string): Promise<Message[]> {
-  const r = await fetch(`/api/sessions/${sessionId}/messages`);
+export async function listMessages(sessionId: string, signal?: AbortSignal): Promise<Message[]> {
+  const r = await fetch(`/api/sessions/${sessionId}/messages`, { signal });
   const { messages } = (await r.json()) as { messages: Message[] };
   return messages;
 }
