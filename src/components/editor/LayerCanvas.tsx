@@ -656,32 +656,36 @@ export function LayerCanvas({
                   <Trash2 size={12} /> 모두 지우기
                 </button>
               </div>
-              <div className="border-t border-border pt-2">
-                <label className="flex items-start gap-2 text-text-muted">
-                  <input
-                    type="checkbox"
-                    checked={mode === "inpaint"}
-                    onChange={e => setMode(e.target.checked ? "inpaint" : "crop")}
-                    className="mt-0.5 size-3.5 accent-[color:var(--accent)]"
-                  />
+              <div className="space-y-2 border-t border-border pt-2">
+                <div className="flex items-start gap-2 text-text-muted">
+                  <button
+                    onClick={() => setMode(mode === "inpaint" ? "crop" : "inpaint")}
+                    className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border px-3 ${
+                      mode === "inpaint"
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                        : "border-border text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    ⚡ AI 복원 {mode === "inpaint" ? "ON" : "OFF"}
+                  </button>
                   <span className="flex-1 leading-tight">
-                    <span className="text-text-primary">⚡ AI 복원</span> — 가려진 영역을
-                    codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
+                    가려진 영역을 codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
                   </span>
-                </label>
+                </div>
                 {mode === "crop" && (
-                  <label className="mt-2 flex items-start gap-2 text-text-muted">
-                    <input
-                      type="checkbox"
-                      checked={trimToContent}
-                      onChange={e => setTrimToContent(e.target.checked)}
-                      className="mt-0.5 size-3.5 accent-[color:var(--accent)]"
-                    />
-                    <span className="flex-1 leading-tight">
-                      <span className="text-text-primary">✂️ 여백 잘라내기</span> — 분리 영역
-                      크기로 저장.
-                    </span>
-                  </label>
+                  <div className="flex items-start gap-2 text-text-muted">
+                    <button
+                      onClick={() => setTrimToContent(v => !v)}
+                      className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border px-3 ${
+                        trimToContent
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                          : "border-border text-text-muted hover:text-text-primary"
+                      }`}
+                    >
+                      ✂️ 여백 잘라내기 {trimToContent ? "ON" : "OFF"}
+                    </button>
+                    <span className="flex-1 leading-tight">분리 영역 크기로 저장.</span>
+                  </div>
                 )}
               </div>
               {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
