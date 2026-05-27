@@ -100,13 +100,18 @@ export function SpriteCanvas({
       return;
     }
     const out: HTMLCanvasElement[] = [];
+    // 셀을 dragPad 만큼 확장한 영역을 원본 시트에서 직접 크롭 → 패딩 밴드에 셀 경계를
+    // 넘어 그려진 실제 픽셀(발/로브/이펙트)이 담긴다. 빈 패딩이 아니라서 미세조정 시
+    // 셀 밖으로 빠진 콘텐츠를 다시 끌어올 수 있다. 1:1 매핑이라 음수 소스 좌표도 안전(밖은 투명).
+    const padW = cellW + 2 * dragPad;
+    const padH = cellH + 2 * dragPad;
     const push = (cx: number, cy: number) => {
       const c = document.createElement("canvas");
-      c.width = cellW;
-      c.height = cellH;
+      c.width = padW;
+      c.height = padH;
       const ctx = c.getContext("2d");
       if (!ctx) return;
-      ctx.drawImage(img, cx * cellW, cy * cellH, cellW, cellH, 0, 0, cellW, cellH);
+      ctx.drawImage(img, cx * cellW - dragPad, cy * cellH - dragPad, padW, padH, 0, 0, padW, padH);
       out.push(c);
     };
     if (order === "row") {
@@ -117,25 +122,24 @@ export function SpriteCanvas({
     setFrames(out);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
-  }, [imgLoaded, rows, cols, order, cellW, cellH]);
+  }, [imgLoaded, rows, cols, order, cellW, cellH, dragPad]);
 
-  // 썸네일용 — 패딩 캔버스에 프레임을 중앙+오프셋으로 배치.
-  // dragPad 만큼 여유가 있어 드래그 시 이미지 짤림 없음.
+  // 프레임은 이미 dragPad 포함 패딩 캔버스(실제 픽셀)이므로 사용자 오프셋만 적용해
+  // 재배치. 오프셋 0이면 원본 프레임 그대로 반환.
   const adjustedFrames = useMemo(() => {
     if (frames.length === 0 || offsets.length !== frames.length) return frames;
-    const padW = cellW + 2 * dragPad;
-    const padH = cellH + 2 * dragPad;
     return frames.map((frame, i) => {
       const off = offsets[i] ?? { x: 0, y: 0 };
+      if (off.x === 0 && off.y === 0) return frame;
       const c = document.createElement("canvas");
-      c.width = padW;
-      c.height = padH;
+      c.width = frame.width;
+      c.height = frame.height;
       const ctx = c.getContext("2d");
       if (!ctx) return c;
-      ctx.drawImage(frame, dragPad + off.x, dragPad + off.y);
+      ctx.drawImage(frame, off.x, off.y);
       return c;
     });
-  }, [frames, offsets, cellW, cellH, dragPad]);
+  }, [frames, offsets]);
 
   // 내보내기 = 패딩 캔버스(cellW+2*dragPad × cellH+2*dragPad) 그대로.
   // 드래그로 원본 셀 경계 밖으로 빠진 픽셀도 잘리지 않음.
