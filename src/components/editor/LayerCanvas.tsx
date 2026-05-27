@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Eraser, RotateCcw, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Eraser, RotateCcw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
@@ -110,6 +110,9 @@ export function LayerCanvas({
   const [labels, setLabels] = useState<Record<ColorKey, string>>(
     () => Object.fromEntries(COLOR_KEYS.map(k => [k, ""])) as Record<ColorKey, string>,
   );
+  // z-order: index 0 = 가장 앞(위) 레이어. 뒤로 갈수록 아래. inpaint 복원 마스크는
+  // 각 색 L 보다 앞에 있는 색들만 "가린다" 고 보고 그 union ∖ self 를 복원 영역으로 삼는다.
+  const [zOrder, setZOrder] = useState<ColorKey[]>([]);
   const [mode, setMode] = useState<SubmitMode>("crop");
   const [phase, setPhase] = useState<"draw" | "result">("draw");
   const [submitting, setSubmitting] = useState(false);
@@ -117,6 +120,28 @@ export function LayerCanvas({
   const [results, setResults] = useState<LayerResult[]>([]);
   const drawingRef = useRef<Stroke | null>(null);
   const recompRef = useRef<HTMLCanvasElement>(null);
+
+  const hasStrokes = strokes.length > 0;
+  // 실제 brush stroke 가 있는 색만 — 라벨 입력·z-order 대상.
+  const paintedColors = COLOR_KEYS.filter(k =>
+    strokes.some(s => s.color === k && s.tool === "brush"),
+  );
+
+  // 유효 z-stack (위=앞 순서). zOrder 는 사용자가 reorder 로 명시한 순서 힌트일 뿐이며,
+  // 실제 표시·마스크 순서는 paintedColors 를 zOrder 위치로 정렬해 파생한다 (sync 효과 불필요).
+  // zOrder 에 없는 새로 칠한 색은 COLOR_KEYS 순서대로 맨 뒤(아래)에 붙는다.
+  const orderedColors = [...paintedColors].sort((a, b) => {
+    const ra = zOrder.indexOf(a);
+    const rb = zOrder.indexOf(b);
+    return (ra === -1 ? Number.MAX_SAFE_INTEGER : ra) - (rb === -1 ? Number.MAX_SAFE_INTEGER : rb);
+  });
+
+  // 결과 뷰용 z-order 정렬: orderedColors[0]=앞(위) 순서를 그대로 따른다 (없는 색은 뒤로).
+  const zRank = (cl: string) => {
+    const r = orderedColors.indexOf(cl as ColorKey);
+    return r === -1 ? Number.MAX_SAFE_INTEGER : r;
+  };
+  const orderedResults = [...results].sort((a, b) => zRank(a.colorLabel) - zRank(b.colorLabel));
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
@@ -197,9 +222,11 @@ export function LayerCanvas({
     const ctx = c.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, imageWidth, imageHeight);
+    // 뒤(아래) 레이어부터 그려 앞(위) 레이어가 위에 오도록 — z-order 합성.
+    const backToFront = [...orderedResults].reverse();
     let cancelled = false;
     (async () => {
-      for (const r of results) {
+      for (const r of backToFront) {
         const img = await loadImage(`/api/images/${r.generationId}`);
         if (cancelled || !img) continue;
         ctx.drawImage(img, 0, 0, imageWidth, imageHeight);
@@ -208,7 +235,9 @@ export function LayerCanvas({
     return () => {
       cancelled = true;
     };
-  }, [phase, results, imageWidth, imageHeight]);
+    // orderedResults 는 results+zOrder 파생 — 둘만 의존성으로 두면 충분.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, results, zOrder, imageWidth, imageHeight]);
 
   // ── pointer events ─────────────────────────────────────────────────────────
   const startStroke = useCallback(
@@ -293,25 +322,27 @@ export function LayerCanvas({
   }
 
   // inpaint 모드: 색별로 codex 가 인식하는 binary mask PNG (red=복원할 영역, black=보존).
-  // 복원 영역 = "다른 색으로 칠해진 모든 곳" (= 그 부위를 가리는 다른 부위). 안 칠한 영역은
-  // 검정 (보존) — 원본 그대로. 따라서 사용자가 모든 픽셀을 칠하지 않아도 부분 복원 가능.
+  // 복원 영역 = "L 보다 앞(위)에 있는 레이어들이 칠한 곳" (= L 을 가리는 부위) ∖ self.
+  // 뒤(아래) 레이어는 L 을 가리지 않으므로 제외. 맨 앞 레이어는 가리는 것이 없어 inpaint 스킵.
+  // 안 칠한 영역은 검정 (보존) — 원본 그대로. 부분 복원 가능.
   function exportInpaintMasks(): Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> {
     const out: Array<{ colorLabel: ColorKey; name: string; dataUrl: string }> = [];
-    for (const colorKey of COLOR_KEYS) {
+    for (const colorKey of orderedColors) {
       const selfMask = buildColorMask(colorKey);
       if (!selfMask) continue;
-      // others = union of all other colors' masks
+      // others = union of colors that are in front of (above) colorKey in z-stack.
+      const idx = orderedColors.indexOf(colorKey);
+      const frontColors = orderedColors.slice(0, idx);
       const othersC = document.createElement("canvas");
       othersC.width = imageWidth;
       othersC.height = imageHeight;
       const octx = othersC.getContext("2d");
       if (!octx) continue;
-      for (const other of COLOR_KEYS) {
-        if (other === colorKey) continue;
-        const m = buildColorMask(other);
+      for (const front of frontColors) {
+        const m = buildColorMask(front);
         if (m) octx.drawImage(m, 0, 0);
       }
-      if (!hasAnyPixel(octx, imageWidth, imageHeight)) continue; // 다른 색이 없으면 inpaint 불필요
+      if (!hasAnyPixel(octx, imageWidth, imageHeight)) continue; // 앞 레이어가 없으면 inpaint 불필요
       // final: red where others & not self, black elsewhere. 검정 base 위에 others = red 칠하고,
       // self 영역은 다시 검정으로 덮어씀 (겹친 영역은 보존이 우선).
       const finalC = document.createElement("canvas");
@@ -340,11 +371,14 @@ export function LayerCanvas({
     return out;
   }
 
-  const hasStrokes = strokes.length > 0;
-  // 실제 brush stroke 가 있는 색만 — 라벨 입력 대상.
-  const paintedColors = COLOR_KEYS.filter(k =>
-    strokes.some(s => s.color === k && s.tool === "brush"),
-  );
+  // z-stack 표시 인덱스 i 의 색을 dir(-1 앞/위, +1 뒤/아래)로 한 칸 이동.
+  function moveLayer(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= orderedColors.length) return;
+    const next = [...orderedColors];
+    [next[i], next[j]] = [next[j], next[i]];
+    setZOrder(next);
+  }
 
   async function submit() {
     if (!hasStrokes || submitting || busy) return;
@@ -484,10 +518,14 @@ export function LayerCanvas({
                   <Eraser size={12} /> 지우개
                 </button>
               </div>
-              {/* 칠해진 색에만 부위명 입력 — inpaint 복원 프롬프트·crop 결과 라벨에 반영. */}
-              {paintedColors.length > 0 && (
+              {/* 칠해진 색에만 부위명 입력 + z-order — inpaint 복원·crop 결과 라벨에 반영.
+                  행 순서 = z-stack (위=앞). 위에 있을수록 앞 레이어. */}
+              {orderedColors.length > 0 && (
                 <div className="space-y-1">
-                  {paintedColors.map(k => (
+                  <p className="text-[10px] leading-tight text-text-muted/70">
+                    위에 있을수록 앞 레이어 — 뒤 레이어의 가려진 부분을 복원합니다.
+                  </p>
+                  {orderedColors.map((k, i) => (
                     <div key={k} className="flex items-center gap-1.5">
                       <span
                         className="inline-block size-3 shrink-0 rounded-full"
@@ -500,6 +538,22 @@ export function LayerCanvas({
                         placeholder={`${COLORS[k].ko} 부위명 (예: 머리띠)`}
                         className="h-6 flex-1 rounded border border-border bg-bg-app px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
                       />
+                      <button
+                        onClick={() => moveLayer(i, -1)}
+                        disabled={i === 0}
+                        className="rounded border border-border p-0.5 text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-25"
+                        title="앞으로 (위)"
+                      >
+                        <ChevronUp size={12} />
+                      </button>
+                      <button
+                        onClick={() => moveLayer(i, 1)}
+                        disabled={i === orderedColors.length - 1}
+                        className="rounded border border-border p-0.5 text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-25"
+                        title="뒤로 (아래)"
+                      >
+                        <ChevronDown size={12} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -567,8 +621,8 @@ export function LayerCanvas({
 
             {/* exploded 레이어 스택 — 각 레이어를 이름과 함께 세로로 분리 표시. */}
             <div className="space-y-2">
-              <p className="text-[11px] font-medium text-text-muted">레이어 ({results.length})</p>
-              {results.map((r, i) => {
+              <p className="text-[11px] font-medium text-text-muted">레이어 ({results.length}) · 위=앞</p>
+              {orderedResults.map((r, i) => {
                 const c = COLORS[r.colorLabel as ColorKey];
                 const name = r.name?.trim() || c?.ko || r.colorLabel;
                 return (
