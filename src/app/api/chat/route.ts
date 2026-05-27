@@ -79,10 +79,10 @@ export async function POST(req: NextRequest) {
   try {
     body = (await req.json()) as ChatRequest;
   } catch {
-    return new Response(JSON.stringify({ error: "invalid json" }), { status: 400 });
+    return Response.json({ error: "invalid json" }, { status: 400 });
   }
   if (!body.message || typeof body.message !== "string") {
-    return new Response(JSON.stringify({ error: "message required" }), { status: 400 });
+    return Response.json({ error: "message required" }, { status: 400 });
   }
 
   const { stream, send, close, signal } = createSseStream<ChatEvent>();
