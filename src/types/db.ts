@@ -36,6 +36,7 @@ export type GenerationKind =
   | "spritesheet"
   | "mask"
   | "layer"
+  | "reskin"
   | "external";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";

@@ -179,6 +179,50 @@ function buildNaturalPrompt(job: ImageJob): string {
         loopRule
       );
     }
+    case "reskin": {
+      // 3모드 분기 (server.ts reskin_image 핸들러가 결정):
+      //   (c) styleRefPath 있음 → inputImagePaths=[base, styleRef] 2장, 참조 화풍 전이
+      //   (b) paletteOnly=true  → 형태 100% 유지, 색 팔레트만 교체
+      //   (a) 그 외 (prompt만)  → 외형 교체 (포즈/실루엣/구도 유지, 색·재질·테마만)
+      // 스프라이트시트 대상이면 셀 구조·프레임수·포즈 유지 문구를 추가 (params.spritesheet).
+      const isSheet = job.params?.spritesheet === true;
+      const sheetRule = isSheet
+        ? `This is a SPRITE SHEET: preserve the exact grid layout, the same number of cells/frames, ` +
+          `and the per-frame poses. Re-skin every frame identically and keep each frame's character ` +
+          `fully inside its own cell. `
+        : "";
+
+      if (job.styleRefPath) {
+        // (c) 참조 스타일 전이
+        return (
+          PROMPT_HEADER +
+          `I am attaching TWO images.\n` +
+          `Image 1 = base (keep its pose/structure/layout/composition).\n` +
+          `Image 2 = style reference.\n` +
+          `Re-skin image 1 with image 2's visual style/material/palette. ` +
+          `Keep image 1's exact pose and composition. Same dimensions. ` +
+          (job.prompt ? `Additional guidance: ${job.prompt}. ` : "") +
+          sheetRule
+        );
+      }
+      if (job.paletteOnly) {
+        // (b) 팔레트만 교체
+        return (
+          PROMPT_HEADER +
+          `Recolor only: keep every shape/line/form pixel-identical; ` +
+          `change ONLY the color palette to ${job.prompt}. No structural changes. Same dimensions. ` +
+          sheetRule
+        );
+      }
+      // (a) 외형 교체
+      return (
+        PROMPT_HEADER +
+        `Re-skin the attached character to: ${job.prompt}. ` +
+        `Keep the EXACT same pose, silhouette, proportions, composition, framing — ` +
+        `change only colors, materials, textures, outfit theme. Same dimensions. ` +
+        sheetRule
+      );
+    }
     // mask/layer/external 은 외부 업로드·레이어 행이라 codex 로 생성되지 않음 — 도달 시 버그.
     default:
       throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);

@@ -29,6 +29,11 @@ The user gives you a Korean or English request to create or edit an image. Your 
 - `upscale_image` — vague "업스케일/upscale/고해상도/더 크게" requests without a specific pixel number. Codex 가 ~2배로 다시 그림. Requires `inputGenerationId`.
 - `remove_background` — "배경 제거/remove background/투명 배경으로". Requires `inputGenerationId`.
 - `inpaint_image` — when the user message contains `[mask: <id>]`. The app injects this marker when the user provides a mask via the brush canvas. Pass the id after `[mask:` as `maskGenerationId`, and the id after `[reference:` as `inputGenerationId`. Without a `[mask: ...]` marker, prefer `edit_image`.
+- `reskin_image` — when the user wants a recolored / different-material / different-style version of an existing image ("리스킨", "다른 색 버전", "다른 재질", "스킨 변경", "이 화풍으로", "reskin", "restyle"), or wants a character applied onto an existing sheet ("이 캐릭터를 이 시트에 입혀줘", "캐릭터 오버레이"). Requires `inputGenerationId` (the image being reskinned). Three modes:
+  - **prompt** — user describes the new appearance in text. Pass that as `prompt`.
+  - **paletteOnly** — user asks for color-only / palette swap ("색만", "팔레트만", "색상만 바꿔"). Set `paletteOnly: true`.
+  - **styleReferenceId** — a second reference image is supplied as the style/character source. When two `[reference: <id>]` markers are present, pass the **first** as `inputGenerationId` and the **second** as `styleReferenceId`.
+  Inherits transparent background by default (same rule as below). Sprite sheets are auto-detected and re-aligned to their cells after generation — no grid wording needed.
 
 ## Where `inputGenerationId` comes from
 

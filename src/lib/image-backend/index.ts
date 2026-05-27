@@ -21,6 +21,10 @@ export type ImageJob = {
   prompt: string;
   /** img2img/inpaint 등의 입력 이미지 절대 경로. */
   inputImagePaths?: string[];
+  /** reskin 모드(c): 스타일 참조 이미지 절대 경로. inputImagePaths=[base, styleRef] 와 함께 쓰임. */
+  styleRefPath?: string;
+  /** reskin 모드(b): 형태 100% 유지 + 색 팔레트만 교체. */
+  paletteOnly?: boolean;
   /** size/quality 등 기타 파라미터 (현재 v1 에선 자연어 prompt 에 녹임). */
   params?: Record<string, unknown>;
 };

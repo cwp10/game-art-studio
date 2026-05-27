@@ -57,6 +57,7 @@ const MCP_TOOL_NAMES = [
   "mcp__imggen__resize_image",
   "mcp__imggen__remove_background",
   "mcp__imggen__inpaint_image",
+  "mcp__imggen__reskin_image",
 ];
 
 let cachedSystemPrompt: string | null = null;

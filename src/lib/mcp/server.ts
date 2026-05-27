@@ -152,6 +152,33 @@ const SCHEMAS = {
     },
     required: ["prompt", "inputGenerationId"],
   },
+  reskin_image: {
+    type: "object" as const,
+    properties: {
+      inputGenerationId: {
+        type: "string",
+        description:
+          "리스킨 대상 이미지의 generation id (필수). 단일 이미지/스프라이트시트 모두 가능 — 대상 kind 로 시트 여부 자동 판별.",
+      },
+      prompt: {
+        type: "string",
+        description:
+          "(선택) 원하는 스킨 설명. 모드 a(외형 교체)·b(색 팔레트)의 본문, 모드 c(참조 전이)의 추가 지시.",
+      },
+      styleReferenceId: {
+        type: "string",
+        description:
+          "(선택, 모드 c) 화풍/팔레트를 가져올 스타일 참조 이미지의 generation id. 지정 시 [대상, 참조] 2장으로 스타일 전이.",
+      },
+      paletteOnly: {
+        type: "boolean",
+        description:
+          "(선택, 모드 b) true 면 형태·선을 100% 유지하고 색 팔레트만 prompt 대로 교체.",
+      },
+      ...SESSION_PROP,
+    },
+    required: ["inputGenerationId"],
+  },
 } as const;
 
 const TOOLS = [
@@ -206,6 +233,16 @@ const TOOLS = [
       "maskGenerationId 가 있으면 그 영역만 다시 그림.",
     inputSchema: SCHEMAS.inpaint_image,
   },
+  {
+    name: "reskin_image",
+    description:
+      "기존 이미지/스프라이트시트의 외형을 바꿔 새 버전을 생성 (구조·포즈는 유지). 3모드: " +
+      "(a) prompt 만 → 외형 교체(색·재질·테마만, 포즈/실루엣/구도 유지). " +
+      "(b) paletteOnly=true → 형태 100% 유지, 색 팔레트만 prompt 대로 교체. " +
+      "(c) styleReferenceId → 참조 이미지의 화풍/팔레트를 대상에 전이. " +
+      "대상이 스프라이트시트면 셀 정렬·투명화 후처리가 자동 적용된다(단일 이미지는 후처리 없음).",
+    inputSchema: SCHEMAS.reskin_image,
+  },
 ];
 
 // ─── server bootstrap ────────────────────────────────────────────────────────
@@ -223,6 +260,8 @@ type CallArgs = {
   prompt?: string;
   inputGenerationId?: string;
   maskGenerationId?: string;
+  styleReferenceId?: string;
+  paletteOnly?: boolean;
   rows?: number;
   cols?: number;
   targetSize?: number;
@@ -451,6 +490,92 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           inputGenerationIds: ids,
           sessionId,
         });
+      }
+
+      case "reskin_image": {
+        const inputId = requireString(args.inputGenerationId, "inputGenerationId");
+        const inputGen = getGeneration(inputId);
+        if (!inputGen) throw new Error(`generation not found: ${inputId}`);
+        const inputPath = path.join(DATA_DIR, inputGen.image_path);
+
+        const paletteOnly = args.paletteOnly === true;
+        const styleRefId =
+          typeof args.styleReferenceId === "string" && args.styleReferenceId
+            ? args.styleReferenceId
+            : null;
+        const prompt = typeof args.prompt === "string" ? args.prompt : "";
+
+        // 모드 결정: c(참조) > b(팔레트) > a(외형). c·b 외엔 prompt 가 사실상 필수.
+        let styleRefPath: string | undefined;
+        const inputGenerationIds = [inputId];
+        let overrideInputPaths: string[] | undefined;
+        if (styleRefId) {
+          const styleGen = getGeneration(styleRefId);
+          if (!styleGen) throw new Error(`style reference generation not found: ${styleRefId}`);
+          styleRefPath = path.join(DATA_DIR, styleGen.image_path);
+          // Codex 입력 순서: [base, styleRef] (codex-exec 의 reskin 분기와 일치).
+          overrideInputPaths = [inputPath, styleRefPath];
+          inputGenerationIds.push(styleRefId);
+        }
+        if (!styleRefId && !prompt) {
+          throw new Error("reskin_image requires either a prompt or a styleReferenceId");
+        }
+
+        const isSheet = inputGen.kind === "spritesheet";
+        // 시트면 입력 배경 상속(투명 여부) — 후처리 chroma-key/정렬에 사용.
+        const wantsTransparent = isSheet ? await detectTransparentBg(inputPath) : false;
+
+        const mcpResult = await runImageTool({
+          name,
+          kind: "reskin",
+          prompt,
+          inputGenerationIds,
+          overrideInputPaths,
+          styleRefPath,
+          paletteOnly,
+          params: {
+            mode: styleRefId ? "style_ref" : paletteOnly ? "palette" : "appearance",
+            styleReferenceId: styleRefId,
+            spritesheet: isSheet,
+          },
+          sessionId,
+        });
+
+        // 스프라이트시트 입력이면 후처리: resize → chroma-key → normalizeSpritesheetCells.
+        // grid 는 결과 치수에서 detectSpriteGrid 로 역산. 감지 실패 시 단일처럼 폴백(스킵).
+        if (isSheet) {
+          const genId: string | undefined = mcpResult?.structuredContent?.generationId;
+          if (genId) {
+            const filePath = imagePathFor(genId);
+            try {
+              const meta = await sharp(filePath).metadata();
+              const grid = detectSpriteGrid(meta.width ?? 0, meta.height ?? 0);
+              if (!grid) {
+                log(`reskin_image: grid detect failed (${meta.width}x${meta.height}), skip sheet post-process`);
+              } else {
+                const { rows, cols } = grid;
+                const cellW = Math.floor((meta.width ?? 0) / cols);
+                const cellH = Math.floor((meta.height ?? 0) / rows);
+                const canvasW = cols * cellW;
+                const canvasH = rows * cellH;
+                const resizeTmp = `${filePath}.resize.tmp`;
+                await sharp(filePath)
+                  .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
+                  .png()
+                  .toFile(resizeTmp);
+                fs.renameSync(resizeTmp, filePath);
+                if (wantsTransparent) {
+                  await chromaKeyGreenFile(filePath);
+                }
+                await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
+                log(`reskin_image sheet post-process gen=${genId} ${cols}x${rows} transparent=${wantsTransparent}`);
+              }
+            } catch (e) {
+              log(`reskin_image post-process fail: ${(e as Error).message}`);
+            }
+          }
+        }
+        return mcpResult;
       }
 
       default:
@@ -871,6 +996,43 @@ async function normalizeSpritesheetCells(
   log(`normalizeSpritesheetCells: ${cols}x${rows} cells normalized, ${layers.length} non-empty`);
 }
 
+/**
+ * 스프라이트 시트 이미지 크기에서 rows × cols 를 역산 (gcd 기반).
+ * make_spritesheet 는 정사각 셀(cellW=cellH=min(512, floor(2048/max(rows,cols)))) 을 쓰므로
+ * gcd(width,height) 의 약수 중 64~512 px 범위에서 rows/cols 가 1~16 정수가 되는 셀 크기를 찾는다.
+ *
+ * NOTE: src/components/editor/SpriteCanvas.tsx 의 detectSpriteGrid 와 동일 로직.
+ *       한 쪽을 고치면 다른 쪽도 동기화할 것.
+ */
+function detectSpriteGrid(
+  width: number,
+  height: number,
+): { rows: number; cols: number } | null {
+  if (!width || !height) return null;
+  const g = gcd(width, height);
+  const divs: number[] = [];
+  for (let d = 1; d * d <= g; d++) {
+    if (g % d === 0) {
+      divs.push(d);
+      if (d !== g / d) divs.push(g / d);
+    }
+  }
+  divs.sort((a, b) => b - a);
+  for (const d of divs) {
+    if (d < 64 || d > 512) continue;
+    const c = width / d;
+    const r = height / d;
+    if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
+      return { rows: r, cols: c };
+    }
+  }
+  return null;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
 async function runImageTool(spec: {
   name: string;
   kind: GenerationKind;
@@ -880,10 +1042,14 @@ async function runImageTool(spec: {
   /** Codex 에 실제로 전달할 이미지 경로 순서를 완전히 override.
    *  설정하면 inputGenerationIds + extraInputPaths 자동 조합을 무시. */
   overrideInputPaths?: string[];
+  /** reskin 모드(c): 스타일 참조 이미지 절대 경로. */
+  styleRefPath?: string;
+  /** reskin 모드(b): 색 팔레트만 교체. */
+  paletteOnly?: boolean;
   params?: Record<string, unknown>;
   sessionId: string | null;
 }) {
-  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, params, sessionId } = spec;
+  const { name, kind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId } = spec;
 
   // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
   // 없으면 inputGenerationIds → 경로 변환 후 extraInputPaths 를 뒤에 추가.
@@ -931,7 +1097,7 @@ async function runImageTool(spec: {
   }
 
   const backend = await selectImageBackend();
-  const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths, params };
+  const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths, styleRefPath, paletteOnly, params };
   const result = await backend.execute(job, (stage, detail) => {
     log(`  ${jobId} stage=${stage}${detail ? " " + detail : ""}`);
     appendProgress(stage, detail);
