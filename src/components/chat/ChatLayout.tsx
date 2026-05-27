@@ -168,7 +168,13 @@ export function ChatLayout() {
             attachmentGenerationIds: opts?.attachmentGenerationIds,
             maskGenerationId: opts?.maskGenerationId,
           },
-          event => dispatch({ type: "sse", event }),
+          event => {
+            dispatch({ type: "sse", event });
+            // 새 세션이 만들어지는 즉시(생성 시작 시점) 사이드바 갱신 — 응답 완료까지 기다리지 않음.
+            if (event.type === "session_started") {
+              listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
+            }
+          },
           abort.signal,
         );
         // 응답 끝나면 세션 목록 refresh (새 세션이 만들어졌거나 updated_at 갱신)
@@ -513,7 +519,7 @@ export function ChatLayout() {
           </div>
         )}
         <header className="flex h-14 items-center border-b border-border px-4">
-          <h1 className="font-mono text-sm text-text-muted">⌘ image-generator</h1>
+          <h1 className="font-mono text-sm text-text-muted">⌘ SpriteForge</h1>
           <span className="ml-auto text-xs text-text-muted">개인용 · Codex imagegen</span>
         </header>
         <main className="flex-1 overflow-y-auto">

@@ -19,8 +19,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
         pendingToolResult = block;
       } else if (block.type === "image_ref") {
         if (pendingToolResult && pendingToolResult.kind === undefined) {
-          const kind = getGeneration(block.generation_id)?.kind;
-          if (kind) pendingToolResult.kind = kind;
+          const g = getGeneration(block.generation_id);
+          if (g?.kind) pendingToolResult.kind = g.kind;
+          if (g?.created_at) pendingToolResult.createdAt = g.created_at;
         }
         pendingToolResult = null;
       }

@@ -239,6 +239,7 @@ async function runChat(
                 width: g?.width ?? 0,
                 height: g?.height ?? 0,
                 kind: g?.kind,
+                createdAt: g?.created_at,
               },
             });
           } else {

@@ -111,6 +111,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                 imageUrl={lastTool.result.imageUrl}
                 width={lastTool.result.width}
                 height={lastTool.result.height}
+                createdAt={lastTool.result.createdAt}
                 prompt={userPromptForCard}
                 onAction={(a, opts) =>
                   onAction?.(a, {

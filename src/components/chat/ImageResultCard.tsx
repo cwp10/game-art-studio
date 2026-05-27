@@ -34,6 +34,8 @@ type Props = {
   imageUrl: string;
   width: number;
   height: number;
+  /** generation 생성 시각 (epoch ms). 사이즈 옆에 날짜 표시. */
+  createdAt?: number;
   prompt?: string;
   onAction?: (action: Action, opts?: { targetSize?: number }) => void;
 };
@@ -41,7 +43,14 @@ type Props = {
 /** plan §S3 의 [업스케일] 단일 버튼을 명시적 픽셀 크기 6개 드롭다운으로 확장. */
 const RESIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048] as const;
 
-export function ImageResultCard({ generationId, imageUrl, width, height, prompt, onAction }: Props) {
+/** epoch ms → "YYYY.MM.DD HH:mm" (로컬). */
+function formatCreatedAt(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, prompt, onAction }: Props) {
   const [copied, setCopied] = useState(false);
   const [resizeOpen, setResizeOpen] = useState(false);
   const [resizeAlignLeft, setResizeAlignLeft] = useState(false);
@@ -180,6 +189,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
         <div className="space-y-2 border-t border-border pt-2">
           <div className="text-text-muted/60">
             {width}×{height}
+            {createdAt ? <span className="ml-2">· {formatCreatedAt(createdAt)}</span> : null}
           </div>
           <div className="flex flex-wrap gap-1">
             <button

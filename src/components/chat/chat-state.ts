@@ -14,7 +14,7 @@ export type ToolCallState = {
   args: unknown;
   status: "running" | "succeeded" | "failed";
   progress: Array<{ stage: string; detail?: string }>;
-  result?: { generationId: string; imageUrl: string; width: number; height: number; kind?: string };
+  result?: { generationId: string; imageUrl: string; width: number; height: number; kind?: string; createdAt?: number };
   error?: string;
 };
 
@@ -131,6 +131,7 @@ function messagesToItems(messages: Message[]): ChatItem[] {
                 height: typeof parsed.height === "number" ? parsed.height : 0,
                 // API enrichment 으로 채운 블록 kind 우선, 없으면 result 내 kind(신규 생성).
                 kind: tr.kind ?? (typeof parsed.kind === "string" ? parsed.kind : undefined),
+                createdAt: tr.createdAt ?? (typeof parsed.createdAt === "number" ? parsed.createdAt : undefined),
               };
             }
           }
