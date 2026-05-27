@@ -393,7 +393,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           ? [gridTemplatePath, refPath]   // [grid, ref]
           : [gridTemplatePath];            // [grid only]
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpResult = await runImageTool({
           name,
           kind: "spritesheet",
@@ -402,7 +401,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           overrideInputPaths,                         // Codex 실제 입력 순서 제어
           params: { seamlessLoop },
           sessionId,
-        }) as any;
+        });
         // ── 후처리 파이프라인 ──────────────────────────────────────────────
         // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
         // 2) wantsTransparent: #00ff00 chroma-key → alpha 0 변환
@@ -1119,6 +1118,7 @@ async function runImageTool(spec: {
     kind: persistedKind,
     prompt,
     input_image_ids: inputGenerationIds,
+    params, // 생성 메타(seamlessLoop / reskin mode·styleReferenceId 등) 영속화.
     image_path: toRelative(result.imagePath),
     width: result.width,
     height: result.height,

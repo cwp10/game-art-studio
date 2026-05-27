@@ -145,7 +145,6 @@ export function SpriteCanvas({
       for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) push(c, r);
     }
     setFrames(out);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
   }, [imgLoaded, rows, cols, order, cellW, cellH, dragPad]);
 

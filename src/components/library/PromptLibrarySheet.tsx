@@ -76,8 +76,11 @@ export function PromptLibrarySheet({ open, onClose, onUse }: Props) {
   useEffect(() => {
     if (!open) return;
     refresh();
+    // 시트가 열릴 때 1회 UI 리셋(의도된 동작) — open 전이 시점에만 발생.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setFocusIdx(0);
     setFillingItem(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
     setTimeout(() => searchRef.current?.focus(), 50);
   }, [open, refresh]);
 

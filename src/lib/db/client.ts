@@ -21,7 +21,6 @@ type DbInstance = Database.Database;
 const SCHEMA_PATH = path.join(process.cwd(), "src/lib/db/schema.sql");
 
 declare global {
-  // eslint-disable-next-line no-var
   var __imggen_db: DbInstance | undefined;
 }
 
