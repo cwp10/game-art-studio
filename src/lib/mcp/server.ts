@@ -575,8 +575,10 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
       data[i + 3] = 0;
       continue;
     }
-    // Pass 2: spill 제거 — 그린 톤만 살짝 우세한 경계 픽셀에서 g 채널을 desaturate
-    if (data[i + 3] > 0 && g > r + 15 && g > b + 15) {
+    // Pass 2: spill 제거 — 그린 톤이 살짝이라도 우세하면 g 채널을 max(r,b) 로 클램프.
+    // 화염/이펙트 가장자리의 미묘한 그린 틴트까지 제거. 캐릭터에 의도된 녹색이
+    // 있으면 같이 영향받지만 게임 캐릭터에서는 드물고, 잔재 제거 효과가 큼.
+    if (data[i + 3] > 0 && g > r + 5 && g > b + 5) {
       data[i + 1] = Math.max(r, b);
     }
   }
@@ -792,18 +794,45 @@ async function normalizeSpritesheetCells(
         .png()
         .toBuffer();
 
-      // 가로: 메인 컴포넌트 무게중심 x 를 셀 가로 중심에 정렬
-      let mainSumX = 0;
-      for (const idx of compPixels[mainLabel]) mainSumX += idx % W;
-      const mainCenterX = mainSumX / compPixels[mainLabel].length;
+      // Shape-aware 본체 추출 — 메인 컴포넌트의 y행별 픽셀 수 분포 분석.
+      // 캐릭터 본체(어깨~다리)는 일정한 두께로 연속, 이펙트(불꽃 호/검기/폭발)는
+      // 행별 픽셀 수가 적음. row count 가 max 의 일정 비율 이상인 행만 "본체" 로
+      // 간주해 발 라인/가로 중심을 계산. → 이펙트 길이/방향 영향에서 자유로움.
+      const rowCounts = new Int32Array(H);
+      const rowSumX = new Float64Array(H);
+      for (const idx of compPixels[mainLabel]) {
+        const px = idx % W;
+        const py = Math.floor(idx / W);
+        rowCounts[py]++;
+        rowSumX[py] += px;
+      }
+      let rowMax = 0;
+      for (let y = 0; y < H; y++) {
+        if (rowCounts[y] > rowMax) rowMax = rowCounts[y];
+      }
+      const bodyThreshold = Math.max(2, Math.floor(rowMax * 0.25));
+
+      // 본체 영역의 가장 아래 y = 발 라인 / 본체 픽셀의 가로 무게중심
+      let footY = compMaxY[mainLabel];
+      let bodySumX = 0;
+      let bodyCount = 0;
+      for (let y = compMaxY[mainLabel]; y >= compMinY[mainLabel]; y--) {
+        if (rowCounts[y] >= bodyThreshold) {
+          if (bodyCount === 0) footY = y; // 가장 처음 발견한 본체 행 = 가장 아래
+          bodySumX += rowSumX[y];
+          bodyCount += rowCounts[y];
+        }
+      }
+      // 본체 검출 실패(전체가 얇은 이펙트) 시 메인 픽셀 전체로 폴백
+      const mainCenterX = bodyCount > 0
+        ? bodySumX / bodyCount
+        : compPixels[mainLabel].reduce((s, idx) => s + (idx % W), 0) / compPixels[mainLabel].length;
+
+      // 가로: 본체 무게중심 x 를 셀 가로 중심에
       const layerCenterX = mainCenterX - bMinX;
       const desiredLeft = Math.round(cellX0 + cellW / 2 - layerCenterX);
 
-      // 세로: 메인 y 95th percentile = 발 라인 → 셀 하단 paddingBottom 위에 정렬
-      const mainYs: number[] = [];
-      for (const idx of compPixels[mainLabel]) mainYs.push(Math.floor(idx / W));
-      mainYs.sort((a, b) => a - b);
-      const footY = mainYs[Math.min(mainYs.length - 1, Math.floor(mainYs.length * 0.95))];
+      // 세로: 본체 발 라인을 셀 하단 paddingBottom 위에
       const targetFootY = cellY0 + cellH - paddingBottom - 1;
       const layerFootY = footY - bMinY;
       const desiredTop = Math.round(targetFootY - layerFootY);
