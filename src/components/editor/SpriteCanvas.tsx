@@ -36,6 +36,9 @@ export function SpriteCanvas({
   const [gifError, setGifError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
+  // 셀 경계 밖 픽셀을 추가로 추출해서 출력 캔버스에 축소 표시 (0~50%).
+  // 예: 20% → 셀보다 25% 넓은 영역을 추출, 80% 크기로 축소 → 좌우 여백 생성
+  const [cellPad, setCellPad] = useState(0);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
@@ -97,13 +100,37 @@ export function SpriteCanvas({
       return;
     }
     const out: HTMLCanvasElement[] = [];
+    // contentScale: cellPad % 만큼 셀 경계 밖까지 추출, 출력 캔버스에 축소 표시
+    const contentScale = 1 - cellPad / 100;
     const push = (cx: number, cy: number) => {
       const c = document.createElement("canvas");
       c.width = cellW;
       c.height = cellH;
       const ctx = c.getContext("2d");
       if (!ctx) return;
-      ctx.drawImage(img, cx * cellW, cy * cellH, cellW, cellH, 0, 0, cellW, cellH);
+      if (contentScale >= 1) {
+        ctx.drawImage(img, cx * cellW, cy * cellH, cellW, cellH, 0, 0, cellW, cellH);
+      } else {
+        // 추출 영역: 셀보다 1/contentScale 배 넓게, 셀 중심 기준
+        const srcW = Math.round(cellW / contentScale);
+        const srcH = Math.round(cellH / contentScale);
+        const rawSrcX = cx * cellW - (srcW - cellW) / 2;
+        const rawSrcY = cy * cellH - (srcH - cellH) / 2;
+        // 이미지 경계로 클램핑
+        const srcX = Math.max(0, Math.min(imageWidth, rawSrcX));
+        const srcY = Math.max(0, Math.min(imageHeight, rawSrcY));
+        const srcEndX = Math.max(0, Math.min(imageWidth, rawSrcX + srcW));
+        const srcEndY = Math.max(0, Math.min(imageHeight, rawSrcY + srcH));
+        const clampedW = srcEndX - srcX;
+        const clampedH = srcEndY - srcY;
+        if (clampedW > 0 && clampedH > 0) {
+          ctx.clearRect(0, 0, cellW, cellH);
+          const destX = (srcX - rawSrcX) * contentScale;
+          const destY = (srcY - rawSrcY) * contentScale;
+          ctx.drawImage(img, srcX, srcY, clampedW, clampedH,
+            destX, destY, clampedW * contentScale, clampedH * contentScale);
+        }
+      }
       out.push(c);
     };
     if (order === "row") {
@@ -114,7 +141,7 @@ export function SpriteCanvas({
     setFrames(out);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
-  }, [imgLoaded, rows, cols, order, cellW, cellH]);
+  }, [imgLoaded, rows, cols, order, cellW, cellH, cellPad, imageWidth, imageHeight]);
 
   // offset 적용된 프레임 — GIF·zip·썸네일 공통 사용
   const adjustedFrames = useMemo(() => {
@@ -334,6 +361,16 @@ export function SpriteCanvas({
             >
               <ArrowDown size={12} /> 세로
             </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-12 text-text-muted">여백</span>
+            <input
+              type="range" min={0} max={50} step={1} value={cellPad}
+              onChange={e => setCellPad(Number(e.target.value))}
+              className="flex-1 accent-[color:var(--accent)]"
+              title="셀 경계 밖 픽셀을 추가로 추출해서 캐릭터를 축소 표시 (좌우 여백 확보)"
+            />
+            <span className="w-10 text-right tabular-nums text-text-muted/80">{cellPad}%</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-12 text-text-muted">FPS</span>
