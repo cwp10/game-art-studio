@@ -8,6 +8,7 @@ import {
   Film,
   Layers,
   Link2,
+  Loader2,
   Maximize2,
   RotateCw,
   Scissors,
@@ -41,7 +42,10 @@ const RESIZE_OPTIONS = [64, 128, 256, 512, 1024, 2048] as const;
 export function ImageResultCard({ generationId, imageUrl, width, height, prompt, onAction }: Props) {
   const [copied, setCopied] = useState(false);
   const [resizeOpen, setResizeOpen] = useState(false);
+  const [resizeAlignLeft, setResizeAlignLeft] = useState(false);
   const [lightbox, setLightbox] = useState(false);
+  const [lightboxLoaded, setLightboxLoaded] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const resizeRef = useRef<HTMLDivElement>(null);
 
   // 라이트박스: Esc 닫기
@@ -51,6 +55,12 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [lightbox]);
+
+  // 라이트박스 열기: 큰 이미지 onLoad 전 placeholder 표시를 위해 로딩 상태 리셋
+  function openLightbox() {
+    setLightboxLoaded(false);
+    setLightbox(true);
+  }
 
   // 드롭다운: 바깥 클릭 시 닫기
   useEffect(() => {
@@ -74,16 +84,31 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
   }
 
   function download() {
+    // a.click() 다운로드는 동기라 명확한 완료 시점이 없음 → 중복클릭 방지를 위해
+    // 짧게 busy 표시(대용량 PNG 에서 연타 방지). 실제 다운로드는 브라우저가 비동기로 진행.
+    if (downloading) return;
+    setDownloading(true);
     const a = document.createElement("a");
     a.href = imageUrl;
     a.download = `${generationId}.png`;
     a.click();
     onAction?.("download");
+    setTimeout(() => setDownloading(false), 1200);
   }
 
   function pickResize(targetSize: number) {
     setResizeOpen(false);
     onAction?.("resize", { targetSize });
+  }
+
+  // 좁은 패널(메인 420px)에서 `right-0` 메뉴가 왼쪽으로 펼쳐지며 화면 밖으로 잘릴 수 있음.
+  // 트리거 왼쪽 가용 공간이 메뉴 폭(120px)보다 좁으면 left 정렬로 전환해 뷰포트 안에 들어오게 함.
+  function toggleResize() {
+    if (!resizeOpen && resizeRef.current) {
+      const rect = resizeRef.current.getBoundingClientRect();
+      setResizeAlignLeft(rect.right - 120 < 8);
+    }
+    setResizeOpen(o => !o);
   }
 
   return (
@@ -101,11 +126,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
         >
           <X size={20} />
         </button>
+        {!lightboxLoaded && (
+          <Loader2 size={32} className="absolute animate-spin text-white/70" aria-label="이미지 로딩 중" />
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
           alt={prompt ?? "generated image"}
-          className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+          className={`max-h-[90vh] max-w-[90vw] rounded-lg object-contain shadow-2xl transition-opacity ${lightboxLoaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() => setLightboxLoaded(true)}
           onClick={e => e.stopPropagation()}
         />
       </div>
@@ -117,7 +146,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
           가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 클릭 시 라이트박스. */}
       <div
         className="block cursor-zoom-in overflow-hidden rounded-t-xl bg-black/10"
-        onClick={() => setLightbox(true)}
+        onClick={openLightbox}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -160,7 +189,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             </button>
             <div ref={resizeRef} className="relative">
               <button
-                onClick={() => setResizeOpen(o => !o)}
+                onClick={toggleResize}
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                 title="명시적 픽셀 크기로 리사이즈 (sharp lanczos, 1초 이내, 결정적)"
                 aria-haspopup="menu"
@@ -171,7 +200,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
               {resizeOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 z-10 mt-1 flex min-w-[120px] flex-col gap-0.5 rounded-lg border border-border bg-bg-panel p-1 shadow-lg"
+                  className={`absolute z-10 mt-1 flex min-w-[120px] flex-col gap-0.5 rounded-lg border border-border bg-bg-panel p-1 shadow-lg ${resizeAlignLeft ? "left-0" : "right-0"}`}
                 >
                   {RESIZE_OPTIONS.map(n => {
                     const dir = width && n > width ? "↑" : width && n < width ? "↓" : "·";
@@ -229,10 +258,12 @@ export function ImageResultCard({ generationId, imageUrl, width, height, prompt,
             </button>
             <button
               onClick={download}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              disabled={downloading}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-text-muted"
               title="PNG 다운로드"
             >
-              <Download size={12} /> 저장
+              {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
+              {downloading ? "저장 중" : "저장"}
             </button>
           </div>
         </div>
