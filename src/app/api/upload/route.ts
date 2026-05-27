@@ -62,7 +62,13 @@ export async function POST(req: NextRequest) {
   }
 
   const base64Idx = body.dataUrl.indexOf(",") + 1;
-  const buf = Buffer.from(body.dataUrl.slice(base64Idx), "base64");
+  const base64Str = body.dataUrl.slice(base64Idx);
+  // base64 디코딩 전 크기 추정 (4문자 → 3바이트). Buffer 할당 전에 OOM 방지.
+  const MAX_BYTES = 20 * 1024 * 1024; // 20MB
+  if (base64Str.length * 0.75 > MAX_BYTES) {
+    return Response.json({ error: "이미지 크기 제한 초과 (최대 20MB)" }, { status: 413 });
+  }
+  const buf = Buffer.from(base64Str, "base64");
   if (buf.length === 0) return Response.json({ error: "empty image body" }, { status: 400 });
 
   ensureDataDirs();

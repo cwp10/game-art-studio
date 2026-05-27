@@ -60,11 +60,18 @@ const MCP_TOOL_NAMES = [
 ];
 
 let cachedSystemPrompt: string | null = null;
+let cachedSystemPromptMtime = 0;
 function getSystemPrompt(): string {
-  if (cachedSystemPrompt == null) {
-    cachedSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8");
+  try {
+    const mtime = fs.statSync(SYSTEM_PROMPT_PATH).mtimeMs;
+    if (cachedSystemPrompt == null || mtime !== cachedSystemPromptMtime) {
+      cachedSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf8");
+      cachedSystemPromptMtime = mtime;
+    }
+  } catch {
+    if (!cachedSystemPrompt) throw new Error(`system prompt not found: ${SYSTEM_PROMPT_PATH}`);
   }
-  return cachedSystemPrompt;
+  return cachedSystemPrompt!;
 }
 
 export async function POST(req: NextRequest) {
@@ -357,11 +364,9 @@ function extractGenerationId(content: unknown): {
   return { generationId: null, errorText: null };
 }
 
+// MCP 서버는 항상 `Show it with image ref id "<id>".` 형태로 응답하므로
+// 이 패턴으로만 추출. 느슨한 fallback 정규식은 오탐(에러 메시지 내 16자 문자열) 위험.
 const GEN_ID_REGEX = /image ref id\s*"([a-z0-9]{16})"/i;
-const GEN_ID_FALLBACK = /\b([a-z0-9]{16})\b/;
 function findIdInString(s: string): string | null {
-  const m1 = s.match(GEN_ID_REGEX);
-  if (m1) return m1[1];
-  const m2 = s.match(GEN_ID_FALLBACK);
-  return m2 ? m2[1] : null;
+  return s.match(GEN_ID_REGEX)?.[1] ?? null;
 }

@@ -236,10 +236,14 @@ export class CodexExecBackend implements ImageBackend {
     let lastStage: ReturnType<typeof inferStage> = null;
     let lineBuf = "";
     let stderrLineBuf = "";
+    // codex 는 SKILL.md(~6KB) + 실행 로그를 stderr 에 쏟아내므로 메모리 누적 방지.
+    // 로그 저장용 버퍼는 최신 500KB 만 유지 (디버깅에 충분).
+    const BUF_MAX = 500_000;
 
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdoutBuf += text;
+      if (stdoutBuf.length > BUF_MAX) stdoutBuf = stdoutBuf.slice(-BUF_MAX);
       lineBuf += text;
       let idx: number;
       while ((idx = lineBuf.indexOf("\n")) !== -1) {
@@ -257,6 +261,7 @@ export class CodexExecBackend implements ImageBackend {
     child.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stderrBuf += text;
+      if (stderrBuf.length > BUF_MAX) stderrBuf = stderrBuf.slice(-BUF_MAX);
       stderrLineBuf += text;
       let idx: number;
       while ((idx = stderrLineBuf.indexOf("\n")) !== -1) {
@@ -328,6 +333,10 @@ export class CodexExecBackend implements ImageBackend {
 
     const elapsedMs = Math.round(performance.now() - startedAt);
     onProgress("done", `${width}×${height}, ${(elapsedMs / 1000).toFixed(1)}s`);
+
+    // 성공 시 workDir 정리. 실패 시에는 input 이미지 등 디버깅 자료가 남아있으므로 유지.
+    // (실패는 위 throw 로 빠져나가므로 여기까지 오면 항상 성공.)
+    fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
 
     return {
       imagePath: destPath,
