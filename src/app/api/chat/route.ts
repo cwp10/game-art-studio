@@ -219,6 +219,11 @@ async function runChat(
           if (!imggenToolUseIds.has(ev.toolUseId)) break;
           progressTails.get(ev.toolUseId)?.stop();
           progressTails.delete(ev.toolUseId);
+          // 디버그: tool_result content 원형 로그 (generationId 파싱 실패 분석용)
+          // structuredContent 가 content 로 에코되면 object 형태로 올 수 있음.
+          let rawContentDbg: string;
+          try { rawContentDbg = JSON.stringify(ev.content).slice(0, 300); } catch { rawContentDbg = String(ev.content); }
+          console.log(`[route] tool_result toolUseId=${ev.toolUseId} content=${rawContentDbg}`);
           const { generationId, errorText } = extractGenerationId(ev.content);
           blocks.push({
             type: "tool_result",
@@ -328,6 +333,8 @@ async function runChat(
  *
  * Claude 가 우리에게 user/tool_result 로 echo 할 때 content 는 보통 위 content 배열 그대로
  * 또는 string 으로 들어온다. 두 경우 모두 처리.
+ * Claude CLI 버전에 따라 structuredContent 를 content 자리에 object 로 에코하는 경우도
+ * 방어 처리 (case 3).
  */
 function extractGenerationId(content: unknown): {
   generationId: string | null;
@@ -360,6 +367,18 @@ function extractGenerationId(content: unknown): {
       }
     }
     return { generationId: null, errorText: errParts.join(" ") || null };
+  }
+  // 3) structuredContent 가 content 로 에코된 경우 — { generationId: "<id>", ... }
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const obj = content as Record<string, unknown>;
+    // structuredContent 에 직접 generationId 가 있는 경우
+    if (typeof obj.generationId === "string" && /^[a-z0-9]{16}$/.test(obj.generationId)) {
+      return { generationId: obj.generationId, errorText: null };
+    }
+    // { content: [...] } 로 한 번 더 감싸진 경우
+    if (Array.isArray(obj.content)) {
+      return extractGenerationId(obj.content);
+    }
   }
   return { generationId: null, errorText: null };
 }
