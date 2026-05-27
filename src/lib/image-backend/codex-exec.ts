@@ -123,7 +123,11 @@ function buildNaturalPrompt(job: ImageJob): string {
         `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
         `the post-processing pipeline will key out the green. ${job.prompt}`
       );
-    case "spritesheet":
+    case "spritesheet": {
+      const wantsTrans = /transparent|투명/.test(job.prompt.toLowerCase());
+      const bgLine = wantsTrans
+        ? "Transparent background (RGBA PNG, no fill — only the drawn characters are opaque)."
+        : "White background.";
       if ((job.inputImagePaths?.length ?? 0) > 0) {
         return (
           PROMPT_HEADER +
@@ -131,14 +135,17 @@ function buildNaturalPrompt(job: ImageJob): string {
           `Generate a sprite sheet to fill this template: ${job.prompt}\n` +
           `Output a PNG with EXACTLY the same pixel dimensions as the template. ` +
           `Fill every cell of the grid with exactly one sequential animation frame. ` +
-          `Align all characters/objects precisely within each cell boundary.`
+          `Align all characters/objects precisely within each cell boundary. ` +
+          bgLine
         );
       }
       return (
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet of: ${job.prompt}. ` +
-        `Uniform cell size, white background, evenly spaced grid.`
+        `Uniform cell size, evenly spaced grid. ` +
+        bgLine
       );
+    }
   }
 }
 

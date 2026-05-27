@@ -260,6 +260,13 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 그리드 템플릿 PNG 생성 (흰 배경 + 회색 선) — Codex 에게 레이아웃 시각적으로 전달
         const gridTemplatePath = await generateGridTemplate(cols, rows, cellW, cellH);
 
+        // 사용자 프롬프트에서 배경 설정 감지. 투명 배경 요청이 있으면 그대로, 없으면 흰 배경.
+        const wantsTransparent =
+          /transparent|투명/.test(userPrompt.toLowerCase());
+        const bgInstruction = wantsTransparent
+          ? "Transparent background (RGBA PNG, no background fill, only the character is drawn)."
+          : "White background.";
+
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE showing the exact empty cell layout (${canvasW}×${canvasH} pixels, ${cols} columns × ${rows} rows, each cell ${cellW}×${cellH} pixels). ` +
@@ -271,7 +278,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `(3) same character scale and height in every frame — no shrinking or growing; ` +
           `(4) zero positional drift between frames — only limbs and body parts move, not the whole character; ` +
           `(5) each character fully contained within its cell with 5% margin on all sides. ` +
-          `White background.`;
+          bgInstruction;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpResult = await runImageTool({
           name,
