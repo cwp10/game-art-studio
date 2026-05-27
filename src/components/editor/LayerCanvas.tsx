@@ -672,21 +672,23 @@ export function LayerCanvas({
                     가려진 영역을 codex 가 자연스럽게 복원 (색별 1회씩 호출, 시간 N배·구독 한도 차감).
                   </span>
                 </div>
-                {mode === "crop" && (
-                  <div className="flex items-start gap-2 text-text-muted">
-                    <button
-                      onClick={() => setTrimToContent(v => !v)}
-                      className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border px-3 ${
-                        trimToContent
-                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                          : "border-border text-text-muted hover:text-text-primary"
-                      }`}
-                    >
-                      ✂️ 여백 잘라내기 {trimToContent ? "ON" : "OFF"}
-                    </button>
-                    <span className="flex-1 leading-tight">분리 영역 크기로 저장.</span>
-                  </div>
-                )}
+                <div className="flex items-start gap-2 text-text-muted">
+                  <button
+                    onClick={() => setTrimToContent(v => !v)}
+                    disabled={mode !== "crop"}
+                    className={`flex h-7 shrink-0 items-center gap-1 rounded-lg border px-3 disabled:cursor-not-allowed disabled:opacity-40 ${
+                      mode === "crop" && trimToContent
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                        : "border-border text-text-muted hover:text-text-primary"
+                    }`}
+                    title={mode !== "crop" ? "crop(레이어 분리) 모드 전용" : ""}
+                  >
+                    ✂️ 여백 잘라내기 {mode === "crop" && trimToContent ? "ON" : "OFF"}
+                  </button>
+                  <span className="flex-1 leading-tight">
+                    분리 영역 크기로 저장.{mode !== "crop" && " (crop 모드 전용)"}
+                  </span>
+                </div>
               </div>
               {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
             </div>
