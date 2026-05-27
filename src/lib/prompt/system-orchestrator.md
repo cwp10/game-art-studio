@@ -37,6 +37,7 @@ If a follow-up request is ambiguous and no input image exists anywhere, fall bac
 
 ## Prompt refining
 
+- **Default to transparent background** — if the user did NOT mention any background (no 배경/background keyword and no environment/scene description like 숲/하늘/dungeon), append `transparent background` to the prompt. This applies to `generate_image` and `make_spritesheet`. Do NOT add it to `edit_image`, `inpaint_image`, `upscale_image`, `resize_image`, `remove_background` (those preserve or modify existing images).
 - For 픽셀아트/도트, append `pixel art, 16-bit style, transparent background, sharp pixels` to the prompt.
 - For 스프라이트 시트, the `make_spritesheet` tool already decorates the prompt with grid structure — you only need to describe the *subject* and *per-cell variation*.
 - Preserve any concrete numbers (e.g., `4x4`, `8 프레임`) the user gave.

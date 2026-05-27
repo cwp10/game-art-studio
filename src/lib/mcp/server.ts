@@ -230,14 +230,19 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
   try {
     switch (name) {
-      case "generate_image":
+      case "generate_image": {
+        // 사용자가 배경을 명시하지 않으면 기본 투명 배경.
+        // 오케스트레이터가 빠뜨려도 서버 측에서 한 번 더 보장.
+        const rawPrompt = requireString(args.prompt, "prompt");
+        const prompt = ensureTransparentDefault(rawPrompt);
         return await runImageTool({
           name,
           kind: "text2img",
-          prompt: requireString(args.prompt, "prompt"),
+          prompt,
           inputGenerationIds: [],
           sessionId,
         });
+      }
 
       case "make_spritesheet": {
         let rows = requireInt(args.rows, "rows");
@@ -421,6 +426,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 });
 
 // ─── shared executor ─────────────────────────────────────────────────────────
+
+/**
+ * generate_image 서버 측 배경 기본값 보정.
+ *
+ * 사용자(또는 오케스트레이터)가 프롬프트에 배경 관련 키워드를 전혀 넣지 않은
+ * 경우에만 "transparent background" 를 끝에 부착. 사용자가 흰 배경이든 숲
+ * 배경이든 직접 지정했다면 그 의도를 절대 덮어쓰지 않는다.
+ *
+ * 감지 키워드:
+ *   - "배경" (예: "흰 배경", "숲 배경", "투명 배경") — 한국어 배경 언급
+ *   - "background" — 영문 배경 언급
+ *   - "transparent", "투명" — 투명 명시 (배경 단어 없이도 의도 명확)
+ */
+function ensureTransparentDefault(prompt: string): string {
+  if (/배경|background|transparent|투명/i.test(prompt)) return prompt;
+  return prompt.replace(/[.,]?\s*$/, "") + ", transparent background";
+}
 
 /**
  * 이미지가 투명 배경을 가졌는지 빠르게 감지.
