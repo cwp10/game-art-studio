@@ -93,6 +93,12 @@ const SCHEMAS = {
       ...PROMPT_PROP,
       rows: { type: "integer", minimum: 1, maximum: 16, description: "세로 셀 개수" },
       cols: { type: "integer", minimum: 1, maximum: 16, description: "가로 셀 개수" },
+      inputGenerationId: {
+        type: "string",
+        description:
+          "(선택) 참조 이미지의 generation id. 캐릭터 스타일 참조 및 배경 색상 자동 상속에 사용. " +
+          "사용자가 [reference: <id>] 를 첨부했을 때 이 값을 전달.",
+      },
       ...SESSION_PROP,
     },
     required: ["prompt", "rows", "cols"],
@@ -237,6 +243,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         let rows = requireInt(args.rows, "rows");
         let cols = requireInt(args.cols, "cols");
         const userPrompt = requireString(args.prompt, "prompt");
+        const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
+          ? args.inputGenerationId
+          : null;
 
         // rows=1 이고 cols > 4 인 경우: 다행 그리드로 자동 변환.
         // (시스템 프롬프트가 잘못 지시하거나 사용자가 명시해도 방어)
@@ -260,9 +269,25 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 그리드 템플릿 PNG 생성 (흰 배경 + 회색 선) — Codex 에게 레이아웃 시각적으로 전달
         const gridTemplatePath = await generateGridTemplate(cols, rows, cellW, cellH);
 
-        // 사용자 프롬프트에서 배경 설정 감지. 투명 배경 요청이 있으면 그대로, 없으면 흰 배경.
-        const wantsTransparent =
-          /transparent|투명/.test(userPrompt.toLowerCase());
+        // ── 배경 결정 우선순위 ──────────────────────────────────────────────
+        // 1. 사용자가 프롬프트에 명시("transparent", "투명", "white background", "흰 배경") → 그대로
+        // 2. 참조 이미지가 투명 배경 → 상속
+        // 3. 기본 → 흰 배경
+        const hasExplicitBgKeyword = /transparent|투명|white\s*bg|흰\s*배경|white\s*background/.test(
+          userPrompt.toLowerCase(),
+        );
+        let wantsTransparent = /transparent|투명/.test(userPrompt.toLowerCase());
+        if (!hasExplicitBgKeyword && refId) {
+          const refGen = getGeneration(refId);
+          if (refGen) {
+            const refPath = path.join(DATA_DIR, refGen.image_path);
+            wantsTransparent = await detectTransparentBg(refPath);
+            log(
+              `make_spritesheet: ref=${refId} transparent=${wantsTransparent} (inherited from reference bg)`,
+            );
+          }
+        }
+
         const bgInstruction = wantsTransparent
           ? "Transparent background (RGBA PNG, no background fill, only the character is drawn)."
           : "White background.";
@@ -284,7 +309,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           name,
           kind: "spritesheet",
           prompt: decorated,
-          inputGenerationIds: [],
+          // 참조 이미지가 있으면 Codex 입력으로 전달 → 캐릭터 스타일 일관성 강화.
+          // extraInputPaths 의 그리드 템플릿은 그 뒤에 추가된다.
+          inputGenerationIds: refId ? [refId] : [],
           extraInputPaths: [gridTemplatePath],
           sessionId,
         }) as any;
@@ -381,6 +408,34 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 });
 
 // ─── shared executor ─────────────────────────────────────────────────────────
+
+/**
+ * 이미지가 투명 배경을 가졌는지 빠르게 감지.
+ *
+ * 알파 채널이 없으면 즉시 false. 있으면 네 꼭짓점 픽셀 샘플링으로 판단.
+ * 게임 캐릭터 에셋은 보통 꼭짓점이 배경이므로 충분히 정확하다.
+ */
+async function detectTransparentBg(imagePath: string): Promise<boolean> {
+  const meta = await sharp(imagePath).metadata();
+  if (!meta.hasAlpha) return false;
+  const w = meta.width ?? 2;
+  const h = meta.height ?? 2;
+  const corners = [
+    { left: 0, top: 0 },
+    { left: Math.max(0, w - 1), top: 0 },
+    { left: 0, top: Math.max(0, h - 1) },
+    { left: Math.max(0, w - 1), top: Math.max(0, h - 1) },
+  ];
+  for (const { left, top } of corners) {
+    const px = await sharp(imagePath)
+      .extract({ left, top, width: 1, height: 1 })
+      .ensureAlpha()
+      .raw()
+      .toBuffer();
+    if (px[3] < 10) return true; // 꼭짓점 픽셀이 투명 → 투명 배경
+  }
+  return false;
+}
 
 /**
  * 스프라이트 시트 레퍼런스용 빈 그리드 PNG 생성 (흰 배경 + 연회색 1px 선).

@@ -128,7 +128,25 @@ function buildNaturalPrompt(job: ImageJob): string {
       const bgLine = wantsTrans
         ? "Transparent background (RGBA PNG, no fill — only the drawn characters are opaque)."
         : "White background.";
-      if ((job.inputImagePaths?.length ?? 0) > 0) {
+      const inputCount = job.inputImagePaths?.length ?? 0;
+
+      if (inputCount >= 2) {
+        // inputImagePaths[0] = 참조 캐릭터 이미지, [1] = 그리드 템플릿
+        return (
+          PROMPT_HEADER +
+          `I am attaching TWO images:\n` +
+          `(1) REFERENCE CHARACTER IMAGE — carefully analyze this character's exact visual style, ` +
+          `colors, outfit, proportions, and design details. Reproduce this exact character in every frame.\n` +
+          `(2) GRID TEMPLATE — a blank white grid showing the exact empty cell layout.\n\n` +
+          `Task: ${job.prompt}\n\n` +
+          `Output a PNG with EXACTLY the same pixel dimensions as the grid template (image 2). ` +
+          `Fill every cell with exactly one sequential animation frame. ` +
+          `The character in every frame must faithfully match the visual style of the reference (image 1). ` +
+          bgLine
+        );
+      }
+      if (inputCount === 1) {
+        // inputImagePaths[0] = 그리드 템플릿만
         return (
           PROMPT_HEADER +
           `The attached image is a GRID TEMPLATE — a blank white grid showing the exact empty cell layout. ` +
