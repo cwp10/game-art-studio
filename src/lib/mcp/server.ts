@@ -302,25 +302,24 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           }
         }
 
+        // 투명 배경은 chroma-key 방식: 모델에게 #00ff00 위에 그리게 하고 후처리로 keying.
+        // 모델이 직접 알파를 그리면 흰색 fringe / 회색 잔재가 남음.
         const bgInstruction = wantsTransparent
-          ? "Transparent background (RGBA PNG, no background fill, only the character is drawn)."
+          ? "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
         const decorated =
           `${userPrompt}. ` +
-          `The attached image is a GRID TEMPLATE showing the exact empty cell layout (${canvasW}×${canvasH} pixels, ${cols} columns × ${rows} rows, each cell ${cellW}×${cellH} pixels). ` +
-          `The template contains TWO sets of guide lines per cell: ` +
-          `(a) GRAY outer borders mark the cell boundary; ` +
-          `(b) BLUE inner rectangle (centered inside each cell, ~60% size) marks the SAFE DRAWING ZONE. ` +
+          `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
-          `Place exactly one animation frame per cell. ` +
-          `CRITICAL rules: ` +
-          `(1) Draw each character ENTIRELY INSIDE the blue safe-zone rectangle of its cell — never touch or cross the blue lines; this leaves ~20% padding on all sides within each cell. ` +
+          `Place exactly one animation frame per cell, filling every cell. ` +
+          `CRITICAL framing rules: ` +
+          `(1) Draw each character at approximately 60% of cell size, centered within its cell, leaving ~20% padding on every side; NEVER let any pixel of the character cross into a neighboring cell. ` +
           `(2) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
           `(3) feet always on the same ground line across all frames; ` +
           `(4) same character scale and height in every frame — no shrinking or growing; ` +
           `(5) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
-          `Do NOT include the gray or blue guide lines in the output — they are reference only. ` +
+          `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mcpResult = await runImageTool({
@@ -333,21 +332,32 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           extraInputPaths: [gridTemplatePath],
           sessionId,
         }) as any;
-        // 생성 후 정확한 배수 크기로 강제 리사이즈 — 셀 경계 보장.
+        // ── 후처리 파이프라인 ──────────────────────────────────────────────
+        // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
+        // 2) wantsTransparent: #00ff00 chroma-key → alpha 0 변환
+        // 3) 각 셀의 콘텐츠 bbox 를 inner 60% 영역에 맞춰 스케일+센터링 — 모델이
+        //    셀 밖으로 그림을 빠뜨려도 강제로 가둠.
         const genId: string | undefined = mcpResult?.structuredContent?.generationId;
         if (genId) {
           const filePath = imagePathFor(genId);
-          const tmpPath = `${filePath}.tmp`;
           try {
+            const resizeTmp = `${filePath}.resize.tmp`;
             await sharp(filePath)
               .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
               .png()
-              .toFile(tmpPath);
-            fs.renameSync(tmpPath, filePath);
+              .toFile(resizeTmp);
+            fs.renameSync(resizeTmp, filePath);
             log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
+
+            if (wantsTransparent) {
+              await chromaKeyGreenFile(filePath);
+              log(`make_spritesheet chroma-keyed gen=${genId}`);
+            }
+
+            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
+            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols})`);
           } catch (e) {
-            log(`make_spritesheet resize fail: ${(e as Error).message}`);
-            try { fs.unlinkSync(tmpPath); } catch { /* noop */ }
+            log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
         }
         return mcpResult;
@@ -473,12 +483,11 @@ async function detectTransparentBg(imagePath: string): Promise<boolean> {
 }
 
 /**
- * 스프라이트 시트 레퍼런스용 그리드 PNG 생성.
- *   - 외곽 셀 경계: 회색 1px (#cccccc)
- *   - 내부 안전 영역(safe-zone): 셀 사방 20% 인셋, 청록색 2px (#3399ff)
- *     → 캐릭터를 이 박스 안에만 그리도록 시각적으로 강제.
- * data/templates/sprite-grid-v2-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
- * (v1 → v2: safe-zone 박스 추가로 캐시 키 변경)
+ * 스프라이트 시트 레퍼런스용 그리드 PNG.
+ *   - 외곽 셀 경계: 회색 1px (#cccccc) — 모델에게 셀 레이아웃만 시각적으로 전달.
+ * 내부 safe-zone 박스는 v2 까지 그려넣었지만 모델이 그대로 출력에 복사하는
+ * 부작용 → v3 부터는 그리지 않고 후처리(normalizeSpritesheetCells)로 패딩 강제.
+ * data/templates/sprite-grid-v3-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
  */
 async function generateGridTemplate(
   cols: number,
@@ -491,52 +500,27 @@ async function generateGridTemplate(
   const templatesDir = path.join(DATA_DIR, "templates");
   const cachePath = path.join(
     templatesDir,
-    `sprite-grid-v2-${cols}x${rows}x${cellW}x${cellH}.png`,
+    `sprite-grid-v3-${cols}x${rows}x${cellW}x${cellH}.png`,
   );
   if (fs.existsSync(cachePath)) return cachePath;
 
   // RGB 흰 배경
   const pixels = Buffer.alloc(w * h * 3, 255);
-  const grayR = 204, grayG = 204, grayB = 204; // #cccccc — 외곽 셀 경계
-  const safeR = 51, safeG = 153, safeB = 255;  // #3399ff — 내부 safe-zone (청록)
-
-  const setPx = (x: number, y: number, r: number, g: number, b: number) => {
-    if (x < 0 || x >= w || y < 0 || y >= h) return;
-    const i = (y * w + x) * 3;
-    pixels[i] = r; pixels[i + 1] = g; pixels[i + 2] = b;
-  };
+  const gray = 204; // #cccccc — 외곽 셀 경계
 
   // 외곽 셀 경계 (1px)
   for (let col = 0; col <= cols; col++) {
     const px = Math.min(col * cellW, w - 1);
-    for (let y = 0; y < h; y++) setPx(px, y, grayR, grayG, grayB);
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + px) * 3;
+      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
+    }
   }
   for (let row = 0; row <= rows; row++) {
     const py = Math.min(row * cellH, h - 1);
-    for (let x = 0; x < w; x++) setPx(x, py, grayR, grayG, grayB);
-  }
-
-  // 내부 safe-zone 박스 — 각 셀의 20% 인셋 (60% 면적), 2px 두께
-  const insetX = Math.round(cellW * 0.2);
-  const insetY = Math.round(cellH * 0.2);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x0 = c * cellW + insetX;
-      const y0 = r * cellH + insetY;
-      const x1 = (c + 1) * cellW - insetX - 1;
-      const y1 = (r + 1) * cellH - insetY - 1;
-      for (const dy of [0, 1]) {
-        for (let x = x0; x <= x1; x++) {
-          setPx(x, y0 + dy, safeR, safeG, safeB);
-          setPx(x, y1 - dy, safeR, safeG, safeB);
-        }
-      }
-      for (const dx of [0, 1]) {
-        for (let y = y0; y <= y1; y++) {
-          setPx(x0 + dx, y, safeR, safeG, safeB);
-          setPx(x1 - dx, y, safeR, safeG, safeB);
-        }
-      }
+    for (let x = 0; x < w; x++) {
+      const i = (py * w + x) * 3;
+      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
     }
   }
 
@@ -544,8 +528,143 @@ async function generateGridTemplate(
   await sharp(pixels, { raw: { width: w, height: h, channels: 3 } })
     .png()
     .toFile(cachePath);
-  log(`generateGridTemplate v2: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
+  log(`generateGridTemplate v3: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
   return cachePath;
+}
+
+/**
+ * #00ff00 chroma-key 픽셀을 알파 0 으로 치환 (in-place).
+ * remove_bg 도구와 동일한 keying — anti-alias fringe 까지 잡으려고 넉넉한 threshold.
+ */
+async function chromaKeyGreenFile(filePath: string): Promise<void> {
+  const { data, info } = await sharp(filePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  for (let i = 0; i < data.length; i += ch) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (r < 80 && g > 180 && b < 80) {
+      data[i + 3] = 0;
+    }
+  }
+  const tmpPath = filePath + ".chroma.tmp";
+  await sharp(data, {
+    raw: { width: info.width, height: info.height, channels: ch as 1 | 2 | 3 | 4 },
+  })
+    .png()
+    .toFile(tmpPath);
+  fs.renameSync(tmpPath, filePath);
+}
+
+/**
+ * 스프라이트 시트의 각 셀에 대해:
+ *   1. 셀 내부 콘텐츠의 bounding box 를 탐지
+ *   2. inner safe-zone (셀 사방 20% 인셋, 60% 면적) 에 맞춰 균등 스케일다운
+ *   3. 셀 중앙에 재배치
+ * → 모델이 셀 밖으로 그림을 빠뜨리거나 패딩을 무시해도 후처리로 강제 정렬.
+ *
+ * 콘텐츠 탐지:
+ *   - wantsTransparent: alpha > 10 픽셀
+ *   - 흰 배경: not (R>240 && G>240 && B>240)
+ *
+ * 셀 경계를 가로지른 픽셀은 어느 한 셀에만 속하므로 자동으로 양분된다 (이상적이진
+ * 않지만 sprite sheet 의 본질상 각 프레임은 독립이므로 cross-cell content 는 버그).
+ */
+async function normalizeSpritesheetCells(
+  filePath: string,
+  rows: number,
+  cols: number,
+  wantsTransparent: boolean,
+): Promise<void> {
+  const { data, info } = await sharp(filePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const ch = info.channels;
+  const cellW = Math.floor(W / cols);
+  const cellH = Math.floor(H / rows);
+  const innerW = Math.round(cellW * 0.6);
+  const innerH = Math.round(cellH * 0.6);
+
+  const isContent = (i: number) => {
+    if (wantsTransparent) return data[i + 3] > 10;
+    return !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
+  };
+
+  // 각 셀별로 bbox 추출 → resize → 합성용 버퍼 수집
+  type Layer = { input: Buffer; top: number; left: number };
+  const layers: Layer[] = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cellX0 = c * cellW;
+      const cellY0 = r * cellH;
+      // bbox 탐색 (셀 내부 좌표)
+      let minX = cellW, minY = cellH, maxX = -1, maxY = -1;
+      for (let y = 0; y < cellH; y++) {
+        for (let x = 0; x < cellW; x++) {
+          const i = ((cellY0 + y) * W + (cellX0 + x)) * ch;
+          if (isContent(i)) {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) continue; // 빈 셀
+
+      const bbW = maxX - minX + 1;
+      const bbH = maxY - minY + 1;
+      // bbox 픽셀을 RGBA 버퍼로 추출
+      const bbBuf = Buffer.alloc(bbW * bbH * 4);
+      for (let y = 0; y < bbH; y++) {
+        for (let x = 0; x < bbW; x++) {
+          const si = ((cellY0 + minY + y) * W + (cellX0 + minX + x)) * ch;
+          const di = (y * bbW + x) * 4;
+          bbBuf[di] = data[si];
+          bbBuf[di + 1] = data[si + 1];
+          bbBuf[di + 2] = data[si + 2];
+          bbBuf[di + 3] = ch === 4 ? data[si + 3] : 255;
+        }
+      }
+
+      // inner zone 안에 맞도록 균등 스케일 (확대는 금지 — 작은 캐릭터는 그대로)
+      const sx = innerW / bbW;
+      const sy = innerH / bbH;
+      const scale = Math.min(sx, sy, 1);
+      const newW = Math.max(1, Math.round(bbW * scale));
+      const newH = Math.max(1, Math.round(bbH * scale));
+
+      // sharp 로 리샘플 (lanczos3 = 일반 아트, 픽셀아트도 무난)
+      const resized = await sharp(bbBuf, { raw: { width: bbW, height: bbH, channels: 4 } })
+        .resize(newW, newH, { kernel: "lanczos3" })
+        .png()
+        .toBuffer();
+
+      // 셀 중앙 배치
+      const left = cellX0 + Math.round((cellW - newW) / 2);
+      const top = cellY0 + Math.round((cellH - newH) / 2);
+      layers.push({ input: resized, top, left });
+    }
+  }
+
+  // 빈 캔버스 위에 모두 합성 (배경: 투명 또는 흰)
+  const bg = wantsTransparent
+    ? { r: 0, g: 0, b: 0, alpha: 0 }
+    : { r: 255, g: 255, b: 255, alpha: 1 };
+  const tmpPath = filePath + ".norm.tmp";
+  await sharp({
+    create: { width: W, height: H, channels: 4, background: bg },
+  })
+    .composite(layers)
+    .png()
+    .toFile(tmpPath);
+  fs.renameSync(tmpPath, filePath);
+  log(`normalizeSpritesheetCells: ${cols}x${rows} cells normalized, ${layers.length} non-empty`);
 }
 
 async function runImageTool(spec: {

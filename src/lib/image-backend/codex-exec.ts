@@ -124,17 +124,10 @@ function buildNaturalPrompt(job: ImageJob): string {
         `the post-processing pipeline will key out the green. ${job.prompt}`
       );
     case "spritesheet": {
-      const wantsTrans = /transparent|투명/.test(job.prompt.toLowerCase());
-      const bgLine = wantsTrans
-        ? "Transparent background (RGBA PNG, no fill — only the drawn characters are opaque)."
-        : "White background.";
-      // 각 셀의 청록색 safe-zone 박스 안에만 그리도록 강제. 템플릿에 시각 가이드가
-      // 직접 그려져 있으므로 텍스트로도 같은 규칙을 반복해서 강화.
-      const paddingLine =
-        "Each cell of the grid template contains a BLUE inner rectangle marking the safe " +
-        "drawing zone (~60% of cell, 20% padding on every side). Draw each character " +
-        "ENTIRELY INSIDE this blue rectangle — never let any part of the character touch " +
-        "or cross the blue lines. Do NOT render the blue or gray guide lines in the output.";
+      // 배경 처리는 server.ts 의 decorated 프롬프트가 이미 chroma-key/흰 배경을
+      // 명시했으므로 여기서는 중복 지시하지 않음. 패딩도 server.ts decorated 에
+      // 강하게 명시되어 있고, 후처리(normalizeSpritesheetCells)가 픽셀 단위로
+      // 강제하므로 텍스트 중복은 제거.
       const inputCount = job.inputImagePaths?.length ?? 0;
 
       if (inputCount >= 2) {
@@ -144,34 +137,27 @@ function buildNaturalPrompt(job: ImageJob): string {
           `I am attaching TWO images:\n` +
           `(1) REFERENCE CHARACTER IMAGE — carefully analyze this character's exact visual style, ` +
           `colors, outfit, proportions, and design details. Reproduce this exact character in every frame.\n` +
-          `(2) GRID TEMPLATE — a blank white grid showing the exact empty cell layout.\n\n` +
+          `(2) GRID TEMPLATE — a blank canvas with thin gray cell lines showing the exact empty cell layout.\n\n` +
           `Task: ${job.prompt}\n\n` +
           `Output a PNG with EXACTLY the same pixel dimensions as the grid template (image 2). ` +
           `Fill every cell with exactly one sequential animation frame. ` +
-          `The character in every frame must faithfully match the visual style of the reference (image 1). ` +
-          paddingLine + " " +
-          bgLine
+          `The character in every frame must faithfully match the visual style of the reference (image 1).`
         );
       }
       if (inputCount === 1) {
         // inputImagePaths[0] = 그리드 템플릿만
         return (
           PROMPT_HEADER +
-          `The attached image is a GRID TEMPLATE — a blank white grid showing the exact empty cell layout. ` +
+          `The attached image is a GRID TEMPLATE — a blank canvas with thin gray cell lines showing the exact empty cell layout. ` +
           `Generate a sprite sheet to fill this template: ${job.prompt}\n` +
           `Output a PNG with EXACTLY the same pixel dimensions as the template. ` +
-          `Fill every cell of the grid with exactly one sequential animation frame. ` +
-          `Align all characters/objects precisely within each cell boundary. ` +
-          paddingLine + " " +
-          bgLine
+          `Fill every cell of the grid with exactly one sequential animation frame.`
         );
       }
       return (
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet of: ${job.prompt}. ` +
-        `Uniform cell size, evenly spaced grid. ` +
-        paddingLine + " " +
-        bgLine
+        `Uniform cell size, evenly spaced grid.`
       );
     }
   }
