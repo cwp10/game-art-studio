@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, Pause, Play, RefreshCw, SkipBack, SkipForward, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
@@ -23,6 +23,7 @@ export function SpriteCanvas({
   onCancel,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
+  const previewRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   // 이미지 크기에서 GCD로 셀 크기를 역산해 rows/cols 자동 감지. 감지 실패 시 기본값 6×7.
@@ -35,6 +36,8 @@ export function SpriteCanvas({
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<null | "zip" | "gif">(null);
+  const [playing, setPlaying] = useState(true);
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [offsets, setOffsets] = useState<{ x: number; y: number }[]>([]);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   // 잔재 제거 두 관문: 크기(메인 대비 %)·여백(셀 짧은변 %). 클수록 강하게 제거.
@@ -48,12 +51,28 @@ export function SpriteCanvas({
     origY: number;
   } | null>(null);
 
+  // 드래그/선택(화살표 nudge) 중 리사이즈로 표시 크기가 재측정되면 진행 중인
+  // 포인터 좌표 변환이 흔들린다. MaskCanvas 와 동일하게 조작 중엔 avail 을 고정.
+  // useLayoutEffect 클로저에서 최신 상태에 접근하기 위해 ref 사용.
+  const interactingRef = useRef(false);
+  useEffect(() => {
+    interactingRef.current = dragging !== null || selectedIdx !== null;
+  }, [dragging, selectedIdx]);
+
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
     if (!sizer) return;
-    const w = Math.max(200, sizer.clientWidth - 24);
-    const h = Math.max(200, sizer.clientHeight - 320);
-    setAvail({ w, h });
+    const measure = () => {
+      // 셀 조작(드래그·선택 nudge) 중이면 좌표 mismatch 방지를 위해 재측정 건너뜀.
+      if (interactingRef.current) return;
+      const w = Math.max(200, sizer.clientWidth - 24);
+      const h = Math.max(200, sizer.clientHeight - 320);
+      setAvail({ w, h });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(sizer);
+    return () => ro.disconnect();
   }, []);
 
   // 가로폭 기준으로 등비 축소 — 가로로 긴 스프라이트시트에서 세로가 찌그러지지 않도록.
@@ -160,6 +179,40 @@ export function SpriteCanvas({
     () => adjustedFrames.map(f => f.toDataURL("image/png")),
     [adjustedFrames],
   );
+
+  // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames.
+  const previewFrames = adjustedFrames.length > 0 ? adjustedFrames : frames;
+
+  // 프레임 수가 바뀌면 재생 인덱스를 범위 안으로 클램프.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPreviewIdx(i => (previewFrames.length === 0 ? 0 : Math.min(i, previewFrames.length - 1)));
+  }, [previewFrames.length]);
+
+  // 재생 루프 — fps 에 맞춰 previewIdx 를 순방향으로 진행. setInterval cleanup 으로 정리.
+  useEffect(() => {
+    if (!playing || previewFrames.length <= 1) return;
+    const delay = Math.max(20, Math.round(1000 / fps));
+    const id = setInterval(() => {
+      setPreviewIdx(i => (i + 1) % previewFrames.length);
+    }, delay);
+    return () => clearInterval(id);
+  }, [playing, fps, previewFrames.length]);
+
+  // 현재 프레임을 canvas 에 직접 그림 — 투명 알파 보존을 위해 clearRect 선행.
+  useEffect(() => {
+    const c = previewRef.current;
+    if (!c) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    if (c.width !== exportW || c.height !== exportH) {
+      c.width = exportW;
+      c.height = exportH;
+    }
+    ctx.clearRect(0, 0, c.width, c.height);
+    const frame = previewFrames[previewIdx];
+    if (frame) ctx.drawImage(frame, 0, 0);
+  }, [previewFrames, previewIdx, exportW, exportH]);
 
   // 드래그 — window 이벤트로 썸네일 밖에서도 추적. 선택은 mouseDown 시점에 끝났음.
   useEffect(() => {
@@ -663,18 +716,57 @@ export function SpriteCanvas({
             />
             <span className="w-10 text-right tabular-nums text-text-muted/80">{fps}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-text-muted">GIF</span>
-            <div className="flex h-64 flex-1 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
-              {gifBusy ? (
-                <span className="text-text-muted/60">생성 중…</span>
-              ) : gifError ? (
-                <span className="text-[color:var(--danger)]">{gifError}</span>
-              ) : gifUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={gifUrl} alt="gif preview" className="block h-full w-auto" />
-              ) : (
-                <span className="text-text-muted/60">대기</span>
+          <div className="flex items-start gap-2">
+            <span className="text-text-muted">미리보기</span>
+            <div className="flex flex-1 flex-col gap-1">
+              <div className="relative flex h-64 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+                {previewFrames.length > 0 ? (
+                  <canvas ref={previewRef} className="block h-full w-auto" />
+                ) : (
+                  <span className="text-text-muted/60">대기</span>
+                )}
+                {previewFrames.length > 0 && (
+                  <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-black/70 px-1 text-[10px] tabular-nums text-white/90">
+                    {previewIdx + 1} / {previewFrames.length}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-center gap-1">
+                <button
+                  onClick={() => {
+                    setPlaying(false);
+                    setPreviewIdx(i => (i - 1 + previewFrames.length) % previewFrames.length);
+                  }}
+                  disabled={previewFrames.length === 0}
+                  className="flex h-7 items-center justify-center rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
+                  title="이전 프레임"
+                >
+                  <SkipBack size={12} />
+                </button>
+                <button
+                  onClick={() => setPlaying(p => !p)}
+                  disabled={previewFrames.length <= 1}
+                  className="flex h-7 items-center justify-center gap-1 rounded border border-border px-3 text-text-primary hover:bg-bg-app disabled:opacity-40"
+                  title={playing ? "일시정지" : "재생"}
+                >
+                  {playing ? <Pause size={12} /> : <Play size={12} />}
+                </button>
+                <button
+                  onClick={() => {
+                    setPlaying(false);
+                    setPreviewIdx(i => (i + 1) % previewFrames.length);
+                  }}
+                  disabled={previewFrames.length === 0}
+                  className="flex h-7 items-center justify-center rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
+                  title="다음 프레임"
+                >
+                  <SkipForward size={12} />
+                </button>
+              </div>
+              {(gifBusy || gifError) && (
+                <span className="text-center text-[11px] text-text-muted/60">
+                  {gifBusy ? "GIF 생성 중…" : <span className="text-[color:var(--danger)]">{gifError}</span>}
+                </span>
               )}
             </div>
           </div>
