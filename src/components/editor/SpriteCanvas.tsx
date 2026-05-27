@@ -25,8 +25,9 @@ export function SpriteCanvas({
   const baseRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
-  const [rows, setRows] = useState(2);
-  const [cols, setCols] = useState(2);
+  // 레퍼런스 그리드(7열×6행) 기본값
+  const [rows, setRows] = useState(6);
+  const [cols, setCols] = useState(7);
   const [order, setOrder] = useState<Order>("row");
   const [fps, setFps] = useState(12);
   const [gifUrl, setGifUrl] = useState<string | null>(null);
@@ -492,13 +493,18 @@ function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: numb
       height={h}
       viewBox={`0 0 ${w} ${h}`}
     >
+      {/* 레퍼런스 그리드 스타일: 얇은 실선, 스프라이트 위에서도 구분되도록 반투명 흰선 + 보라 이중 */}
       {vLines.map((x, i) => (
-        <line key={`v${i}`} x1={x} y1={0} x2={x} y2={h}
-          stroke="rgba(168, 85, 247, 0.7)" strokeWidth={1} strokeDasharray="4 4" />
+        <g key={`v${i}`}>
+          <line x1={x} y1={0} x2={x} y2={h} stroke="rgba(255,255,255,0.4)" strokeWidth={2} />
+          <line x1={x} y1={0} x2={x} y2={h} stroke="rgba(168, 85, 247, 0.8)" strokeWidth={0.75} />
+        </g>
       ))}
       {hLines.map((y, i) => (
-        <line key={`h${i}`} x1={0} y1={y} x2={w} y2={y}
-          stroke="rgba(168, 85, 247, 0.7)" strokeWidth={1} strokeDasharray="4 4" />
+        <g key={`h${i}`}>
+          <line x1={0} y1={y} x2={w} y2={y} stroke="rgba(255,255,255,0.4)" strokeWidth={2} />
+          <line x1={0} y1={y} x2={w} y2={y} stroke="rgba(168, 85, 247, 0.8)" strokeWidth={0.75} />
+        </g>
       ))}
     </svg>
   );
