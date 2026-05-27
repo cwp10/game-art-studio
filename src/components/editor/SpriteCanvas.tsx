@@ -4,7 +4,6 @@ import { ArrowDown, ArrowRight, Download, FileArchive, RefreshCw, X } from "luci
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 type Order = "row" | "col";
-type LoopMode = "forward" | "pingpong";
 
 type Props = {
   parentGenerationId: string;
@@ -32,7 +31,6 @@ export function SpriteCanvas({
   const [cols, setCols] = useState(detected?.cols ?? 7);
   const [order, setOrder] = useState<Order>("row");
   const [fps, setFps] = useState(12);
-  const [loopMode, setLoopMode] = useState<LoopMode>("forward");
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
@@ -153,13 +151,8 @@ export function SpriteCanvas({
     });
   }, [adjustedFrames, cellW, cellH, dragPad]);
 
-  // ping-pong: [0..N-1, N-2..1] — 루프 시 마지막→첫 프레임이 자연스럽게 연결
-  const gifFrames = useMemo(() => {
-    if (loopMode === "pingpong" && exportFrames.length > 2) {
-      return [...exportFrames, ...[...exportFrames].reverse().slice(1, -1)];
-    }
-    return exportFrames;
-  }, [exportFrames, loopMode]);
+  // GIF 는 항상 순방향 — AI 가 seamlessLoop 로 설계한 사이클을 그대로 재생
+  const gifFrames = exportFrames;
 
   const thumbs = useMemo(
     () => adjustedFrames.map(f => f.toDataURL("image/png")),
@@ -372,31 +365,6 @@ export function SpriteCanvas({
               className="flex-1 accent-[color:var(--accent)]"
             />
             <span className="w-10 text-right tabular-nums text-text-muted/80">{fps}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="w-12 text-text-muted">루프</span>
-            <button
-              onClick={() => setLoopMode("forward")}
-              className={`h-7 flex-1 rounded border px-2 ${
-                loopMode === "forward"
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border text-text-muted hover:text-text-primary"
-              }`}
-              title="순방향 반복 (1→2→…→N→1)"
-            >
-              순방향
-            </button>
-            <button
-              onClick={() => setLoopMode("pingpong")}
-              className={`h-7 flex-1 rounded border px-2 ${
-                loopMode === "pingpong"
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border text-text-muted hover:text-text-primary"
-              }`}
-              title="핑퐁 반복 (1→…→N→…→1) — 처음↔마지막이 자연스럽게 이어짐"
-            >
-              핑퐁
-            </button>
           </div>
         </div>
 

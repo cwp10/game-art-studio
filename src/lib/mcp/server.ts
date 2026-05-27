@@ -317,13 +317,15 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           : "White background.";
 
         const loopInstruction = seamlessLoop
-          ? `SEAMLESS LOOP REQUIREMENT (CRITICAL): This animation must play as a perfectly seamless loop — Frame N flows smoothly back into Frame 1 without any jump cut. ` +
-            `Design rules: ` +
-            `(A) Frame 1 establishes the base/neutral pose (e.g. both feet on ground for a walk, sword at rest for an attack). ` +
-            `(B) The middle frames progress through the peak of the action. ` +
-            `(C) Frame N returns to a pose visually identical or near-identical to Frame 1 — same foot position, same center-of-mass height, same body angle — so the loop is invisible to the viewer. ` +
-            `For walk/run cycles: use a complete gait cycle where left-right footfall alternates symmetrically, ending where it began. ` +
-            `For other actions: Frame N must be a "recovery" pose that matches Frame 1. `
+          ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
+            `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
+            `Design a CLOSED CYCLE with no beginning and no end: ` +
+            `• Walk/run: cover exactly one complete gait period. ` +
+            `  Example 8-frame walk: (1) left-heel-strike (2) left-mid-stance (3) right-toe-off (4) right-swing (5) right-heel-strike (6) right-mid-stance (7) left-toe-off (8) left-swing → loops back to (1). ` +
+            `  The foot contact pattern in Frame N must be the natural predecessor of Frame 1's foot contact. ` +
+            `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
+            `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
+            `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
           : "";
 
         const decorated =
