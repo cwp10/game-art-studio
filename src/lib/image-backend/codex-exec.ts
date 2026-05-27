@@ -124,10 +124,20 @@ function buildNaturalPrompt(job: ImageJob): string {
         `the post-processing pipeline will key out the green. ${job.prompt}`
       );
     case "spritesheet":
+      if ((job.inputImagePaths?.length ?? 0) > 0) {
+        return (
+          PROMPT_HEADER +
+          `The attached image is a GRID TEMPLATE — a blank white grid showing the exact empty cell layout. ` +
+          `Generate a sprite sheet to fill this template: ${job.prompt}\n` +
+          `Output a PNG with EXACTLY the same pixel dimensions as the template. ` +
+          `Fill every cell of the grid with exactly one sequential animation frame. ` +
+          `Align all characters/objects precisely within each cell boundary.`
+        );
+      }
       return (
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet of: ${job.prompt}. ` +
-        `Uniform cell size, transparent background, evenly spaced grid.`
+        `Uniform cell size, white background, evenly spaced grid.`
       );
   }
 }

@@ -246,10 +246,15 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           : cellH;
         const canvasW = cols * cellW;
         const canvasH = rows * cellH;
+
+        // 그리드 템플릿 PNG 생성 (흰 배경 + 회색 선) — Codex 에게 레이아웃 시각적으로 전달
+        const gridTemplatePath = await generateGridTemplate(cols, rows, cellW, cellH);
+
         const decorated =
           `${userPrompt}. ` +
-          `Single PNG, exactly ${canvasW}×${canvasH} pixels, ` +
-          `${rows}×${cols} animation sprite sheet grid, each cell exactly ${cellW}×${cellH} pixels. ` +
+          `The attached image is a GRID TEMPLATE showing the exact empty cell layout (${canvasW}×${canvasH} pixels, ${cols} columns × ${rows} rows, each cell ${cellW}×${cellH} pixels). ` +
+          `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
+          `Place exactly one animation frame per cell, filling every cell of the grid. ` +
           `CRITICAL pivot rules: ` +
           `(1) character's hip/waist is ALWAYS anchored at the exact horizontal and vertical center of every cell — X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
           `(2) feet always on the same ground line across all frames; ` +
@@ -263,6 +268,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           kind: "spritesheet",
           prompt: decorated,
           inputGenerationIds: [],
+          extraInputPaths: [gridTemplatePath],
           sessionId,
         }) as any;
         // 생성 후 정확한 배수 크기로 강제 리사이즈 — 셀 경계 보장.
@@ -351,14 +357,63 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
 // ─── shared executor ─────────────────────────────────────────────────────────
 
+/**
+ * 스프라이트 시트 레퍼런스용 빈 그리드 PNG 생성 (흰 배경 + 연회색 1px 선).
+ * data/templates/sprite-grid-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
+ */
+async function generateGridTemplate(
+  cols: number,
+  rows: number,
+  cellW: number,
+  cellH: number,
+): Promise<string> {
+  const w = cols * cellW;
+  const h = rows * cellH;
+  const templatesDir = path.join(DATA_DIR, "templates");
+  const cachePath = path.join(
+    templatesDir,
+    `sprite-grid-${cols}x${rows}x${cellW}x${cellH}.png`,
+  );
+  if (fs.existsSync(cachePath)) return cachePath;
+
+  // RGB 흰 배경
+  const pixels = Buffer.alloc(w * h * 3, 255);
+  const gray = 204; // #cccccc — 레퍼런스 그리드 이미지 색상
+
+  // 세로선 (각 셀 경계, 1px)
+  for (let col = 0; col <= cols; col++) {
+    const px = Math.min(col * cellW, w - 1);
+    for (let y = 0; y < h; y++) {
+      const i = (y * w + px) * 3;
+      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
+    }
+  }
+  // 가로선 (각 셀 경계, 1px)
+  for (let row = 0; row <= rows; row++) {
+    const py = Math.min(row * cellH, h - 1);
+    for (let x = 0; x < w; x++) {
+      const i = (py * w + x) * 3;
+      pixels[i] = gray; pixels[i + 1] = gray; pixels[i + 2] = gray;
+    }
+  }
+
+  fs.mkdirSync(templatesDir, { recursive: true });
+  await sharp(pixels, { raw: { width: w, height: h, channels: 3 } })
+    .png()
+    .toFile(cachePath);
+  log(`generateGridTemplate: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
+  return cachePath;
+}
+
 async function runImageTool(spec: {
   name: string;
   kind: GenerationKind;
   prompt: string;
   inputGenerationIds: string[];
+  extraInputPaths?: string[];
   sessionId: string | null;
 }) {
-  const { name, kind, prompt, inputGenerationIds, sessionId } = spec;
+  const { name, kind, prompt, inputGenerationIds, extraInputPaths, sessionId } = spec;
 
   // inputGenerationId → 실제 PNG 경로로 해석
   const inputImagePaths: string[] = [];
@@ -366,6 +421,10 @@ async function runImageTool(spec: {
     const g = getGeneration(gid);
     if (!g) throw new Error(`generation not found: ${gid}`);
     inputImagePaths.push(path.join(DATA_DIR, g.image_path));
+  }
+  // 그리드 템플릿 등 추가 입력 경로 (generation DB 불필요)
+  if (extraInputPaths?.length) {
+    inputImagePaths.push(...extraInputPaths);
   }
 
   const generationId = newGenerationId();
