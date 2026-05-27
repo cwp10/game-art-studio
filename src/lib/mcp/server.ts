@@ -591,12 +591,12 @@ async function chromaKeyGreenFile(filePath: string): Promise<void> {
 
 /**
  * 스프라이트 시트의 각 셀에 대해:
- *   1. 셀 내부 콘텐츠의 bounding box 를 탐지
- *   2. 원본 크기 그대로 (축소 없음) 셀 하단 기준선에 정렬 (bottom-align, 가로는 중앙)
- * → 모든 셀의 캐릭터 발 위치가 동일한 y 라인에 오도록 강제.
- *
- * 축소를 하지 않으므로 큰 이펙트 셀이 무리하게 줄어들지 않는다.
- * (모델이 셀 밖으로 빠뜨린 픽셀은 이미 탐지 단계에서 셀 경계 안만 보므로 자동 클리핑.)
+ *   1. 4-connectivity flood fill 로 connected components 탐지
+ *   2. 가장 큰 컴포넌트 = 메인 콘텐츠 (캐릭터+이펙트)
+ *   3. 메인 bbox 밖 + 작은(메인의 10% 미만) 컴포넌트는 자동 제거
+ *      → 인접 셀에서 침범한 잔재 픽셀이 bbox 에 끼지 않음
+ *   4. 보존된 모든 콘텐츠의 union bbox 를 원본 크기로 추출
+ *   5. 가로 중앙 + 세로 하단(bottom-align, paddingBottom 3%) 으로 배치
  *
  * 콘텐츠 탐지:
  *   - wantsTransparent: alpha > 10 픽셀
@@ -617,7 +617,9 @@ async function normalizeSpritesheetCells(
   const ch = info.channels;
   const cellW = Math.floor(W / cols);
   const cellH = Math.floor(H / rows);
+  const cellN = cellW * cellH;
   const paddingBottom = Math.round(cellH * 0.03);
+  const margin = Math.round(Math.min(cellW, cellH) * 0.05);
 
   const isContent = (i: number) => {
     if (wantsTransparent) return data[i + 3] > 10;
@@ -627,35 +629,140 @@ async function normalizeSpritesheetCells(
   type Layer = { input: Buffer; top: number; left: number };
   const layers: Layer[] = [];
 
+  // 셀당 한 번씩 재사용할 버퍼
+  const mask = new Uint8Array(cellN);
+  const labels = new Int32Array(cellN);
+  const stack: number[] = [];
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cellX0 = c * cellW;
       const cellY0 = r * cellH;
-      let minX = cellW, minY = cellH, maxX = -1, maxY = -1;
+
+      // 1. 셀 마스크
+      mask.fill(0);
+      labels.fill(0);
       for (let y = 0; y < cellH; y++) {
         for (let x = 0; x < cellW; x++) {
-          const i = ((cellY0 + y) * W + (cellX0 + x)) * ch;
-          if (isContent(i)) {
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-          }
+          const gi = ((cellY0 + y) * W + (cellX0 + x)) * ch;
+          if (isContent(gi)) mask[y * cellW + x] = 1;
         }
       }
-      if (maxX < 0) continue; // 빈 셀
 
-      const bbW = maxX - minX + 1;
-      const bbH = maxY - minY + 1;
+      // 2. 4-connectivity flood fill 로 컴포넌트 라벨링
+      const sizes: number[] = [0];
+      let next = 1;
+      for (let start = 0; start < cellN; start++) {
+        if (mask[start] === 0 || labels[start] !== 0) continue;
+        labels[start] = next;
+        let size = 0;
+        stack.push(start);
+        while (stack.length > 0) {
+          const p = stack.pop()!;
+          size++;
+          const lx = p % cellW;
+          const ly = (p - lx) / cellW;
+          if (lx > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
+            labels[p - 1] = next;
+            stack.push(p - 1);
+          }
+          if (lx < cellW - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
+            labels[p + 1] = next;
+            stack.push(p + 1);
+          }
+          if (ly > 0 && mask[p - cellW] === 1 && labels[p - cellW] === 0) {
+            labels[p - cellW] = next;
+            stack.push(p - cellW);
+          }
+          if (ly < cellH - 1 && mask[p + cellW] === 1 && labels[p + cellW] === 0) {
+            labels[p + cellW] = next;
+            stack.push(p + cellW);
+          }
+        }
+        sizes.push(size);
+        next++;
+      }
+      if (sizes.length <= 1) continue; // 빈 셀
+
+      // 3. 메인 컴포넌트 식별 + 메인 bbox 계산
+      let maxSize = 0;
+      let mainLabel = 0;
+      for (let l = 1; l < sizes.length; l++) {
+        if (sizes[l] > maxSize) {
+          maxSize = sizes[l];
+          mainLabel = l;
+        }
+      }
+      let mMinX = cellW, mMinY = cellH, mMaxX = -1, mMaxY = -1;
+      for (let i = 0; i < cellN; i++) {
+        if (labels[i] !== mainLabel) continue;
+        const lx = i % cellW;
+        const ly = (i - lx) / cellW;
+        if (lx < mMinX) mMinX = lx;
+        if (ly < mMinY) mMinY = ly;
+        if (lx > mMaxX) mMaxX = lx;
+        if (ly > mMaxY) mMaxY = ly;
+      }
+      const exMinX = Math.max(0, mMinX - margin);
+      const exMinY = Math.max(0, mMinY - margin);
+      const exMaxX = Math.min(cellW - 1, mMaxX + margin);
+      const exMaxY = Math.min(cellH - 1, mMaxY + margin);
+
+      // 4. 작은(메인의 10% 미만) 컴포넌트 중 centroid 가 메인 bbox+margin 밖인 것 제거
+      const cxSum = new Float64Array(sizes.length);
+      const cySum = new Float64Array(sizes.length);
+      for (let i = 0; i < cellN; i++) {
+        const l = labels[i];
+        if (l === 0) continue;
+        const lx = i % cellW;
+        const ly = (i - lx) / cellW;
+        cxSum[l] += lx;
+        cySum[l] += ly;
+      }
+      const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
+      const remove = new Uint8Array(sizes.length);
+      for (let l = 1; l < sizes.length; l++) {
+        if (l === mainLabel || sizes[l] >= minKeep) continue;
+        const cx = cxSum[l] / sizes[l];
+        const cy = cySum[l] / sizes[l];
+        if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) {
+          remove[l] = 1;
+        }
+      }
+
+      // 5. 보존된 콘텐츠의 union bbox 계산
+      let bMinX = cellW, bMinY = cellH, bMaxX = -1, bMaxY = -1;
+      for (let i = 0; i < cellN; i++) {
+        const l = labels[i];
+        if (l === 0 || remove[l] === 1) continue;
+        const lx = i % cellW;
+        const ly = (i - lx) / cellW;
+        if (lx < bMinX) bMinX = lx;
+        if (ly < bMinY) bMinY = ly;
+        if (lx > bMaxX) bMaxX = lx;
+        if (ly > bMaxY) bMaxY = ly;
+      }
+      if (bMaxX < 0) continue;
+
+      // 6. union bbox 영역의 RGBA 추출 (제거된 컴포넌트 픽셀은 알파 0)
+      const bbW = bMaxX - bMinX + 1;
+      const bbH = bMaxY - bMinY + 1;
       const bbBuf = Buffer.alloc(bbW * bbH * 4);
       for (let y = 0; y < bbH; y++) {
         for (let x = 0; x < bbW; x++) {
-          const si = ((cellY0 + minY + y) * W + (cellX0 + minX + x)) * ch;
+          const lx = bMinX + x;
+          const ly = bMinY + y;
+          const li = ly * cellW + lx;
           const di = (y * bbW + x) * 4;
-          bbBuf[di] = data[si];
-          bbBuf[di + 1] = data[si + 1];
-          bbBuf[di + 2] = data[si + 2];
-          bbBuf[di + 3] = ch === 4 ? data[si + 3] : 255;
+          if (mask[li] === 0 || remove[labels[li]] === 1) {
+            bbBuf[di + 3] = 0;
+            continue;
+          }
+          const gi = ((cellY0 + ly) * W + (cellX0 + lx)) * ch;
+          bbBuf[di] = data[gi];
+          bbBuf[di + 1] = data[gi + 1];
+          bbBuf[di + 2] = data[gi + 2];
+          bbBuf[di + 3] = ch === 4 ? data[gi + 3] : 255;
         }
       }
 
