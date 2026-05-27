@@ -194,9 +194,13 @@ function inferStage(
 }
 
 /**
- * 단순 #00ff00 chroma key. remove_bg 도구가 codex 에게 그 색 위에 다시 그리게
- * 지시했으므로 여기서 그 색 픽셀만 알파 0 으로 친다. anti-aliased fringe 도 잡으려고
- * 넉넉한 threshold (R<80, G>180, B<80).
+ * #00ff00 chroma-key 처리 (in-place). greenness(= g - max(r,b)) 기반 feather:
+ *   - greenness 강함 → alpha 0 (완전 키)
+ *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
+ * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
+ *
+ * NOTE: src/lib/mcp/server.ts 의 chromaKeyGreenFile 과 동일 알고리즘. 둘 중 하나를
+ *       고치면 반드시 다른 쪽도 동기화할 것 (픽셀 루프 한정, fs 처리는 각자 다름).
  */
 async function chromaKeyGreen(filePath: string): Promise<void> {
   const img = sharp(filePath).ensureAlpha();
@@ -206,8 +210,18 @@ async function chromaKeyGreen(filePath: string): Promise<void> {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    if (r < 80 && g > 180 && b < 80) {
+    const greenness = g - Math.max(r, b);
+    // 확실한 키 픽셀 → 완전 투명
+    if (greenness > 40 && g > 90) {
       data[i + 3] = 0;
+      continue;
+    }
+    // fringe — 탈채도 후 greenness(5~40)를 알파 감쇠(1→0)로 매핑.
+    // 캐릭터에 의도된 녹색이 있으면 같이 영향받지만 게임 캐릭터에서는 드물다.
+    if (data[i + 3] > 0 && greenness > 5) {
+      data[i + 1] = Math.max(r, b);
+      const fade = 1 - Math.min(1, (greenness - 5) / 35);
+      data[i + 3] = Math.round(data[i + 3] * fade);
     }
   }
   // 결과를 임시 경로에 쓰고 atomically rename — destPath 가 sharp 의 read 와 동일 파일이면

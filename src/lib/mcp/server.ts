@@ -568,6 +568,9 @@ async function generateGridTemplate(
  *   - greenness 강함 → alpha 0 (완전 키)
  *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
  * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
+ *
+ * NOTE: src/lib/image-backend/codex-exec.ts 의 chromaKeyGreen 과 동일 알고리즘. 둘 중
+ *       하나를 고치면 반드시 다른 쪽도 동기화할 것 (픽셀 루프 한정, fs 처리는 각자 다름).
  */
 async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const { data, info } = await sharp(filePath)
