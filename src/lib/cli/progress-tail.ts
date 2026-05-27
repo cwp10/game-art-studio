@@ -43,6 +43,23 @@ export function tailProgress(opts: {
   let readOffset = 0;
   let lineBuf = "";
   let timer: NodeJS.Timeout | null = null;
+  /** jobs 조회 연속 실패 카운터. 임계 도달 시 1회만 경고 후 warned 로 억제. */
+  let dbFailStreak = 0;
+  let dbFailWarned = false;
+  const DB_FAIL_WARN_THRESHOLD = 10;
+
+  /**
+   * 단일 활성 timer 불변식: 기존 timer 를 항상 clear 후 재설정한다.
+   * stopped 면 절대 예약하지 않는다 (stop() 과 tick 사이 race 방지).
+   */
+  function schedule(): void {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (stopped) return;
+    timer = setTimeout(tick, pollMs);
+  }
 
   /** progress.jsonl 의 새 내용을 동기로 한 번 읽고 onEvent 로 forward. */
   function drainOnce(): void {
@@ -92,21 +109,34 @@ export function tailProgress(opts: {
           )
           .get(opts.turnStartTime) as { id: string } | undefined;
         if (row) foundJobId = row.id;
-      } catch {
-        // DB busy / locked — 다음 tick 에서 다시 시도
+        // 정상 조회 — 카운터/경고 리셋 (복구 시 다시 경고 가능하도록).
+        dbFailStreak = 0;
+        dbFailWarned = false;
+      } catch (e) {
+        // DB busy / locked — 다음 tick 에서 다시 시도. 연속 실패가 임계를 넘으면 1회만 경고.
+        dbFailStreak += 1;
+        if (dbFailStreak >= DB_FAIL_WARN_THRESHOLD && !dbFailWarned) {
+          dbFailWarned = true;
+          console.warn(`[progress-tail] jobs lookup failed ${dbFailStreak}x in a row`, e);
+        }
       }
     }
 
     drainOnce();
 
-    if (!stopped) timer = setTimeout(tick, pollMs);
+    schedule();
   }
   tick();
 
   return {
     stop: () => {
+      if (stopped) return;
+      // stopped 를 먼저 세팅해야 진행 중 tick 이 schedule() 에서 재예약하지 않는다.
       stopped = true;
-      if (timer) clearTimeout(timer);
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
       // tool_result 와 progress.jsonl 의 마지막 줄 append 가 거의 동시에 발생하는
       // race 가 있다 (stop 시점에 polling cycle 사이에 들어온 줄이 누락). 마지막 한 번
       // 동기 drain 으로 남은 줄(보통 recovering / done)도 forward.
