@@ -11,8 +11,7 @@ export const runtime = "nodejs";
  * POST /api/layers — LayerCanvas 가 그린 N(=4)개의 색별 PNG 를 한 번에 generation 행으로 저장.
  *
  * 각 PNG 는 클라이언트에서 (원본 이미지 × 색별 binary mask) 합성 결과.
- * generation 행 kind 는 `inpaint` 재활용 + params.kindHint='layer' + params.colorLabel=...
- * (스키마의 CHECK enum 변경 회피 — 마스크와 동일 패턴.)
+ * generation 행 kind 는 `layer` + params.colorLabel=... 로 저장.
  *
  * body:
  *   { parentGenerationId, layers: [{ colorLabel: "red"|"green"|"blue"|"yellow", dataUrl: "data:image/png;base64,..." }, ...] }
@@ -70,10 +69,10 @@ export async function POST(req: NextRequest) {
       id: generationId,
       session_id: parent.session_id,
       message_id: null,
-      kind: "inpaint",
+      kind: "layer",
       prompt: `layer:${l.colorLabel}`,
       input_image_ids: [parent.id],
-      params: { kindHint: "layer", colorLabel: l.colorLabel },
+      params: { colorLabel: l.colorLabel },
       image_path: toRelative(destPath),
       width,
       height,

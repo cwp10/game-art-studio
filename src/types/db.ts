@@ -33,7 +33,10 @@ export type GenerationKind =
   | "upscale"
   | "remove_bg"
   | "inpaint"
-  | "spritesheet";
+  | "spritesheet"
+  | "mask"
+  | "layer"
+  | "external";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";
 

@@ -179,6 +179,9 @@ function buildNaturalPrompt(job: ImageJob): string {
         loopRule
       );
     }
+    // mask/layer/external 은 외부 업로드·레이어 행이라 codex 로 생성되지 않음 — 도달 시 버그.
+    default:
+      throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);
   }
 }
 

@@ -52,7 +52,7 @@ export async function uploadMask(parentGenerationId: string, dataUrl: string): P
 
 /**
  * 외부 이미지 파일(사용자 업로드) 을 generation 행으로 저장. dataUrl 은 FileReader 로
- * 변환한 base64. backend='external', kind='text2img' + params.kindHint='external'.
+ * 변환한 base64. backend='external', kind='external'.
  */
 export async function uploadImage(args: {
   dataUrl: string;

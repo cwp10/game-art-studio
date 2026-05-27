@@ -12,10 +12,10 @@ export const runtime = "nodejs";
  *
  * kind:
  *   "mask"  — 인페인트 마스크. parentGenerationId 필수. lineage 는 input_image_ids.
- *             generations.kind='inpaint' + params.kindHint='mask'.
+ *             generations.kind='mask'.
  *   "image" — 외부 이미지 import (Composer 첨부 / EmptyState 업로드). parent 없음.
- *             generations.kind='text2img' (enum 회피) + params.kindHint='external',
- *             prompt='업로드 이미지', backend='external', sessionId 있으면 연결.
+ *             generations.kind='external', prompt='업로드 이미지',
+ *             backend='external', sessionId 있으면 연결.
  *
  * body (mask):  { kind:"mask", parentGenerationId, dataUrl }
  * body (image): { kind:"image", dataUrl, sessionId?, filename? }
@@ -92,10 +92,10 @@ export async function POST(req: NextRequest) {
           id: generationId,
           session_id: parent!.session_id,
           message_id: null,
-          kind: "inpaint",
+          kind: "mask",
           prompt: null,
           input_image_ids: [parent!.id],
-          params: { kindHint: "mask" },
+          params: {},
           image_path: toRelative(destPath),
           width,
           height,
@@ -105,9 +105,9 @@ export async function POST(req: NextRequest) {
           id: generationId,
           session_id: body.sessionId ?? null,
           message_id: null,
-          kind: "text2img",
+          kind: "external",
           prompt: body.filename ? `업로드: ${body.filename}` : "업로드 이미지",
-          params: { kindHint: "external", filename: body.filename },
+          params: { filename: body.filename },
           image_path: toRelative(destPath),
           width,
           height,

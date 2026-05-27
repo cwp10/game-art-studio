@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DB_PATH, ensureDataDirs } from "@/lib/util/paths";
 import { cleanupTmpJobs } from "@/lib/util/tmp-cleanup";
+import { runMigrations } from "./migrate";
 import { seedBuiltinPresets } from "./seed-presets";
 
 /**
@@ -34,6 +35,8 @@ function init(): DbInstance {
   // 스키마는 IF NOT EXISTS 라 매번 안전하게 실행 가능.
   const schemaSql = fs.readFileSync(SCHEMA_PATH, "utf8");
   db.exec(schemaSql);
+  // 스키마 보장 후 버전 마이그레이션 (user_version 가드 + 백업).
+  runMigrations(db);
   // builtin style preset seed — name UNIQUE + INSERT OR IGNORE 라 멱등.
   // 사용자가 builtin 의 prompt_suffix 를 수정하면 보존됨.
   seedBuiltinPresets(db);

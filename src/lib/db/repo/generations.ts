@@ -125,10 +125,10 @@ export function listGenerations(
     where.push("prompt LIKE ?");
     params.push(`%${search.trim()}%`);
   }
-  // 갤러리는 마스크/레이어 등 'kindHint' 가 'mask'/'layer' 인 행은 노이즈 — 기본적으로 제외.
-  // 별도 옵션으로 보고 싶으면 sessionId 또는 kind 필터 명시 시.
+  // 갤러리는 마스크/레이어 행이 노이즈 — 기본적으로 제외 (idx_generations_kind 활용).
+  // 별도 옵션으로 보고 싶으면 sessionId 또는 kind 필터 명시 시. external 은 제외하지 않음.
   if (!sessionId && !kind) {
-    where.push("(params IS NULL OR (params NOT LIKE '%\"kindHint\":\"mask\"%' AND params NOT LIKE '%\"kindHint\":\"layer\"%'))");
+    where.push("kind NOT IN ('mask','layer')");
   }
   const sql = `SELECT * FROM generations ${
     where.length ? "WHERE " + where.join(" AND ") : ""

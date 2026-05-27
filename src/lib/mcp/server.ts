@@ -1019,7 +1019,7 @@ async function runResizeTool(spec: {
     .toFile(destPath);
   const elapsedMs = Math.round(performance.now() - startedAt);
 
-  // generations.kind CHECK 제약: text2img|img2img|upscale|remove_bg|inpaint|spritesheet.
+  // generations.kind CHECK 제약: text2img|img2img|upscale|remove_bg|inpaint|spritesheet|mask|layer|external.
   // resize 는 'upscale' 의미가 가장 가까워 그대로 재활용 (의미가 약간 늘어남: 원본보다 작아도
   // 같은 kind 로 분류 — kind enum 확장은 별도 마이그레이션 필요).
   const gen = createGeneration({
