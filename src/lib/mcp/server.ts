@@ -34,6 +34,13 @@ import sharp from "sharp";
 // tsx 가 tsconfig paths 를 해석하지 않으므로 상대 경로 import.
 // 이 파일은 stdio 진입점이라 별도 빌드 없이 `node --import tsx` 로 실행된다.
 import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
+import {
+  chromaKeyFile,
+  normalizeSpritesheetCells,
+  type AnchorStrategy,
+  type ChromaKeyColor,
+  type SubjectType,
+} from "../image-backend/spritesheet-postprocess.js";
 import { createGeneration, getGeneration } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -104,6 +111,16 @@ const SCHEMAS = {
         description:
           "true 면 마지막 프레임이 첫 프레임으로 자연스럽게 이어지는 완전한 루프 사이클로 생성. " +
           "걷기/달리기 사이클, 아이들, 공격 모션 등 반복 재생이 필요한 경우 true.",
+      },
+      subjectType: {
+        type: "string",
+        enum: ["character", "effect"],
+        description: "(선택) 시트 종류. 미지정 시 프롬프트 키워드로 추론.",
+      },
+      anchorStrategy: {
+        type: "string",
+        enum: ["auto", "feet", "hip", "center", "top"],
+        description: "(선택) 세로 정렬 기준. 기본 auto=캐릭터는 발/이펙트는 중앙.",
       },
       ...SESSION_PROP,
     },
@@ -266,6 +283,8 @@ type CallArgs = {
   cols?: number;
   targetSize?: number;
   seamlessLoop?: boolean;
+  subjectType?: SubjectType;
+  anchorStrategy?: AnchorStrategy;
   sessionId?: string;
 };
 
@@ -349,10 +368,20 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           }
         }
 
-        // 투명 배경은 chroma-key 방식: 모델에게 #00ff00 위에 그리게 하고 후처리로 keying.
+        // ⑥ 녹색 캐릭터 키워드 감지 → 마젠타 키 폴백.
+        // 명시적 녹색 색상 키워드만(고블린 등 모호어 제외) — 녹색 옷/슬라임이 chroma-key 에
+        // 먹히는 회귀 방지. 키워드 없으면 기존 green 경로.
+        const greenSubject = /녹색|초록|연두|green|슬라임|slime|잎|leaf|이끼|moss/.test(
+          userPrompt.toLowerCase(),
+        );
+        const chromaKeyColor: ChromaKeyColor = greenSubject ? "magenta" : "green";
+
+        // 투명 배경은 chroma-key 방식: 모델에게 키색 위에 그리게 하고 후처리로 keying.
         // 모델이 직접 알파를 그리면 흰색 fringe / 회색 잔재가 남음.
         const bgInstruction = wantsTransparent
-          ? "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
+          ? chromaKeyColor === "magenta"
+            ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
+            : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
         const loopInstruction = seamlessLoop
@@ -367,10 +396,15 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
           : "";
 
-        // 피사체 앵커 분류 — 모델에게 "if 캐릭터/if 이펙트" 선택을 맡기면 슬래시 등
-        // 접지 동작을 바닥에 앵커링해 이펙트가 아래로 쏠린다. 빌드 시점에 결정적으로
-        // 분류해, 이펙트면 접지 규칙을 아예 빼고 중앙 앵커만 강제. 캐릭터/모호는 기존 유지.
-        const isEffectAnchor = classifyAnchor(userPrompt, !!refId) === "effect";
+        // 피사체 종류·앵커 전략 해석 — 명시 param 우선, 없으면 키워드 추론 폴백.
+        // subjectType 은 normalize 정렬·이펙트 가드의 결정적 입력 신호.
+        const subjectType: SubjectType =
+          args.subjectType ?? (classifyAnchor(userPrompt, !!refId) === "effect" ? "effect" : "character");
+        const anchorStrategy: AnchorStrategy = args.anchorStrategy ?? "auto";
+        // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
+        const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
+          anchorStrategy !== "auto" ? anchorStrategy : subjectType === "effect" ? "center" : "feet";
+        const isEffectAnchor = resolvedAnchor === "center";
         const cx = Math.round(cellW / 2);
         const cy = Math.round(cellH / 2);
         const anchorRule = isEffectAnchor
@@ -407,13 +441,37 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           ? [gridTemplatePath, refPath]   // [grid, ref]
           : [gridTemplatePath];            // [grid only]
 
+        // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
+        // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
+        const paddingBottom = Math.round(cellH * 0.03);
+        const anchorMargin = Math.round(Math.min(cellW, cellH) * 0.05);
+        const anchorY =
+          resolvedAnchor === "center"
+            ? Math.round(cellH / 2)
+            : resolvedAnchor === "top"
+              ? anchorMargin
+              : resolvedAnchor === "hip"
+                ? Math.round(cellH - paddingBottom - 1 - cellH * 0.9 * 0.45)
+                : cellH - paddingBottom - 1; // feet
+        const anchorPivot = { x: cx, y: anchorY };
+
         const mcpResult = await runImageTool({
           name,
           kind: "spritesheet",
           prompt: decorated,
           inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
           overrideInputPaths,                         // Codex 실제 입력 순서 제어
-          params: { seamlessLoop },
+          params: {
+            seamlessLoop,
+            subjectType,
+            anchorStrategy,
+            anchor: anchorPivot,
+            rows,
+            cols,
+            cellW,
+            cellH,
+            fps: 12,
+          },
           sessionId,
         });
         // ── 후처리 파이프라인 ──────────────────────────────────────────────
@@ -432,13 +490,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
 
             if (wantsTransparent) {
-              await chromaKeyGreenFile(filePath);
-              log(`make_spritesheet chroma-keyed gen=${genId}`);
+              await chromaKeyFile(filePath, chromaKeyColor, log);
+              log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
             }
-            // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 발 라인/가로
-            // 중심 정렬. 격자 경계를 넘어 그려진 캐릭터의 이탈·잔재를 후처리로 흡수한다.
-            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, isEffectAnchor);
-            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols}) centerV=${isEffectAnchor}`);
+            // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 시트-전역 단일
+            // scale-to-fit + 앵커 전략별 정렬. 셀 경계 이탈·잔재를 후처리로 흡수한다.
+            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
+              anchorStrategy,
+              subjectType,
+              log,
+            });
+            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
@@ -582,10 +644,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                   .toFile(resizeTmp);
                 fs.renameSync(resizeTmp, filePath);
                 if (wantsTransparent) {
-                  await chromaKeyGreenFile(filePath);
+                  await chromaKeyFile(filePath, "green", log);
                 }
-                await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
-                log(`reskin_image sheet post-process gen=${genId} ${cols}x${rows} transparent=${wantsTransparent}`);
+                // 부모 generation 의 subjectType 상속 → 앵커 도출(effect→center, 그 외→feet).
+                // 부모 정보 없으면 기존 동작(feet)로 폴백.
+                const parentSubject = inputGen.params?.subjectType;
+                const reskinSubject: SubjectType = parentSubject === "effect" ? "effect" : "character";
+                await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
+                  subjectType: reskinSubject,
+                  log,
+                });
+                log(`reskin_image sheet post-process gen=${genId} ${cols}x${rows} transparent=${wantsTransparent} subject=${reskinSubject}`);
               }
             } catch (e) {
               log(`reskin_image post-process fail: ${(e as Error).message}`);
@@ -706,15 +775,6 @@ async function generateGridTemplate(
 }
 
 /**
- * #00ff00 chroma-key 처리 (in-place). greenness(= g - max(r,b)) 기반 feather:
- *   - greenness 강함 → alpha 0 (완전 키)
- *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
- * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
- *
- * NOTE: src/lib/image-backend/codex-exec.ts 의 chromaKeyGreen 과 동일 알고리즘. 둘 중
- *       하나를 고치면 반드시 다른 쪽도 동기화할 것 (픽셀 루프 한정, fs 처리는 각자 다름).
- */
-/**
  * 스프라이트시트 피사체 앵커 분류. "effect" 면 중앙 앵커(바닥 앵커 제거), 그 외 "character"(기존 동작).
  *
  * 결정적·보수적: 명백한 이펙트 키워드가 있고 캐릭터 키워드·참조 이미지가 없을 때만 "effect".
@@ -746,320 +806,6 @@ function classifyAnchor(prompt: string, hasRef: boolean): "effect" | "character"
   ];
   if (EFFECT_WORDS.some(w => p.includes(w))) return "effect";
   return "character"; // 모호 → 기존(캐릭터) 동작 유지
-}
-
-async function chromaKeyGreenFile(filePath: string): Promise<void> {
-  const { data, info } = await sharp(filePath)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const ch = info.channels;
-  for (let i = 0; i < data.length; i += ch) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    const greenness = g - Math.max(r, b);
-    // 확실한 키 픽셀 → 완전 투명
-    if (greenness > 40 && g > 90) {
-      data[i + 3] = 0;
-      continue;
-    }
-    // fringe — 탈채도 후 greenness(5~40)를 알파 감쇠(1→0)로 매핑.
-    // 캐릭터에 의도된 녹색이 있으면 같이 영향받지만 게임 캐릭터에서는 드물다.
-    if (data[i + 3] > 0 && greenness > 5) {
-      data[i + 1] = Math.max(r, b);
-      const fade = 1 - Math.min(1, (greenness - 5) / 35);
-      data[i + 3] = Math.round(data[i + 3] * fade);
-    }
-  }
-  const tmpPath = filePath + ".chroma.tmp";
-  await sharp(data, {
-    raw: { width: info.width, height: info.height, channels: ch as 1 | 2 | 3 | 4 },
-  })
-    .png()
-    .toFile(tmpPath);
-  fs.renameSync(tmpPath, filePath);
-}
-
-/**
- * 스프라이트 시트 후처리 (글로벌 connected components 기반):
- *   1. 시트 전체에 대해 4-connectivity flood fill → 컴포넌트 라벨링
- *   2. 각 컴포넌트를 "가장 많은 픽셀이 있는 셀" 에 통째로 할당
- *      → 캐릭터가 셀 경계를 넘어 그려져도 발끝/날개 등이 잘리지 않음
- *   3. 셀별로: 메인 컴포넌트(가장 큰 것) 식별 + 메인 bbox + 5% margin 안의
- *      보존 대상 작은 컴포넌트 결정. 메인의 10% 미만이면서 bbox 밖이면 제거.
- *   4. 보존 컴포넌트의 union bbox 영역을 글로벌 좌표로 추출
- *   5. 가로: 메인 컴포넌트의 무게중심 x 를 셀 가로 중심에 정렬
- *      세로: 메인 컴포넌트 y 의 95th percentile 을 발 라인으로 추정, 셀 하단 정렬
- *      (시트 경계 안에 클램프 — 셀 경계 침범은 의도적으로 허용)
- */
-async function normalizeSpritesheetCells(
-  filePath: string,
-  rows: number,
-  cols: number,
-  wantsTransparent: boolean,
-  /** true 면 셀 안에서 내용을 발-라인(하단) 대신 세로 중앙에 배치. 이펙트/VFX 시트용 —
-   *  모델이 슬래시 등 이펙트를 셀 하단에 쏠리게 그려도 후처리로 결정적 재중앙화. */
-  centerVertically = false,
-): Promise<void> {
-  const { data, info } = await sharp(filePath)
-    .ensureAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const W = info.width;
-  const H = info.height;
-  const ch = info.channels;
-  const cellW = Math.floor(W / cols);
-  const cellH = Math.floor(H / rows);
-  const N = W * H;
-  const paddingBottom = Math.round(cellH * 0.03);
-  const margin = Math.round(Math.min(cellW, cellH) * 0.05);
-
-  const isContent = (i: number) => {
-    if (wantsTransparent) return data[i + 3] > 10;
-    return !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
-  };
-
-  // 1. 시트 전체 마스크
-  const mask = new Uint8Array(N);
-  for (let i = 0; i < N; i++) {
-    if (isContent(i * ch)) mask[i] = 1;
-  }
-
-  // 2. 글로벌 4-connectivity 라벨링
-  const labels = new Int32Array(N);
-  const sizes: number[] = [0];
-  let next = 1;
-  const stack: number[] = [];
-  for (let start = 0; start < N; start++) {
-    if (mask[start] === 0 || labels[start] !== 0) continue;
-    labels[start] = next;
-    let size = 0;
-    stack.push(start);
-    while (stack.length > 0) {
-      const p = stack.pop()!;
-      size++;
-      const x = p % W;
-      const y = (p - x) / W;
-      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
-        labels[p - 1] = next;
-        stack.push(p - 1);
-      }
-      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
-        labels[p + 1] = next;
-        stack.push(p + 1);
-      }
-      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
-        labels[p - W] = next;
-        stack.push(p - W);
-      }
-      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
-        labels[p + W] = next;
-        stack.push(p + W);
-      }
-    }
-    sizes.push(size);
-    next++;
-  }
-  if (sizes.length <= 1) {
-    log(`normalizeSpritesheetCells: empty sheet, skipping`);
-    return;
-  }
-
-  // 3. 컴포넌트별 픽셀 인덱스 + bbox + 셀별 픽셀 카운트
-  const compPixels: number[][] = Array.from({ length: sizes.length }, () => []);
-  const compCellCount: Map<number, number>[] = Array.from({ length: sizes.length }, () => new Map());
-  const compMinX = new Int32Array(sizes.length).fill(W);
-  const compMinY = new Int32Array(sizes.length).fill(H);
-  const compMaxX = new Int32Array(sizes.length).fill(-1);
-  const compMaxY = new Int32Array(sizes.length).fill(-1);
-  for (let i = 0; i < N; i++) {
-    const l = labels[i];
-    if (l === 0) continue;
-    const x = i % W;
-    const y = (i - x) / W;
-    compPixels[l].push(i);
-    if (x < compMinX[l]) compMinX[l] = x;
-    if (y < compMinY[l]) compMinY[l] = y;
-    if (x > compMaxX[l]) compMaxX[l] = x;
-    if (y > compMaxY[l]) compMaxY[l] = y;
-    const ci = Math.floor(y / cellH) * cols + Math.floor(x / cellW);
-    compCellCount[l].set(ci, (compCellCount[l].get(ci) ?? 0) + 1);
-  }
-
-  // 4. 각 컴포넌트 → 가장 많은 픽셀이 있는 셀에 할당
-  const labelsPerCell = new Map<number, number[]>();
-  for (let l = 1; l < sizes.length; l++) {
-    let maxCount = 0;
-    let assigned = 0;
-    for (const [ci, count] of compCellCount[l]) {
-      if (count > maxCount) {
-        maxCount = count;
-        assigned = ci;
-      }
-    }
-    if (!labelsPerCell.has(assigned)) labelsPerCell.set(assigned, []);
-    labelsPerCell.get(assigned)!.push(l);
-  }
-
-  type Layer = { input: Buffer; top: number; left: number };
-  const layers: Layer[] = [];
-
-  // 5. 셀별 처리
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const cellIdx = r * cols + c;
-      const cellX0 = c * cellW;
-      const cellY0 = r * cellH;
-      const assigned = labelsPerCell.get(cellIdx);
-      if (!assigned || assigned.length === 0) continue;
-
-      // 메인 = 가장 큰 컴포넌트
-      let mainLabel = assigned[0];
-      let maxSize = sizes[mainLabel];
-      for (const l of assigned) {
-        if (sizes[l] > maxSize) {
-          maxSize = sizes[l];
-          mainLabel = l;
-        }
-      }
-
-      // 메인 bbox + 5% margin (글로벌 좌표)
-      const exMinX = compMinX[mainLabel] - margin;
-      const exMinY = compMinY[mainLabel] - margin;
-      const exMaxX = compMaxX[mainLabel] + margin;
-      const exMaxY = compMaxY[mainLabel] + margin;
-
-      // 보존할 컴포넌트: 메인 + (큰 컴포넌트 OR 메인 bbox 안의 centroid)
-      const minKeep = Math.max(4, Math.floor(maxSize * 0.1));
-      const keep: number[] = [mainLabel];
-      for (const l of assigned) {
-        if (l === mainLabel) continue;
-        if (sizes[l] >= minKeep) {
-          keep.push(l);
-          continue;
-        }
-        let sx = 0, sy = 0;
-        for (const idx of compPixels[l]) {
-          sx += idx % W;
-          sy += Math.floor(idx / W);
-        }
-        const cx = sx / compPixels[l].length;
-        const cy = sy / compPixels[l].length;
-        const inMainBox = cx >= exMinX && cx <= exMaxX && cy >= exMinY && cy <= exMaxY;
-        // 셀 내부 안전영역(가장자리 edge band 제외): 본체와 떨어진 정당한 이펙트
-        // (스파크·번개 줄기)는 보존. edge band 안의 작은 먼 컴포넌트만 인접 셀 bleed 로 삭제.
-        const inSafeZone =
-          cx >= cellX0 + margin && cx <= cellX0 + cellW - margin &&
-          cy >= cellY0 + margin && cy <= cellY0 + cellH - margin;
-        if (inMainBox || inSafeZone) {
-          keep.push(l);
-        }
-      }
-
-      // 보존 컴포넌트의 union bbox (글로벌)
-      let bMinX = W, bMinY = H, bMaxX = -1, bMaxY = -1;
-      for (const l of keep) {
-        if (compMinX[l] < bMinX) bMinX = compMinX[l];
-        if (compMinY[l] < bMinY) bMinY = compMinY[l];
-        if (compMaxX[l] > bMaxX) bMaxX = compMaxX[l];
-        if (compMaxY[l] > bMaxY) bMaxY = compMaxY[l];
-      }
-      if (bMaxX < 0) continue;
-
-      const keepSet = new Set(keep);
-      const bbW = bMaxX - bMinX + 1;
-      const bbH = bMaxY - bMinY + 1;
-      const bbBuf = Buffer.alloc(bbW * bbH * 4);
-      for (let y = 0; y < bbH; y++) {
-        for (let x = 0; x < bbW; x++) {
-          const gx = bMinX + x;
-          const gy = bMinY + y;
-          const li = gy * W + gx;
-          const di = (y * bbW + x) * 4;
-          if (mask[li] === 0 || !keepSet.has(labels[li])) {
-            bbBuf[di + 3] = 0;
-            continue;
-          }
-          const gi = li * ch;
-          bbBuf[di] = data[gi];
-          bbBuf[di + 1] = data[gi + 1];
-          bbBuf[di + 2] = data[gi + 2];
-          bbBuf[di + 3] = ch === 4 ? data[gi + 3] : 255;
-        }
-      }
-
-      const layerPng = await sharp(bbBuf, { raw: { width: bbW, height: bbH, channels: 4 } })
-        .png()
-        .toBuffer();
-
-      // Shape-aware 본체 추출 — 메인 컴포넌트의 y행별 픽셀 수 분포 분석.
-      // 캐릭터 본체(어깨~다리)는 일정한 두께로 연속, 이펙트(불꽃 호/검기/폭발)는
-      // 행별 픽셀 수가 적음. row count 가 max 의 일정 비율 이상인 행만 "본체" 로
-      // 간주해 발 라인/가로 중심을 계산. → 이펙트 길이/방향 영향에서 자유로움.
-      const rowCounts = new Int32Array(H);
-      const rowSumX = new Float64Array(H);
-      for (const idx of compPixels[mainLabel]) {
-        const px = idx % W;
-        const py = Math.floor(idx / W);
-        rowCounts[py]++;
-        rowSumX[py] += px;
-      }
-      let rowMax = 0;
-      for (let y = 0; y < H; y++) {
-        if (rowCounts[y] > rowMax) rowMax = rowCounts[y];
-      }
-      const bodyThreshold = Math.max(2, Math.floor(rowMax * 0.25));
-
-      // 본체 영역의 가장 아래 y = 발 라인 / 본체 픽셀의 가로 무게중심
-      let footY = compMaxY[mainLabel];
-      let bodySumX = 0;
-      let bodyCount = 0;
-      for (let y = compMaxY[mainLabel]; y >= compMinY[mainLabel]; y--) {
-        if (rowCounts[y] >= bodyThreshold) {
-          if (bodyCount === 0) footY = y; // 가장 처음 발견한 본체 행 = 가장 아래
-          bodySumX += rowSumX[y];
-          bodyCount += rowCounts[y];
-        }
-      }
-      // 본체 검출 실패(전체가 얇은 이펙트) 시 메인 픽셀 전체로 폴백
-      const mainCenterX = bodyCount > 0
-        ? bodySumX / bodyCount
-        : compPixels[mainLabel].reduce((s, idx) => s + (idx % W), 0) / compPixels[mainLabel].length;
-
-      // 가로: 본체 무게중심 x 를 셀 가로 중심에
-      const layerCenterX = mainCenterX - bMinX;
-      const desiredLeft = Math.round(cellX0 + cellW / 2 - layerCenterX);
-
-      // 세로: 이펙트면 추출 bbox(꼬리 포함)를 셀 세로 중앙에, 아니면 본체 발 라인을
-      // 셀 하단 paddingBottom 위에(캐릭터 접지). 이펙트는 모델이 하단 쏠리게 그려도
-      // 여기서 결정적으로 중앙 정렬된다.
-      const desiredTop = centerVertically
-        ? Math.round(cellY0 + (cellH - bbH) / 2)
-        : (() => {
-            const targetFootY = cellY0 + cellH - paddingBottom - 1;
-            const layerFootY = footY - bMinY;
-            return Math.round(targetFootY - layerFootY);
-          })();
-
-      // 시트 경계 안으로 클램프 (셀 경계 침범은 허용 — 크게 그려진 캐릭터/이펙트 보존)
-      const left = Math.max(0, Math.min(W - bbW, desiredLeft));
-      const top = Math.max(0, Math.min(H - bbH, desiredTop));
-      layers.push({ input: layerPng, top, left });
-    }
-  }
-
-  // 빈 캔버스 위에 모두 합성 (배경: 투명 또는 흰)
-  const bg = wantsTransparent
-    ? { r: 0, g: 0, b: 0, alpha: 0 }
-    : { r: 255, g: 255, b: 255, alpha: 1 };
-  const tmpPath = filePath + ".norm.tmp";
-  await sharp({
-    create: { width: W, height: H, channels: 4, background: bg },
-  })
-    .composite(layers)
-    .png()
-    .toFile(tmpPath);
-  fs.renameSync(tmpPath, filePath);
-  log(`normalizeSpritesheetCells: ${cols}x${rows} cells normalized, ${layers.length} non-empty`);
 }
 
 /**

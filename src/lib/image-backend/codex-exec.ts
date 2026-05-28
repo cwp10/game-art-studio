@@ -252,8 +252,9 @@ function inferStage(
  *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
  * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
  *
- * NOTE: src/lib/mcp/server.ts 의 chromaKeyGreenFile 과 동일 알고리즘. 둘 중 하나를
- *       고치면 반드시 다른 쪽도 동기화할 것 (픽셀 루프 한정, fs 처리는 각자 다름).
+ * NOTE: 단일 이미지 remove_bg 전용. 스프라이트시트는 더 강한 후처리(테두리-connected
+ *       배경만 키아웃·적응형 임계값·green/magenta 일반화)를 쓰는 별도 구현
+ *       src/lib/image-backend/spritesheet-postprocess.ts 의 chromaKeyFile 을 사용한다.
  */
 async function chromaKeyGreen(filePath: string): Promise<void> {
   const img = sharp(filePath).ensureAlpha();
