@@ -8,6 +8,7 @@
     "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "db:init": "tsx scripts/init-db.ts",
+    "cleanup": "tsx scripts/cleanup.ts",
     "probe": "node scripts/probe-codex-imagegen.mjs",
     "postinstall": "cp -f node_modules/gif.js/dist/gif.worker.js public/gif.worker.js"
   },

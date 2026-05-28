@@ -151,7 +151,7 @@ export function GallerySheet({ open, onClose, onAction }: Props) {
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`/api/images/${g.id}`}
+                    src={`/api/thumbnails/${g.id}`}
                     alt={g.prompt ?? "generation"}
                     className="block aspect-square w-full object-cover"
                     loading="lazy"
