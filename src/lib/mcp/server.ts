@@ -495,10 +495,13 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const directionPrompt =
           isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
 
-        // 걷기/달리기 등 보행: 프레임수(cols=방향당 프레임) 인지형 gait — 좌우 발 교차 강제.
+        // 걷기/달리기 등 보행: 한 사이클의 프레임 수 인지형 gait — 좌우 발 교차 강제.
+        // 방향 시트면 한 행(=cols 프레임)이 한 사이클; 비방향 시트는 전체 셀(rows*cols)이
+        // 행 우선 순서로 한 사이클. (rows=1 auto-reshape 후에도 총 프레임 기준으로 일관.)
         // 캐릭터 시트에서만, seamlessLoop 무관하게 주입(걷기면 발은 항상 교대). 이펙트엔 X.
+        const gaitFrames = directions ? cols : rows * cols;
         const gaitPrompt =
-          isCharacter && isWalk ? buildGaitPrompt(cols, !!directions) : "";
+          isCharacter && isWalk ? buildGaitPrompt(gaitFrames, !!directions) : "";
 
         const decorated =
           `${userPrompt}. ` +

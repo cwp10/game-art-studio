@@ -535,13 +535,13 @@ export async function normalizeSpritesheetCells(
     );
   }
 
-  // ── 패스 2.5: 정렬 기준선 robust 보정 (feet/hip/top) ───────────────────────
-  // 목표선은 고정선(⑧ upfront 피벗과 일치)이지만, 검출이 중앙값에서 크게 벗어난
-  // 셀은 이상치로 보고 그 셀만 중앙값으로 폴백 — upfront 피벗과 일치 유지.
+  // ── 정렬 기준점 산출 ──────────────────────────────────────────────────────
+  // 각 셀의 본체 기준점(footY/hipY/headTopY)을 전략별 셀-로컬 고정 목표선에 맞춰
+  // 배치한다. 목표선이 고정값이라 모든 셀이 동일 라인에 정렬되고 ⑧ upfront 피벗과 일치.
   type AlignKind = "feet" | "hip" | "center" | "top";
   const alignKind: AlignKind = anchor;
 
-  // 각 셀의 정렬 기준점(scale 반영된 layer-local offset)을 산출.
+  // 각 셀의 정렬 기준점(scale 반영된 layer-local offset).
   const refOff = (cell: Cell): number => {
     // layer-local(축소 전) 기준 → scale 곱.
     if (alignKind === "feet") return (cell.footY - cell.bMinY) * scale;
@@ -553,21 +553,6 @@ export async function normalizeSpritesheetCells(
     // center 는 layer 세로 중앙
     return (cell.bbH * scale) / 2;
   };
-
-  // cell-local 정렬선(= cellY0 기준 목표 y) 중앙값 — 이상치 거부에만 사용.
-  // 목표선 자체는 고정선이라 export 피벗과 일치.
-  const localLines = cells.map(cell => {
-    const sH = Math.round(cell.bbH * scale);
-    if (alignKind === "feet" || alignKind === "hip") {
-      // 기준점이 셀 안에서 놓일 위치 = cellH - paddingBottom - 1 - (footTail)
-      // 여기서는 검출 일관성 판단용으로 desiredTop+refOff 의 cell-local 값을 모은다.
-      return cellH - paddingBottom - 1; // 고정 목표(feet/hip 공통 발-기준)
-    }
-    if (alignKind === "top") return margin;
-    return Math.round((cellH - sH) / 2);
-  });
-  const sortedLines = [...localLines].sort((a, b) => a - b);
-  const medianLine = sortedLines[Math.floor(sortedLines.length / 2)];
 
   // ── 패스 3: 배치 ────────────────────────────────────────────────────────────
   type Layer = { input: Buffer; top: number; left: number };
@@ -600,12 +585,7 @@ export async function normalizeSpritesheetCells(
       // feet/hip → 발 기준선(cellH - paddingBottom - 1), top → margin.
       // hip 은 기준점이 hipY 라 발보다 위에 정렬 → 콘텐츠가 셀 위로 올라감.
       const targetLocal = alignKind === "top" ? margin : cellH - paddingBottom - 1;
-      const off = refOff(cell);
-      // 검출 이상치 거부: 본 셀 목표 local 선이 중앙값에서 cellH*0.25 이상 벗어나면
-      // 중앙값으로 폴백(noise 한 footY 가 캐릭터를 들쭉날쭉하게 만드는 것 방지).
-      const safeTargetLocal =
-        Math.abs(targetLocal - medianLine) > cellH * 0.25 ? medianLine : targetLocal;
-      desiredTop = Math.round(cell.cellY0 + safeTargetLocal - off);
+      desiredTop = Math.round(cell.cellY0 + targetLocal - refOff(cell));
     }
 
     const left = Math.max(cell.cellX0, Math.min(cell.cellX0 + cellW - sW, desiredLeft));
