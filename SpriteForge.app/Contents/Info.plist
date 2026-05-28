@@ -17,7 +17,9 @@
   <key>CFBundleExecutable</key>
   <string>SpriteForge</string>
   <key>CFBundleIconFile</key>
-  <string>AppIcon</string>
+  <string>SpriteForge</string>
+  <key>CFBundleIconName</key>
+  <string>SpriteForge</string>
   <key>LSUIElement</key>
   <true/>
 </dict>

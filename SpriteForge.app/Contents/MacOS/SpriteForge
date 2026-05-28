@@ -1,3 +1,6 @@
 #!/bin/bash
-# .app 더블클릭 → 리포의 런처 실행. (개인 머신 전용, 절대 경로 고정)
-exec "/Users/wonpyoung/Developer/workspace/image-generator/scripts/launch.sh"
+# .app 더블클릭 → 실제 런처를 백그라운드로 분리 실행하고 즉시 반환.
+# 메인 실행파일이 블로킹하면 macOS 가 "응답 없음"으로 판단하므로 빠르게 종료한다.
+# (분리된 launch.sh 가 서버 시작·전용 창·창 닫힘 시 서버 종료를 담당.)
+nohup "/Users/wonpyoung/Developer/workspace/image-generator/scripts/launch.sh" >/dev/null 2>&1 &
+exit 0
