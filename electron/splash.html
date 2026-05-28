@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>SpriteForge</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        -webkit-user-select: none;
+        cursor: default;
+        overflow: hidden;
+      }
+      .wrap {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+        color: rgba(255, 255, 255, 0.82);
+        -webkit-app-region: drag;
+      }
+      .title {
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+      .spinner {
+        width: 26px;
+        height: 26px;
+        border: 2.5px solid rgba(255, 255, 255, 0.18);
+        border-top-color: rgba(255, 255, 255, 0.85);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      .hint {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.45);
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="spinner"></div>
+      <div class="title">SpriteForge</div>
+      <div class="hint">준비 중…</div>
+    </div>
+  </body>
+</html>

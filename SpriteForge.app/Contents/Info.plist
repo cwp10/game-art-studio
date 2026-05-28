@@ -20,7 +20,5 @@
   <string>SpriteForge</string>
   <key>CFBundleIconName</key>
   <string>SpriteForge</string>
-  <key>LSUIElement</key>
-  <true/>
 </dict>
 </plist>

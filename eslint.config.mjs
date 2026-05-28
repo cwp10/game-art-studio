@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "public/gif.worker.js", // gif.js vendor bundle (postinstall 로 복사)
+    "electron/**", // Electron 데스크톱 셸 — CommonJS(Node main 프로세스), Next 앱 lint 대상 아님
   ]),
 ]);
 

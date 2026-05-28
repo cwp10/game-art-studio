@@ -1,6 +1,9 @@
 #!/bin/bash
-# .app 더블클릭 → 실제 런처를 백그라운드로 분리 실행하고 즉시 반환.
-# 메인 실행파일이 블로킹하면 macOS 가 "응답 없음"으로 판단하므로 빠르게 종료한다.
-# (분리된 launch.sh 가 서버 시작·전용 창·창 닫힘 시 서버 종료를 담당.)
-nohup "/Users/wonpyoung/Developer/workspace/image-generator/scripts/launch.sh" >/dev/null 2>&1 &
-exit 0
+# .app 더블클릭 → Electron 네이티브 셸 실행.
+# Finder 에서 실행되면 PATH 가 최소화되므로 도구 위치를 직접 넣는다(node/pnpm/codex/claude).
+# 이 PATH 는 Electron main → spawn 한 Next 서버 → codex/claude 로 그대로 상속된다.
+# exec 로 교체 실행하여 Electron 이 .app 의 포그라운드 프로세스로 남는다.
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/usr/sbin:/bin:$PATH"
+PROJECT_DIR="/Users/wonpyoung/Developer/workspace/image-generator"
+cd "$PROJECT_DIR" || exit 1
+exec "$PROJECT_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" "$PROJECT_DIR/electron/main.js"
