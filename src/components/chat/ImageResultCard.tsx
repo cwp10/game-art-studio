@@ -11,6 +11,7 @@ import {
   Loader2,
   Palette,
   RotateCw,
+  UserPlus,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -25,6 +26,7 @@ type Action =
   | "layer_split"
   | "sprite_split"
   | "reskin"
+  | "overlay"
   | "reference"
   | "compare";
 
@@ -35,6 +37,8 @@ type Props = {
   height: number;
   /** generation 생성 시각 (epoch ms). 사이즈 옆에 날짜 표시. */
   createdAt?: number;
+  /** generation kind — 'spritesheet' 일 때만 [캐릭터 입히기] 단축어 노출. */
+  kind?: string;
   prompt?: string;
   onAction?: (action: Action, opts?: { targetSize?: number }) => void;
 };
@@ -46,7 +50,7 @@ function formatCreatedAt(ms: number): string {
   return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, prompt, onAction }: Props) {
+export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, kind, prompt, onAction }: Props) {
   const [copied, setCopied] = useState(false);
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
@@ -186,6 +190,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Palette size={12} /> 리스킨
             </button>
+            {kind === "spritesheet" && (
+              <button
+                onClick={() => onAction?.("overlay")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="캐릭터 입히기 — 캐릭터 이미지를 골라 시트의 모든 포즈에 입힘 (오버레이)"
+              >
+                <UserPlus size={12} /> 캐릭터
+              </button>
+            )}
             <button
               onClick={() => onAction?.("compare")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"

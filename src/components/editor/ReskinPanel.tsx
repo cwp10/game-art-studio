@@ -40,6 +40,8 @@ type Props = {
   height: number;
   /** 시트면 셀 정렬·투명 후처리 안내 배너 표시. 미지정 시 치수로 추정. */
   kind?: string;
+  /** 진입 시 기본 모드. 캐릭터 오버레이 단축어는 "c"로 바로 연다. 미지정 시 "a". */
+  initialMode?: Mode;
   /** 현재 세션 — 모드 c 의 참조 썸네일 그리드 조회용. */
   sessionId: string | null;
   onSubmit: (payload: ReskinSubmit) => void;
@@ -61,11 +63,12 @@ export function ReskinPanel({
   width,
   height,
   kind,
+  initialMode,
   sessionId,
   onSubmit,
   onClose,
 }: Props) {
-  const [mode, setMode] = useState<Mode>("a");
+  const [mode, setMode] = useState<Mode>(initialMode ?? "a");
   const [prompt, setPrompt] = useState("");
   const [extra, setExtra] = useState("");
   const [styleRefId, setStyleRefId] = useState<string | null>(null);
@@ -102,6 +105,8 @@ export function ReskinPanel({
   // 시트 여부: kind 우선, 없으면 치수에서 grid 감지(SpriteCanvas 와 동일 GCD 역산).
   const isSheet = kind === "spritesheet" || (!kind && detectSpriteGrid(width, height) !== null);
   const grid = detectSpriteGrid(width, height);
+  // 시트 베이스 + 참조 전이(c) = 캐릭터 오버레이 → 라벨/안내 리프레이밍(백엔드는 동일).
+  const overlay = isSheet && mode === "c";
 
   // 모드 c 진입 시 세션 이미지 목록 로드 — 원본 자신·마스크 제외.
   useEffect(() => {
@@ -157,7 +162,7 @@ export function ReskinPanel({
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
-          <Palette size={14} /> 리스킨
+          <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
         </span>
         <span className="text-xs text-text-muted/60">
           {width}×{height} · parent {generationId.slice(0, 6)}…
@@ -192,7 +197,7 @@ export function ReskinPanel({
         {/* 원본 미리보기 + kind 배지 — 크게 표시. */}
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-text-muted/80">원본</span>
+            <span className="text-text-muted/80">{overlay ? "베이스 시트" : "원본"}</span>
             <span className="text-text-primary">{width}×{height}</span>
             {isSheet && (
               <span className="inline-flex items-center rounded bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">
@@ -322,7 +327,16 @@ export function ReskinPanel({
 
         {mode === "c" && (
           <div className="shrink-0 space-y-2">
-            <label className="text-xs text-text-muted">스타일 참조 이미지 — 세션 이미지 선택 또는 업로드</label>
+            {overlay && (
+              <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
+                ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
+              </div>
+            )}
+            <label className="text-xs text-text-muted">
+              {overlay
+                ? "입힐 캐릭터 — 세션 이미지 선택 또는 업로드"
+                : "스타일 참조 이미지 — 세션 이미지 선택 또는 업로드"}
+            </label>
             <input
               ref={fileInputRef}
               type="file"
@@ -390,8 +404,16 @@ export function ReskinPanel({
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={styleRefUrl} alt="참조" className="h-full w-full object-contain" />
                 </div>
-                <span className="text-[11px] text-text-muted/70">이 참조의 화풍·팔레트를 입힙니다.</span>
+                <span className="text-[11px] text-text-muted/70">
+                  {overlay ? "이 캐릭터를 모든 프레임에 입힙니다." : "이 참조의 화풍·팔레트를 입힙니다."}
+                </span>
               </div>
+            )}
+
+            {overlay && (
+              <p className="text-[11px] text-[color:var(--danger)]/90">
+                ⚠ 모든 프레임의 머리·얼굴·복장 일관성은 모델에 의존합니다(드리프트 가능). 베이스 시트 정렬 품질이 중요합니다.
+              </p>
             )}
 
             <div className="space-y-1">
@@ -428,7 +450,7 @@ export function ReskinPanel({
           className="h-9 flex-[2] rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
           title={canSubmit ? "" : mode === "c" ? "참조 이미지 선택 필요" : "설명 입력 필요"}
         >
-          리스킨 실행 ▸
+          {overlay ? "오버레이 실행 ▸" : "리스킨 실행 ▸"}
         </button>
       </footer>
     </aside>

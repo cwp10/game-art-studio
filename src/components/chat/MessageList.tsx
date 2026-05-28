@@ -19,6 +19,7 @@ type Props = {
       | "layer_split"
       | "sprite_split"
       | "reskin"
+      | "overlay"
       | "reference"
       | "compare",
     payload: {
@@ -169,6 +170,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                 width={lastTool.result.width}
                 height={lastTool.result.height}
                 createdAt={lastTool.result.createdAt}
+                kind={lastTool.result.kind}
                 prompt={userPromptForCard}
                 onAction={(a, opts) =>
                   onAction?.(a, {

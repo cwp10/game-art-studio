@@ -52,7 +52,7 @@ type Editing =
   | ({ mode: "inpaint" } & EditTarget)
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
-  | ({ mode: "reskin" } & EditTarget)
+  | ({ mode: "reskin"; initialMode?: "a" | "b" | "c" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -340,6 +340,7 @@ export function ChatLayout() {
         | "layer_split"
         | "sprite_split"
         | "reskin"
+        | "overlay"
         | "reference"
         | "compare",
       payload: {
@@ -370,6 +371,18 @@ export function ChatLayout() {
       } else if (action === "remove_bg" && payload.generationId) {
         handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
           attachmentGenerationIds: [payload.generationId],
+        });
+      } else if (action === "overlay" && payload.generationId && payload.width && payload.height) {
+        // 캐릭터 오버레이 = 리스킨 모드 c(참조 전이)를 시트 베이스로 바로 오픈.
+        // 백엔드 동일 — 패널이 시트+모드c 일 때 "캐릭터 오버레이"로 리프레이밍.
+        setEditing({
+          mode: "reskin",
+          initialMode: "c",
+          generationId: payload.generationId,
+          imageUrl: `/api/images/${payload.generationId}`,
+          width: payload.width,
+          height: payload.height,
+          kind: payload.kind,
         });
       } else if (
         (action === "edit" ||
@@ -475,6 +488,8 @@ export function ChatLayout() {
     async (payload: ReskinSubmit) => {
       if (!editing || editing.mode !== "reskin") return;
       const genId = editing.generationId;
+      // 시트 베이스 + 모드 c = 캐릭터 오버레이 → 메시지 문구를 오버레이 맥락으로.
+      const isSheetBase = editing.kind === "spritesheet";
       setEditing(null);
       if (payload.mode === "b-precise") {
         // 결정적 색교체 — codex/Claude 우회, 전용 API 직접 호출 후 합성 결과 카드 삽입.
@@ -507,10 +522,10 @@ export function ChatLayout() {
           attachmentGenerationIds: [genId],
         });
       } else {
-        handleSend(
-          `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`,
-          { attachmentGenerationIds: [genId, payload.styleReferenceId] },
-        );
+        const msg = isSheetBase
+          ? `베이스 시트(첫 번째 이미지)의 모든 포즈에 두 번째 이미지의 캐릭터를 입혀줘. 포즈·프레임 구성은 그대로 유지.${payload.extra ? ` ${payload.extra}` : ""}`
+          : `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`;
+        handleSend(msg, { attachmentGenerationIds: [genId, payload.styleReferenceId] });
       }
     },
     [editing, handleSend],
@@ -783,6 +798,7 @@ export function ChatLayout() {
             width={editing.width}
             height={editing.height}
             kind={editing.kind}
+            initialMode={editing.initialMode}
             sessionId={state.activeSessionId}
             onSubmit={handleReskin}
             onClose={() => setEditing(null)}
