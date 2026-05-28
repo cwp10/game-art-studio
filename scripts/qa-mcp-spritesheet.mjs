@@ -1,7 +1,7 @@
 /**
  * Phase 2 실생성 QA 하네스 — 실제 MCP make_spritesheet 핸들러를 stdio 로 호출한다.
  *
- *   node scripts/qa-mcp-spritesheet.mjs "<prompt>" <rows> <cols> [subjectType]
+ *   node scripts/qa-mcp-spritesheet.mjs "<prompt>" <rows> <cols> [subjectType] [directions]
  *
  * scripts/gen.ts 는 ImageBackend 를 직접 호출해 effectGuard/decorated 빌더를
  * 우회한다. 이 하네스는 진짜 MCP 서버를 spawn 해 핸들러의 decorated 프롬프트(가드 포함)와
@@ -13,13 +13,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import path from "node:path";
 
-const [, , prompt, rowsStr, colsStr, subjectType] = process.argv;
+const [, , prompt, rowsStr, colsStr, subjectType, directionsStr] = process.argv;
 if (!prompt) {
-  console.error('usage: node scripts/qa-mcp-spritesheet.mjs "<prompt>" <rows> <cols> [subjectType]');
+  console.error('usage: node scripts/qa-mcp-spritesheet.mjs "<prompt>" <rows> <cols> [subjectType] [directions]');
   process.exit(2);
 }
 const rows = Number(rowsStr ?? 2);
 const cols = Number(colsStr ?? 2);
+const directions = directionsStr ? Number(directionsStr) : undefined;
 
 const transport = new StdioClientTransport({
   command: "node",
@@ -31,8 +32,9 @@ const client = new Client({ name: "phase2-qa", version: "1.0.0" }, { capabilitie
 
 const args = { prompt, rows, cols, seamlessLoop: true };
 if (subjectType) args.subjectType = subjectType;
+if (directions) args.directions = directions;
 
-console.log(`[qa] calling make_spritesheet prompt="${prompt}" ${cols}x${rows} subjectType=${subjectType ?? "(infer)"}`);
+console.log(`[qa] calling make_spritesheet prompt="${prompt}" ${cols}x${rows} subjectType=${subjectType ?? "(infer)"} directions=${directions ?? "(none)"}`);
 const t0 = Date.now();
 try {
   await client.connect(transport);

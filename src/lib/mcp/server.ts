@@ -41,7 +41,11 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { inferSubjectType } from "./spritesheet-classify.js";
+import {
+  inferSubjectType,
+  buildDirectionPrompt,
+  type Directions,
+} from "./spritesheet-classify.js";
 import { createGeneration, getGeneration } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -122,6 +126,11 @@ const SCHEMAS = {
         type: "string",
         enum: ["auto", "feet", "hip", "center", "top"],
         description: "(선택) 세로 정렬 기준. 기본 auto=캐릭터는 발/이펙트는 중앙.",
+      },
+      directions: {
+        type: "integer",
+        enum: [1, 2, 4, 8],
+        description: "(선택) 방향 수. 지정 시 rows=방향수, cols=방향당 프레임수로 해석. 캐릭터 시트 전용.",
       },
       ...SESSION_PROP,
     },
@@ -286,6 +295,7 @@ type CallArgs = {
   seamlessLoop?: boolean;
   subjectType?: SubjectType;
   anchorStrategy?: AnchorStrategy;
+  directions?: Directions;
   sessionId?: string;
 };
 
@@ -318,6 +328,14 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
           ? args.inputGenerationId
           : null;
+
+        // ② 방향 시트: directions 가 주어지면 rows=directions 로 강제(각 행=한 방향),
+        // cols 는 방향당 프레임 수로 해석(그대로 사용). directions=1 은 단일 방향(기존 동작).
+        const directions: Directions | null = args.directions ?? null;
+        if (directions && rows !== directions) {
+          log(`make_spritesheet directions=${directions}: rows ${rows} → ${directions}`);
+          rows = directions;
+        }
 
         // rows=1 이고 cols > 4 인 경우: 다행 그리드로 자동 변환.
         // (시스템 프롬프트가 잘못 지시하거나 사용자가 명시해도 방어)
@@ -405,39 +423,58 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
         const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
           anchorStrategy !== "auto" ? anchorStrategy : subjectType === "effect" ? "center" : "feet";
-        const isEffectAnchor = resolvedAnchor === "center";
+        // 가드·콘텐츠 열거·캐릭터 프레이밍은 subjectType 로 게이팅(앵커 전략과 무관).
+        // 배치(placement)만 resolvedAnchor 로 분기 — character+center 도 캐릭터 프레이밍/가드 유지.
+        const isCharacter = subjectType === "character";
         const cx = Math.round(cellW / 2);
         const cy = Math.round(cellH / 2);
-        const anchorRule = isEffectAnchor
-          ? `(5) CENTER ANCHOR — this is a visual effect / VFX, NOT a grounded character. ` +
-            `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
-            `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
-            `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
-            `The trailing tail must NOT reach or touch the bottom edge. ` +
-            `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `
-          : `(5) CHARACTER ANCHOR — keep the hip/waist near X=${cx}, Y=${cy}, feet on a consistent ground line, ` +
-            `and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
+        // (5) 배치 규칙 — 5전략별. character 의 center 는 "수직 중앙"(접지 언급 X),
+        // effect 의 center 만 "VFX radiates symmetrically / no ground line" 문구.
+        const placementRule = ((): string => {
+          switch (resolvedAnchor) {
+            case "feet":
+              return `keep the feet on a consistent ground line and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
+            case "hip":
+              return `keep the hip/waist near the cell center X=${cx}, Y=${cy} with the feet falling naturally below, and identical character height in every frame; only limbs and body parts move between frames. `;
+            case "top":
+              return `keep the top of the head near the cell's upper edge in every frame and identical character height; only limbs and body parts move between frames, not the whole body. `;
+            case "center":
+              return isCharacter
+                ? `place the WHOLE character vertically centered so its visual center sits at the cell center X=${cx}, Y=${cy} in EVERY cell, identical character height; only limbs and body parts move between frames. `
+                : `this is a visual effect / VFX, NOT a grounded character. ` +
+                  `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
+                  `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
+                  `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
+                  `The trailing tail must NOT reach or touch the bottom edge. ` +
+                  `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `;
+          }
+        })();
+        const anchorRule = `(5) ${isCharacter ? "CHARACTER" : "EFFECT"} ANCHOR — ${placementRule}`;
 
         // rule (1)/(3) 의 콘텐츠 열거는 시트 종류에 따라 분기.
         // character 시트는 발산 VFX 를 콘텐츠로 전제하면 안 됨(③) — 몸·무기·천만 나열.
-        const containedContent = isEffectAnchor
-          ? "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes"
-          : "the character's body, weapon, and any flowing cape or robe";
-        const oversizeContent = isEffectAnchor
-          ? "especially a sweeping effect like a slash, blast, beam, or trail"
-          : "especially a large pose or a wide weapon swing";
+        const containedContent = isCharacter
+          ? "the character's body, weapon, and any flowing cape or robe"
+          : "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes";
+        const oversizeContent = isCharacter
+          ? "especially a large pose or a wide weapon swing"
+          : "especially a sweeping effect like a slash, blast, beam, or trail";
 
-        // ③ 캐릭터 시트 이펙트 가드 — subjectType=character 면 액션 무관하게 항상 주입.
+        // ③ 캐릭터 시트 이펙트 가드 — subjectType=character 면 anchor 무관하게 항상 주입.
         // 외부로 발산되는 액션/능력 VFX 만 금지, 캐릭터 고유 디자인은 허용.
-        const effectGuard = isEffectAnchor
-          ? ""
-          : `Render the character's body and its INTRINSIC design only. ` +
+        const effectGuard = isCharacter
+          ? `Render the character's body and its INTRINSIC design only. ` +
             `Do NOT add action or ability visual effects: NO attack slash trails, ` +
             `NO spell or magic particles, NO projectiles, NO emitted auras around the body, ` +
             `NO motion lines, NO impact flashes, NO smoke, NO sparkles, NO extra decorative VFX. ` +
             `The character's OWN intrinsic material is fine (e.g. a robot's status lights or ` +
             `glowing core, a fire creature's flame body, a weapon that glows as part of its ` +
-            `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `;
+            `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `
+          : "";
+
+        // ② 방향 라벨 지시 — 캐릭터 시트 + directions≥2 에서만 의미. 이펙트엔 주입 X.
+        const directionPrompt =
+          isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
 
         const decorated =
           `${userPrompt}. ` +
@@ -450,6 +487,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
           `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
           anchorRule +
+          directionPrompt +
           effectGuard +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
@@ -488,6 +526,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             seamlessLoop,
             subjectType,
             anchorStrategy,
+            directions: directions ?? undefined,
             anchor: anchorPivot,
             rows,
             cols,

@@ -56,3 +56,52 @@ export function classifyAnchor(prompt: string, hasRef: boolean): "effect" | "cha
 export function inferSubjectType(prompt: string, hasRef: boolean): SubjectType {
   return classifyAnchor(prompt, hasRef) === "effect" ? "effect" : "character";
 }
+
+/** make_spritesheet 가 지원하는 방향 수. rows = directions 로 강제 매핑. */
+export type Directions = 1 | 2 | 4 | 8;
+
+/**
+ * 방향 수 → 행별 facing 라벨(위→아래 행 순서). 게임 관례(확정):
+ *   2 = 좌, 우 / 4 = 하, 좌, 우, 상 / 8 = 시계방향(down 시작).
+ * directions=1 은 단일 방향이라 라벨 없음(빈 배열).
+ */
+export function directionLabels(n: Directions): string[] {
+  switch (n) {
+    case 2:
+      return ["LEFT", "RIGHT"];
+    case 4:
+      return ["DOWN (toward viewer)", "LEFT", "RIGHT", "UP (away from viewer)"];
+    case 8:
+      return [
+        "DOWN (toward viewer)",
+        "DOWN-LEFT",
+        "LEFT",
+        "UP-LEFT",
+        "UP (away from viewer)",
+        "UP-RIGHT",
+        "RIGHT",
+        "DOWN-RIGHT",
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * 방향 시트용 행별 facing 지시 프롬프트. 캐릭터 시트에서만 의미 있음(이펙트엔 주입 X).
+ * 각 행 = 한 방향, 같은 캐릭터·같은 액션 사이클, 행 간엔 카메라 facing 만 다름.
+ * directions=1 이면 빈 문자열(단일 방향, 기존 동작).
+ */
+export function buildDirectionPrompt(n: Directions, framesPerDir: number): string {
+  const labels = directionLabels(n);
+  if (labels.length === 0) return "";
+  const rowLines = labels
+    .map((label, i) => `Row ${i + 1}${i === 0 ? " (top)" : ""}: character facing ${label}.`)
+    .join(" ");
+  return (
+    `This is a DIRECTIONAL sheet: each ROW is one facing direction, ` +
+    `the SAME character and the SAME ${framesPerDir}-frame action cycle, ` +
+    `only the camera facing changes between rows. ${rowLines} ` +
+    `Keep identical character, identical action phase alignment across rows; only the viewing angle differs. `
+  );
+}
