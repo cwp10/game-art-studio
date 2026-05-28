@@ -11,6 +11,8 @@
 import {
   directionLabels,
   buildDirectionPrompt,
+  isLocomotion,
+  buildGaitPrompt,
   type Directions,
 } from "../src/lib/mcp/spritesheet-classify";
 
@@ -99,6 +101,39 @@ console.log("── 경계: n=2 / n=8 행 수·라벨 일치 ──");
   });
   check("n=8: 8개 행 라인이 시계방향 라벨 순서대로 정확", allRowsOk);
   check("n=8: framesPerDir=4 반영", p8.includes("4-frame action cycle"));
+}
+
+console.log("── isLocomotion: 보행 키워드 감지 ──");
+check('"기사 걷기" → true', isLocomotion("기사 걷기"));
+check('"warrior walk cycle" → true', isLocomotion("warrior walk cycle"));
+check('"좀비 달리기" → true', isLocomotion("좀비 달리기"));
+check('"running soldier" → true', isLocomotion("running soldier"));
+check('"마법사 공격" → false (보행 아님)', !isLocomotion("마법사 공격"));
+check('"idle 대기" → false', !isLocomotion("idle 대기"));
+
+console.log("── buildGaitPrompt: 프레임수 인지 + scissor + 행 일관성 ──");
+{
+  const g6 = buildGaitPrompt(6, true);
+  check('gait(6): "WALK/RUN GAIT" 헤더', g6.includes("WALK/RUN GAIT"));
+  check('gait(6): "ONE complete walk cycle"', g6.includes("ONE complete walk cycle"));
+  check('gait(6): N=6 반영 ("these 6 frames")', g6.includes("these 6 frames"));
+  // contact mirror 프레임 = floor(6/2)+1 = 4
+  check('gait(6): mid-cycle = Frame 4', g6.includes("Frame 4 (mid-cycle)"));
+  check('gait(6): SCISSOR 측면 지시', g6.includes("SCISSOR"));
+  check('gait(6): "BOTH legs must swing" 강조', g6.includes("BOTH legs must swing fully"));
+  check('gait(6): directions=true → 행 일관성 문구', g6.includes("Every row uses the SAME 6-frame gait"));
+}
+{
+  const g8 = buildGaitPrompt(8, false);
+  check('gait(8): N=8 반영', g8.includes("these 8 frames"));
+  // contact mirror = floor(8/2)+1 = 5
+  check('gait(8): mid-cycle = Frame 5', g8.includes("Frame 5 (mid-cycle)"));
+  check('gait(8): directions=false → 행 일관성 문구 없음', !g8.includes("Every row uses the SAME"));
+}
+{
+  const g4 = buildGaitPrompt(4, true);
+  // contact mirror = floor(4/2)+1 = 3
+  check('gait(4): mid-cycle = Frame 3', g4.includes("Frame 3 (mid-cycle)"));
 }
 
 console.log("── Directions 타입 가드(컴파일 단언): 1|2|4|8 만 허용 ──");

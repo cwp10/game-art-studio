@@ -35,6 +35,8 @@ export async function chromaKeyFile(
   filePath: string,
   keyColor: ChromaKeyColor = "green",
   log: Logger = noop,
+  // 셀 면적(px) — enclosed 포켓 키아웃 임계 기준. 시트는 cellW*cellH, 단일 이미지는 미지정(전체).
+  cellArea?: number,
 ): Promise<void> {
   const { data, info } = await sharp(filePath)
     .ensureAlpha()
@@ -107,7 +109,76 @@ export async function chromaKeyFile(
     if (p < N - W) pushIfKey(p + W);
   }
 
-  // 4. 적용: 배경-connected hard-key → 투명. 그 경계에 인접한 fringe → despill + 알파 감쇠.
+  // 3.5. enclosed 키 포켓 키아웃 — 테두리에서 도달 못 한 hard-key(다리 사이 등) 중
+  //   "셀 대비 작은" 컴포넌트만 배경 bleed 로 보고 추가 투명화. 큰 내부 키색(녹색 옷·
+  //   슬라임 본체)은 보존(CASE D/E 회귀 금지). 다리 사이 포켓은 셀의 <1% 수준인 반면
+  //   옷 패치는 셀의 수% 이상이라 셀 면적 비율로 구분된다.
+  {
+    // 셀 면적 미지정 시 전체 이미지를 한 셀로 간주(단일 이미지 경로 보수적 처리).
+    const cellPx = cellArea && cellArea > 0 ? cellArea : N;
+    const pocketCap = Math.max(48, Math.round(cellPx * 0.02)); // 셀의 2% 미만 = 포켓
+    const visited = new Uint8Array(N);
+    const cstk: number[] = [];
+    for (let s = 0; s < N; s++) {
+      if (isHardKey[s] !== 1 || bgKey[s] === 1 || visited[s] === 1) continue;
+      visited[s] = 1;
+      const comp: number[] = [s];
+      cstk.length = 0;
+      cstk.push(s);
+      while (cstk.length > 0) {
+        const p = cstk.pop()!;
+        const x = p % W;
+        const tryp = (q: number) => {
+          if (q >= 0 && q < N && isHardKey[q] === 1 && bgKey[q] === 0 && visited[q] === 0) {
+            visited[q] = 1;
+            comp.push(q);
+            cstk.push(q);
+          }
+        };
+        if (x > 0) tryp(p - 1);
+        if (x < W - 1) tryp(p + 1);
+        if (p >= W) tryp(p - W);
+        if (p < N - W) tryp(p + W);
+      }
+      if (comp.length < pocketCap) {
+        for (const p of comp) bgKey[p] = 1; // 작은 포켓 → 배경으로 흡수
+      }
+    }
+  }
+
+  // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
+  //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
+  //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
+  const DESPILL_RADIUS = 3;
+  const bgDist = new Uint8Array(N).fill(255);
+  {
+    const bfs: number[] = [];
+    for (let p = 0; p < N; p++) {
+      if (bgKey[p] === 1) {
+        bgDist[p] = 0;
+        bfs.push(p);
+      }
+    }
+    let head = 0;
+    while (head < bfs.length) {
+      const p = bfs[head++];
+      const d = bgDist[p];
+      if (d >= DESPILL_RADIUS) continue;
+      const x = p % W;
+      const relax = (q: number) => {
+        if (q >= 0 && q < N && bgDist[q] > d + 1) {
+          bgDist[q] = d + 1;
+          bfs.push(q);
+        }
+      };
+      if (x > 0) relax(p - 1);
+      if (x < W - 1) relax(p + 1);
+      if (p >= W) relax(p - W);
+      if (p < N - W) relax(p + W);
+    }
+  }
+
+  // 4. 적용: 배경-connected hard-key → 투명. 배경 경계 DESPILL_RADIUS 이내 fringe → despill + 알파 감쇠.
   let keyedOut = 0;
   for (let p = 0; p < N; p++) {
     const i = p * ch;
@@ -119,15 +190,8 @@ export async function chromaKeyFile(
     if (data[i + 3] === 0) continue;
     const k = keyness(i);
     if (k <= fringeFloor) continue;
-    // fringe 는 배경(bgKey)에 인접한 경우만 처리 — 내부 키색 보존.
-    const x = p % W;
-    const y = (p - x) / W;
-    const nearBg =
-      (x > 0 && bgKey[p - 1] === 1) ||
-      (x < W - 1 && bgKey[p + 1] === 1) ||
-      (y > 0 && bgKey[p - W] === 1) ||
-      (y < H - 1 && bgKey[p + W] === 1);
-    if (!nearBg) continue;
+    // fringe 는 배경(bgKey)에서 반경 이내일 때만 처리 — 내부 깊은 키색 보존.
+    if (bgDist[p] > DESPILL_RADIUS) continue;
     // despill: 키 채널을 반대 채널 쪽으로 끌어내림(green→g=max(r,b), magenta→r,b=g).
     if (keyColor === "green") {
       data[i + 1] = Math.max(data[i], data[i + 2]);

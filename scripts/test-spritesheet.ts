@@ -351,6 +351,106 @@ async function caseE() {
   assert(fringeBad === 0, `E3: 마젠타 fringe/halo 잔재 없음 (${fringeBad}개)`);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// CASE F: 다크 피사체 잔여 제거 — 다리 사이 enclosed 녹색 포켓 키아웃 + 엣지 halo despill
+//   (el2vbyq3eqccnv7n 회귀 재현). 큰 내부 녹색 옷은 보존(CASE D 와 동일 보장).
+// ════════════════════════════════════════════════════════════════════════════
+async function caseF() {
+  console.log("\n=== CASE F: dark subject residue (between-legs pocket keyout + edge halo despill) ===");
+  const cols = 6, rows = 1, cellW = 200, cellH = 300;
+  const W = cellW * cols, H = cellH * rows;
+  const buf = makeCanvas(W, H, GREEN);
+  const DARK: RGBA = [28, 30, 34, 255]; // 어두운 아머
+  const cellArea = cellW * cellH;
+
+  // 셀마다 다크 캐릭터: 몸통 + 살짝 벌어진 두 다리(다리 사이 = 작은 녹색 포켓이 enclosed).
+  for (let c = 0; c < cols; c++) {
+    const x0 = c * cellW;
+    const cx = x0 + cellW / 2;
+    // 몸통
+    fillRect(buf, W, cx - 40, 60, cx + 40, 180, DARK);
+    // 머리
+    fillRect(buf, W, cx - 22, 24, cx + 22, 60, DARK);
+    // 두 다리(살짝 벌어짐) — 사이 틈은 좁아 포켓이 작음(실제 다리 사이 수준 ~0.5%셀).
+    fillRect(buf, W, cx - 34, 180, cx - 6, 270, DARK); // 왼다리
+    fillRect(buf, W, cx + 6, 180, cx + 34, 270, DARK); // 오른다리
+    // 발 가로바 → 다리사이 녹색이 사방 다크로 둘러싸여 enclosed 포켓(12x82≈984? → 좁힘).
+    fillRect(buf, W, cx - 34, 262, cx + 34, 270, DARK);
+    // 큰 내부 녹색 옷 패치(몸통 중앙) — 보존되어야 함(CASE D 보장)
+    fillRect(buf, W, cx - 24, 90, cx + 24, 160, GREEN); // 48x70=3360px (셀의 5.6%)
+  }
+  // 엣지 halo 모사: 다크 실루엣 가장자리 2px 를 녹색 쪽으로 살짝 오염(anti-alias fringe).
+  // (간단히: 다크 픽셀 중 녹색에 인접한 1~2px 를 어두운 녹색으로 칠해 halo 재현)
+  const tmp = await writePng(buf, W, H, "caseF_raw.png");
+  const { data: rawD } = await readRaw(tmp);
+  const isGreenPx = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const p = (y * W + x) * 4;
+    return rawD[p + 1] - Math.max(rawD[p], rawD[p + 2]) > 40;
+  };
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const p = (y * W + x) * 4;
+      const isDark = buf[p] < 60 && buf[p + 1] < 60 && buf[p + 2] < 60 && buf[p + 3] === 255;
+      if (!isDark) continue;
+      const nearGreen = isGreenPx(x - 1, y) || isGreenPx(x + 1, y) || isGreenPx(x, y - 1) || isGreenPx(x, y + 1);
+      if (nearGreen) {
+        // 다크 엣지를 녹색쪽으로 오염 → halo (g 가 r,b 보다 30~50 높은 옅은 녹색)
+        buf[p] = 30; buf[p + 1] = 95; buf[p + 2] = 40;
+      }
+    }
+  }
+
+  const fp = await writePng(buf, W, H, "caseF_input.png");
+  fs.copyFileSync(fp, path.join(OUT, "caseF_00_raw.png"));
+  await chromaKeyFile(fp, "green", log, cellArea);
+  fs.copyFileSync(fp, path.join(OUT, "caseF_01_chroma.png"));
+
+  const { data, W: w, H: h } = await readRaw(fp);
+
+  // F1: 다리 사이 enclosed 녹색 포켓 투명화 — 각 셀 다리 사이 중심(cx, y=225) alpha=0.
+  let pocketOpaque = 0;
+  for (let c = 0; c < cols; c++) {
+    const cx = Math.round(c * cellW + cellW / 2);
+    for (let y = 200; y < 258; y++) {
+      const p = (y * w + cx) * 4;
+      if (data[p + 3] > 40) pocketOpaque++;
+    }
+  }
+  console.log(`      between-legs pocket opaque px: ${pocketOpaque} (기대 0)`);
+  assert(pocketOpaque === 0, `F1: 다리 사이 enclosed 녹색 포켓 키아웃 (남은 불투명 ${pocketOpaque}px)`);
+
+  // F2: 큰 내부 녹색 옷 패치 보존 — 몸통 중앙(cx, y=125) alpha=255, g 보존.
+  let clothBad = 0;
+  for (let c = 0; c < cols; c++) {
+    const cx = Math.round(c * cellW + cellW / 2);
+    const p = (125 * w + cx) * 4;
+    if (data[p + 3] !== 255 || data[p + 1] < 200) clothBad++;
+  }
+  console.log(`      interior cloth patch broken cells: ${clothBad} (기대 0)`);
+  assert(clothBad === 0, `F2: 큰 내부 녹색 옷 보존 (손상 셀 ${clothBad})`);
+
+  // F3: 엣지 halo 잔여 감소 — 보존된 옷 패치 영역을 제외한 곳에 강한 녹색(keyness>20)
+  //   opaque 픽셀이 거의 없어야 함(다크 실루엣 가장자리 halo 가 despill 됨).
+  // 옷 패치(48x70) + 그 경계 2px 링 제외 — 링은 옷↔다크 내부 전이라 잔여 아님(테스트 구성물).
+  const inCloth = (x: number, y: number, c: number) => {
+    const cx = c * cellW + cellW / 2;
+    return x >= cx - 26 && x < cx + 26 && y >= 88 && y < 162;
+  };
+  let haloGreen = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const c = Math.floor(x / cellW);
+      if (inCloth(x, y, c)) continue; // 합법 옷 녹색 제외
+      const i = (y * w + x) * 4;
+      if (data[i + 3] <= 40) continue;
+      if (data[i + 1] - Math.max(data[i], data[i + 2]) > 20) haloGreen++;
+    }
+  }
+  console.log(`      halo/pocket green outside cloth (k>20): ${haloGreen}px`);
+  assert(haloGreen < 30, `F3: 옷 외부 녹색 잔여(halo+포켓) 미미 (${haloGreen}px < 30)`);
+}
+
 async function main() {
   console.log("spritesheet-postprocess 결정적 검증");
   console.log("출력 디렉토리:", OUT);
@@ -358,6 +458,7 @@ async function main() {
   await caseC();
   await caseD();
   await caseE();
+  await caseF();
   console.log(`\n=========================================`);
   console.log(`총: ${passCount} PASS / ${failCount} FAIL`);
   console.log(`=========================================`);

@@ -57,6 +57,50 @@ export function inferSubjectType(prompt: string, hasRef: boolean): SubjectType {
   return classifyAnchor(prompt, hasRef) === "effect" ? "effect" : "character";
 }
 
+// 보행(locomotion) 키워드 — 발이 교대로 움직여야 하는 동작. 있으면 gait 가이드 주입.
+// seamlessLoop 여부와 무관(걷기인데 loop 아니어도 발은 교대해야 함).
+const LOCOMOTION_WORDS = [
+  "걷기", "걸음", "walk", "walking", "run", "running", "달리기", "뛰기", "뛰는",
+  "march", "marching", "행진", "조깅", "jog", "스프린트", "sprint", "질주", "이동", "보행",
+];
+
+/**
+ * userPrompt 에 보행(걷기·달리기·행진 등) 키워드가 있는지. 순수·결정적.
+ * (대소문자 무시. 캐릭터 시트에서만 gait 가이드 주입에 사용 — 호출부가 게이팅.)
+ */
+export function isLocomotion(prompt: string): boolean {
+  const p = prompt.toLowerCase();
+  return LOCOMOTION_WORDS.some(w => p.includes(w));
+}
+
+/**
+ * 프레임 수 인지형 걷기 보행주기(gait) 지시. 캐릭터+보행 시 주입(이펙트엔 X).
+ * N(=방향당 프레임 수) 프레임에 한 완전한 보행 주기를 담도록 지시하고, 좌우 발이
+ * 확실히 교차(scissor)하도록 강제. 측면(LEFT/RIGHT)·정면/뒷면(DOWN/UP) 모두 다룸.
+ * hasDirections=true 면 "모든 행이 같은 N프레임 사이클" 일관성 문구를 추가(방향 시트).
+ *
+ * loopInstruction 과 통합: seamlessLoop 일 때 server 는 이 gait 만 쓰고 별도 loop 예시는 생략.
+ */
+export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): string {
+  const n = Math.max(2, framesPerDir);
+  const contactB = Math.floor(n / 2) + 1; // 반대 발이 닿는 프레임(대략 사이클 절반)
+  return (
+    `WALK/RUN GAIT (CRITICAL — the legs MUST visibly alternate): ` +
+    `Across these ${n} frames, depict ONE complete walk cycle: ` +
+    `one foot plants (heel contact) → both legs pass under the body (passing pose) → ` +
+    `the OTHER foot plants → legs pass again → repeat. ` +
+    `Frame 1 = LEFT foot forward / RIGHT foot back. ` +
+    `Frame ${contactB} (mid-cycle) = the MIRROR: RIGHT foot forward / LEFT foot back. ` +
+    `Frames between are passing/swing poses where the legs cross under the torso. ` +
+    `Do NOT keep one foot static or merely twitch a single leg — BOTH legs must swing fully fore-and-aft, alternating, with a clear stride length. ` +
+    `Side views (facing LEFT or RIGHT): the legs SCISSOR in profile — one leg reaches clearly forward and the other clearly back, then they swap, with a visible passing frame where they cross. ` +
+    `Front/back views (facing the viewer or away): alternate which leg steps forward each half-cycle and add a slight up/down body bob. ` +
+    (hasDirections
+      ? `Every row uses the SAME ${n}-frame gait cycle and the SAME per-frame leg phase; only the viewing angle differs between rows. `
+      : "")
+  );
+}
+
 /** make_spritesheet 가 지원하는 방향 수. rows = directions 로 강제 매핑. */
 export type Directions = 1 | 2 | 4 | 8;
 

@@ -44,6 +44,8 @@ import {
 import {
   inferSubjectType,
   buildDirectionPrompt,
+  isLocomotion,
+  buildGaitPrompt,
   type Directions,
 } from "./spritesheet-classify.js";
 import { createGeneration, getGeneration } from "../db/repo/generations.js";
@@ -403,15 +405,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
+        // 걷기 등 보행 동작은 frame-count 인지형 gait 프롬프트(아래)가 발 교대를 전담.
+        // loopInstruction 은 idle/attack 등 비보행 사이클 폐쇄만 담당해 중복/충돌 방지.
+        const isWalk = isLocomotion(userPrompt);
         const loopInstruction = seamlessLoop
           ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
             `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
             `Design a CLOSED CYCLE with no beginning and no end: ` +
-            `• Walk/run: cover exactly one complete gait period. ` +
-            `  Example 8-frame walk: (1) left-heel-strike (2) left-mid-stance (3) right-toe-off (4) right-swing (5) right-heel-strike (6) right-mid-stance (7) left-toe-off (8) left-swing → loops back to (1). ` +
-            `  The foot contact pattern in Frame N must be the natural predecessor of Frame 1's foot contact. ` +
-            `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
-            `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
+            (isWalk
+              ? `the walk gait below must close seamlessly — Frame N's leg phase is the natural predecessor of Frame 1's. `
+              : `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
+                `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. `) +
             `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
           : "";
 
@@ -476,6 +480,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const directionPrompt =
           isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
 
+        // 걷기/달리기 등 보행: 프레임수(cols=방향당 프레임) 인지형 gait — 좌우 발 교차 강제.
+        // 캐릭터 시트에서만, seamlessLoop 무관하게 주입(걷기면 발은 항상 교대). 이펙트엔 X.
+        const gaitPrompt =
+          isCharacter && isWalk ? buildGaitPrompt(cols, !!directions) : "";
+
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
@@ -489,6 +498,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           anchorRule +
           directionPrompt +
           effectGuard +
+          gaitPrompt +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
@@ -552,7 +562,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
 
             if (wantsTransparent) {
-              await chromaKeyFile(filePath, chromaKeyColor, log);
+              // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
+              await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
               log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
             }
             // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 시트-전역 단일
