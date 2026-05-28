@@ -160,14 +160,18 @@ function buildNaturalPrompt(job: ImageJob): string {
         );
       }
       if (inputCount === 1) {
-        // [0] 그리드 템플릿만
+        // [0] 그리드 템플릿만. 피사체가 캐릭터일 수도 이펙트(VFX)일 수도 있으므로 "character"
+        // 로 단정하지 않는다 — 단정하면 슬래시/폭발 같은 이펙트 시트에도 캐릭터가 끼어든다.
         return (
           PROMPT_HEADER +
           `The attached image is the OUTPUT CANVAS — a blank grid with thin gray cell lines. ` +
           `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
           `Task: ${job.prompt}\n` +
           `Draw one sequential animation frame inside each cell of the grid. ` +
-          `Each character must be fully contained within its own cell. ` +
+          `Render exactly what the task describes and nothing more — ` +
+          `if the task is a visual effect/VFX (slash, explosion, magic, impact, etc.), ` +
+          `draw ONLY that effect with NO character or figure unless the task explicitly asks for one. ` +
+          `Each frame's content must be fully contained within its own cell. ` +
           loopRule
         );
       }
@@ -176,6 +180,8 @@ function buildNaturalPrompt(job: ImageJob): string {
         PROMPT_HEADER +
         `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
         `Uniform cell size, evenly spaced grid, one animation frame per cell. ` +
+        `Render exactly what the task describes — if it is a visual effect/VFX, ` +
+        `draw ONLY the effect with no character unless explicitly requested. ` +
         loopRule
       );
     }
