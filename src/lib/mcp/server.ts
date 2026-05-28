@@ -691,6 +691,27 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 시트면 입력 배경 상속(투명 여부) — 후처리 chroma-key/정렬에 사용.
         const wantsTransparent = isSheet ? await detectTransparentBg(inputPath) : false;
 
+        // reskin 은 입력 시트 치수를 보존하므로 부모의 sprite 그리드 메타를 그대로 상속해
+        // 영속한다(SpriteCanvas source-of-truth · 아틀라스 export). 구버전 시트는 값이
+        // undefined → JSON.stringify 시 빠져 GCD 폴백(회귀 없음).
+        const parentSheet =
+          isSheet && inputGen.params && typeof inputGen.params === "object"
+            ? (inputGen.params as Record<string, unknown>)
+            : null;
+        const inheritedSheetParams = parentSheet
+          ? {
+              subjectType: parentSheet.subjectType,
+              anchorStrategy: parentSheet.anchorStrategy,
+              anchor: parentSheet.anchor,
+              directions: parentSheet.directions,
+              rows: parentSheet.rows,
+              cols: parentSheet.cols,
+              cellW: parentSheet.cellW,
+              cellH: parentSheet.cellH,
+              fps: parentSheet.fps,
+            }
+          : {};
+
         const mcpResult = await runImageTool({
           name,
           kind: "reskin",
@@ -704,6 +725,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           styleRefPath,
           paletteOnly,
           params: {
+            ...inheritedSheetParams,
             mode: styleRefId ? "style_ref" : paletteOnly ? "palette" : "appearance",
             styleReferenceId: styleRefId,
             spritesheet: isSheet,
