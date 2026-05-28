@@ -367,19 +367,33 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
           : "";
 
+        // 피사체 앵커 분류 — 모델에게 "if 캐릭터/if 이펙트" 선택을 맡기면 슬래시 등
+        // 접지 동작을 바닥에 앵커링해 이펙트가 아래로 쏠린다. 빌드 시점에 결정적으로
+        // 분류해, 이펙트면 접지 규칙을 아예 빼고 중앙 앵커만 강제. 캐릭터/모호는 기존 유지.
+        const isEffectAnchor = classifyAnchor(userPrompt, !!refId) === "effect";
+        const cx = Math.round(cellW / 2);
+        const cy = Math.round(cellH / 2);
+        const anchorRule = isEffectAnchor
+          ? `(5) CENTER ANCHOR — this is a visual effect / VFX, NOT a grounded character. ` +
+            `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
+            `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
+            `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
+            `The trailing tail must NOT reach or touch the bottom edge. ` +
+            `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `
+          : `(5) CHARACTER ANCHOR — keep the hip/waist near X=${cx}, Y=${cy}, feet on a consistent ground line, ` +
+            `and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
+
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           `Place exactly one animation frame per cell, filling every cell. ` +
           `CRITICAL framing rules (apply to EVERY cell): ` +
-          `(1) The ENTIRE frame content — the character AND all spell effects, magic, auras, particles, projectiles, weapons, and flowing capes/robes — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
+          `(1) The ENTIRE frame content — the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
           `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
-          `(3) If a spell or effect would be large, SCALE IT DOWN so it stays inside the cell — never let an effect sprawl across cell boundaries. An effect belongs to the SAME cell as the character casting it. ` +
-          `(4) character's hip/waist is centered at X=${Math.round(cellW / 2)}, Y=${Math.round(cellH / 2)} within each cell; ` +
-          `(5) feet always on the same ground line across all frames; ` +
-          `(6) same character scale and height in every frame — no shrinking or growing; ` +
-          `(7) zero positional drift between frames — only limbs and body parts move, not the whole character. ` +
+          `(3) If the content would be large (especially a sweeping effect like a slash, blast, beam, or trail), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
+          `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
+          anchorRule +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
@@ -423,8 +437,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             }
             // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 발 라인/가로
             // 중심 정렬. 격자 경계를 넘어 그려진 캐릭터의 이탈·잔재를 후처리로 흡수한다.
-            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent);
-            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols})`);
+            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, isEffectAnchor);
+            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols}) centerV=${isEffectAnchor}`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
@@ -700,6 +714,40 @@ async function generateGridTemplate(
  * NOTE: src/lib/image-backend/codex-exec.ts 의 chromaKeyGreen 과 동일 알고리즘. 둘 중
  *       하나를 고치면 반드시 다른 쪽도 동기화할 것 (픽셀 루프 한정, fs 처리는 각자 다름).
  */
+/**
+ * 스프라이트시트 피사체 앵커 분류. "effect" 면 중앙 앵커(바닥 앵커 제거), 그 외 "character"(기존 동작).
+ *
+ * 결정적·보수적: 명백한 이펙트 키워드가 있고 캐릭터 키워드·참조 이미지가 없을 때만 "effect".
+ * 캐릭터 단어가 함께 있으면(예: "화염 마법사") 캐릭터가 우선 → 회귀 방지. 모호하면 character.
+ */
+function classifyAnchor(prompt: string, hasRef: boolean): "effect" | "character" {
+  if (hasRef) return "character"; // 참조 캐릭터가 있으면 캐릭터 시트
+  // 오케스트레이터가 모든 시트 프롬프트에 강제 주입하는 보일러플레이트는 분류에서 제외.
+  // (구버전 "character consistent across frames" 의 'character' 가 분류를 오염시킴.)
+  const p = prompt
+    .toLowerCase()
+    .replace(/(uniform cells,?\s*)?(character|subject) consistent across frames/g, "");
+  // 캐릭터를 명확히 가리키는 단어 — 있으면 항상 character.
+  const CHAR_WORDS = [
+    "캐릭터", "캐릭", "character", "소녀", "소년", "girl", "boy", "기사", "knight",
+    "전사", "warrior", "마법사", "wizard", "mage", "궁수", "archer", "사람", "인물",
+    "person", "man", "woman", "hero", "영웅", "몬스터", "monster", "동물", "animal",
+    "creature", "갑옷", "armor", "걷기", "walk", "run", "달리기", "점프", "jump",
+    "idle", "대기", "걸음", "뛰기",
+  ];
+  if (CHAR_WORDS.some(w => p.includes(w))) return "character";
+  // 명백한 VFX/이펙트 단어 — 캐릭터 단어가 없을 때만 효과로 판정.
+  const EFFECT_WORDS = [
+    "이펙트", "이팩트", "effect", "vfx", "슬래시", "slash", "베기", "참격", "검기",
+    "검광", "폭발", "폭팔", "explosion", "blast", "burst", "충격파", "shockwave",
+    "투사체", "projectile", "빔", "beam", "광선", "오라", "aura", "잔상", "trail",
+    "임팩트", "impact", "타격", "회오리", "소용돌이", "swirl", "스파크", "spark",
+    "파티클", "particle", "폭염", "불기둥", "화염구", "fireball",
+  ];
+  if (EFFECT_WORDS.some(w => p.includes(w))) return "effect";
+  return "character"; // 모호 → 기존(캐릭터) 동작 유지
+}
+
 async function chromaKeyGreenFile(filePath: string): Promise<void> {
   const { data, info } = await sharp(filePath)
     .ensureAlpha()
@@ -748,6 +796,9 @@ async function normalizeSpritesheetCells(
   rows: number,
   cols: number,
   wantsTransparent: boolean,
+  /** true 면 셀 안에서 내용을 발-라인(하단) 대신 세로 중앙에 배치. 이펙트/VFX 시트용 —
+   *  모델이 슬래시 등 이펙트를 셀 하단에 쏠리게 그려도 후처리로 결정적 재중앙화. */
+  centerVertically = false,
 ): Promise<void> {
   const { data, info } = await sharp(filePath)
     .ensureAlpha()
@@ -972,10 +1023,16 @@ async function normalizeSpritesheetCells(
       const layerCenterX = mainCenterX - bMinX;
       const desiredLeft = Math.round(cellX0 + cellW / 2 - layerCenterX);
 
-      // 세로: 본체 발 라인을 셀 하단 paddingBottom 위에
-      const targetFootY = cellY0 + cellH - paddingBottom - 1;
-      const layerFootY = footY - bMinY;
-      const desiredTop = Math.round(targetFootY - layerFootY);
+      // 세로: 이펙트면 추출 bbox(꼬리 포함)를 셀 세로 중앙에, 아니면 본체 발 라인을
+      // 셀 하단 paddingBottom 위에(캐릭터 접지). 이펙트는 모델이 하단 쏠리게 그려도
+      // 여기서 결정적으로 중앙 정렬된다.
+      const desiredTop = centerVertically
+        ? Math.round(cellY0 + (cellH - bbH) / 2)
+        : (() => {
+            const targetFootY = cellY0 + cellH - paddingBottom - 1;
+            const layerFootY = footY - bMinY;
+            return Math.round(targetFootY - layerFootY);
+          })();
 
       // 시트 경계 안으로 클램프 (셀 경계 침범은 허용 — 크게 그려진 캐릭터/이펙트 보존)
       const left = Math.max(0, Math.min(W - bbW, desiredLeft));
