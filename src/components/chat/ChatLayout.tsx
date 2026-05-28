@@ -738,6 +738,34 @@ export function ChatLayout() {
     { enableOnFormTags: ["TEXTAREA", "INPUT"] },
   );
 
+  // 갤러리에서 [첨부] — 이 이미지를 현재 대화에 결과 카드로 삽입해 카드의 모든 기능
+  // (편집/레이어/스프라이트/리스킨/캐릭터/비교/참조/복제/저장)을 바로 쓸 수 있게 한다.
+  // 합성 카드라 DB 에 message 로 저장되진 않음 — recolor/upload 와 동일 패턴(원본은 갤러리에 그대로).
+  const handleGalleryInsert = useCallback(
+    async (payload: { generationId: string; prompt?: string; width: number; height: number; kind?: string }) => {
+      // 활성 세션이 없으면(새 세션 상태) 새 세션을 만들어 활성화 — 이후 이 카드에서 한 작업이 이 세션에 쌓인다.
+      // 업로드 흐름과 동일: set_active 가 유발하는 listMessages reload 가 합성 카드를 덮지 않도록 1회 skip.
+      if (!state.activeSessionId) {
+        const title = (payload.prompt?.slice(0, 40) || "갤러리에서 추가").trim();
+        const newSession = await createSession(title);
+        const next = await listSessions();
+        dispatch({ type: "set_sessions", sessions: next });
+        skipNextLoadRef.current = true;
+        dispatch({ type: "set_active", sessionId: newSession.id });
+      }
+      dispatch({
+        type: "add_result_card",
+        tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+        userText: payload.prompt || "🖼 갤러리에서 추가",
+        generationId: payload.generationId,
+        width: payload.width,
+        height: payload.height,
+        kind: payload.kind,
+      });
+    },
+    [state.activeSessionId],
+  );
+
   const hasItems = state.items.length > 0;
 
   return (
@@ -906,7 +934,7 @@ export function ChatLayout() {
       <GallerySheet
         open={galleryOpen}
         onClose={() => setGalleryOpen(false)}
-        onAction={handleAction}
+        onInsert={handleGalleryInsert}
       />
       {comparing && (
         <CompareSheet
