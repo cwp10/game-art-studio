@@ -74,6 +74,10 @@ export function ChatLayout() {
   // 이미 items 를 채운 경우 (예: 업로드 흐름) race 로 items 가 빈 응답에 reset 되는 것 방지.
   const skipNextLoadRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // 진행 중 스트림 토큰. 세션 전환·새 전송 시 증가시켜, 이전(고아) 스트림의 SSE 콜백이
+  // 현재 세션 items 에 dispatch 하는 것을 차단(다른 세션 메시지 누수 방지). 서버 생성은
+  // 계속 진행되어 결과는 DB 에 저장됨 — 해당 세션 복귀 시 load_messages 로 표시.
+  const streamSeqRef = useRef(0);
   // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
@@ -112,11 +116,13 @@ export function ChatLayout() {
 
   // 새 세션
   const handleNew = useCallback(() => {
+    streamSeqRef.current++; // 진행 중 스트림 무효화 — 이전 세션 응답 누수 차단
     dispatch({ type: "set_active", sessionId: null });
   }, []);
 
   // 세션 선택
   const handleSelect = useCallback((id: string) => {
+    streamSeqRef.current++; // 진행 중 스트림 무효화 — 이전 세션 응답 누수 차단
     dispatch({ type: "set_active", sessionId: id });
   }, []);
 
@@ -163,6 +169,10 @@ export function ChatLayout() {
       const batchId = "batch-" + Math.random().toString(36).slice(2, 8);
       dispatch({ type: "batch_start", userTempId, text: finalText, batchId, total: count });
 
+      // 스트림 토큰 — 세션 전환 시 무효화되어 배치 결과가 다른 세션에 누수되지 않게 한다.
+      const myToken = ++streamSeqRef.current;
+      const isCurrent = () => streamSeqRef.current === myToken;
+
       // 첫 회 새 세션이면 session_started 후의 listMessages reload race 를 1회 skip.
       let curSession = state.activeSessionId;
       if (!curSession) skipNextLoadRef.current = true;
@@ -184,6 +194,7 @@ export function ChatLayout() {
                 batch: { id: batchId, index: i, total: count },
               },
               event => {
+                if (!isCurrent()) return; // 세션 전환됨 — 이 배치는 더 이상 화면 주인이 아님
                 if (event.type === "session_started") {
                   curSession = event.sessionId;
                   if (!refreshedSessions) {
@@ -216,6 +227,8 @@ export function ChatLayout() {
             }
             result = { error: (e as Error).message };
           }
+          // 세션이 전환됐으면 남은 배치 멤버를 더 보내지 않고, 결과도 dispatch 하지 않는다.
+          if (!isCurrent()) break;
           dispatch({
             type: "batch_result",
             batchId,
@@ -223,8 +236,8 @@ export function ChatLayout() {
           });
         }
       } finally {
-        dispatch({ type: "set_generating", generating: false });
-        abortRef.current = null;
+        if (isCurrent()) dispatch({ type: "set_generating", generating: false });
+        if (abortRef.current === abort) abortRef.current = null;
         const next = await listSessions();
         dispatch({ type: "set_sessions", sessions: next });
       }
@@ -270,6 +283,11 @@ export function ChatLayout() {
       if (!state.activeSessionId) skipNextLoadRef.current = true;
       dispatch({ type: "user_send", tempId, text: finalText });
 
+      // 이 스트림의 토큰 — 세션 전환·다음 전송이 streamSeqRef 를 올리면 아래 콜백이
+      // 무효화돼 더 이상 현재 items 를 건드리지 않는다(다른 세션 누수 방지).
+      const myToken = ++streamSeqRef.current;
+      const isCurrent = () => streamSeqRef.current === myToken;
+
       // 생성 결과(generationId/치수)를 캡처해 호출자에 반환 — 편집 패널의 연속 편집에 사용.
       let sendResult: { generationId: string; width: number; height: number } | null = null;
       const abort = new AbortController();
@@ -283,6 +301,8 @@ export function ChatLayout() {
             maskGenerationId: opts?.maskGenerationId,
           },
           event => {
+            // 세션이 전환됐거나 새 전송이 시작됐으면 이 스트림은 더 이상 화면 주인이 아님 — 무시.
+            if (!isCurrent()) return;
             dispatch({ type: "sse", event });
             // 새 세션이 만들어지는 즉시(생성 시작 시점) 사이드바 갱신 — 응답 완료까지 기다리지 않음.
             if (event.type === "session_started") {
@@ -302,18 +322,18 @@ export function ChatLayout() {
         const next = await listSessions();
         dispatch({ type: "set_sessions", sessions: next });
       } catch (e) {
-        if ((e as Error).name === "AbortError") {
-          dispatch({ type: "sse", event: { type: "error", message: "취소되었습니다." } });
-        } else {
-          console.error(e);
-          dispatch({
-            type: "sse",
-            event: { type: "error", message: (e as Error).message },
-          });
+        if (isCurrent()) {
+          if ((e as Error).name === "AbortError") {
+            dispatch({ type: "sse", event: { type: "error", message: "취소되었습니다." } });
+          } else {
+            console.error(e);
+            dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+          }
         }
       } finally {
-        dispatch({ type: "set_generating", generating: false });
-        abortRef.current = null;
+        // 내 스트림이 여전히 현재일 때만 generating 해제 — 전환 후엔 새 컨텍스트 상태를 건드리지 않음.
+        if (isCurrent()) dispatch({ type: "set_generating", generating: false });
+        if (abortRef.current === abort) abortRef.current = null;
       }
       return sendResult;
     },
