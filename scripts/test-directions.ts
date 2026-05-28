@@ -115,25 +115,27 @@ console.log("── buildGaitPrompt: 프레임수 인지 + scissor + 행 일관�
 {
   const g6 = buildGaitPrompt(6, true);
   check('gait(6): "WALK/RUN GAIT" 헤더', g6.includes("WALK/RUN GAIT"));
-  check('gait(6): "ONE complete walk cycle"', g6.includes("ONE complete walk cycle"));
+  check('gait(6): "ONE full walk cycle"', g6.includes("ONE full walk cycle"));
   check('gait(6): N=6 반영 ("these 6 frames")', g6.includes("these 6 frames"));
   // contact mirror 프레임 = floor(6/2)+1 = 4
-  check('gait(6): mid-cycle = Frame 4', g6.includes("Frame 4 (mid-cycle)"));
+  check('gait(6): mid-cycle contact = F4 (mirror of F1)', g6.includes("F4 CONTACT (mirror of F1)"));
+  check('gait(6): F1 contact 명시', g6.includes("F1 CONTACT"));
   check('gait(6): SCISSOR 측면 지시', g6.includes("SCISSOR"));
-  check('gait(6): "BOTH legs must swing" 강조', g6.includes("BOTH legs must swing fully"));
-  check('gait(6): directions=true → 행 일관성 문구', g6.includes("Every row uses the SAME 6-frame gait"));
+  check('gait(6): near-duplicate 금지 강제', g6.includes("near-duplicate"));
+  check('gait(6): WIDE stride 강제', g6.includes("WIDE apart"));
+  check('gait(6): directions=true → 행 일관성 문구', g6.includes("Every row uses this SAME 6-frame per-frame leg choreography"));
 }
 {
   const g8 = buildGaitPrompt(8, false);
   check('gait(8): N=8 반영', g8.includes("these 8 frames"));
   // contact mirror = floor(8/2)+1 = 5
-  check('gait(8): mid-cycle = Frame 5', g8.includes("Frame 5 (mid-cycle)"));
-  check('gait(8): directions=false → 행 일관성 문구 없음', !g8.includes("Every row uses the SAME"));
+  check('gait(8): mid-cycle contact = F5 (mirror of F1)', g8.includes("F5 CONTACT (mirror of F1)"));
+  check('gait(8): directions=false → 행 일관성 문구 없음', !g8.includes("Every row uses this SAME"));
 }
 {
   const g4 = buildGaitPrompt(4, true);
   // contact mirror = floor(4/2)+1 = 3
-  check('gait(4): mid-cycle = Frame 3', g4.includes("Frame 3 (mid-cycle)"));
+  check('gait(4): mid-cycle contact = F3 (mirror of F1)', g4.includes("F3 CONTACT (mirror of F1)"));
 }
 
 console.log("── Directions 타입 가드(컴파일 단언): 1|2|4|8 만 허용 ──");

@@ -84,19 +84,56 @@ export function isLocomotion(prompt: string): boolean {
 export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): string {
   const n = Math.max(2, framesPerDir);
   const contactB = Math.floor(n / 2) + 1; // 반대 발이 닿는 프레임(대략 사이클 절반)
+
+  // 프레임별 다리 상태 표 — contact(WIDE) ↔ passing(crossing) 교대.
+  // 두 contact(F1, F(contactB))를 앵커로 잡고, 그 사이를 passing→swing 보간으로 채운다.
+  // 측면 기준 좌/우 발의 전후 위치를 프레임마다 명시해 모델이 near-duplicate 를 못 내게 강제.
+  const frameLines: string[] = [];
+  for (let f = 1; f <= n; f++) {
+    if (f === 1) {
+      frameLines.push(
+        `F1 CONTACT — front leg fully extended FORWARD (heel strike), back leg fully extended BEHIND (toe off); legs WIDE apart, maximum stride.`,
+      );
+    } else if (f === contactB) {
+      frameLines.push(
+        `F${f} CONTACT (mirror of F1) — the OTHER leg now fully FORWARD, the previously-front leg now BEHIND; legs WIDE apart, maximum stride, opposite of F1.`,
+      );
+    } else if (f < contactB) {
+      // F1 → contactB 사이: 앞다리가 닫히고 뒷다리가 몸 아래로 올라오는 first-half passing.
+      const half = (f - 1) / (contactB - 1); // 0..1
+      frameLines.push(
+        half < 0.5
+          ? `F${f} PUSH-OFF — back leg lifts off the ground and starts swinging forward; front leg bears weight; stance narrowing from F1.`
+          : `F${f} PASSING — the swinging leg crosses UNDER the torso, both knees close together and overlapping in profile; nearly single-leg silhouette.`,
+      );
+    } else {
+      // contactB → N 사이: mirror half 의 push-off/passing(F1 으로 다시 닫힘).
+      const half = (f - contactB) / (n - contactB + 1); // 0..1
+      frameLines.push(
+        half < 0.5
+          ? `F${f} PUSH-OFF (mirror) — the other back leg lifts and swings forward; opposite weight-bearing leg from the first half.`
+          : `F${f} PASSING (mirror) — legs cross UNDER the torso again, knees overlapping; this pose flows straight back into F1.`,
+      );
+    }
+  }
+
   return (
-    `WALK/RUN GAIT (CRITICAL — the legs MUST visibly alternate): ` +
-    `Across these ${n} frames, depict ONE complete walk cycle: ` +
-    `one foot plants (heel contact) → both legs pass under the body (passing pose) → ` +
-    `the OTHER foot plants → legs pass again → repeat. ` +
-    `Frame 1 = LEFT foot forward / RIGHT foot back. ` +
-    `Frame ${contactB} (mid-cycle) = the MIRROR: RIGHT foot forward / LEFT foot back. ` +
-    `Frames between are passing/swing poses where the legs cross under the torso. ` +
-    `Do NOT keep one foot static or merely twitch a single leg — BOTH legs must swing fully fore-and-aft, alternating, with a clear stride length. ` +
-    `Side views (facing LEFT or RIGHT): the legs SCISSOR in profile — one leg reaches clearly forward and the other clearly back, then they swap, with a visible passing frame where they cross. ` +
-    `Front/back views (facing the viewer or away): alternate which leg steps forward each half-cycle and add a slight up/down body bob. ` +
+    `WALK/RUN GAIT (CRITICAL — every frame MUST be a DISTINCTLY different leg pose): ` +
+    `Across these ${n} frames depict ONE full walk cycle as a strict per-frame leg choreography. ` +
+    `Use this EXACT per-frame leg phase: ${frameLines.join(" ")} ` +
+    // 차별화 강제 — near-duplicate 금지.
+    `DIFFERENTIATION (non-negotiable): NO two frames may look the same or near-duplicate. ` +
+    `If any two frames have a similar leg pose the animation FAILS — each frame must be visibly distinguishable by leg position alone. ` +
+    `Do NOT keep a foot static, do NOT merely twitch one leg, do NOT draw the same standing pose with small jitter. ` +
+    // stride 크기 강제.
+    `STRIDE: in the CONTACT frames the legs must be WIDE apart with a LARGE stride — clearly one leg forward and one leg back, never a narrow upright stance. ` +
+    // 측면 crossing 강조.
+    `SIDE VIEWS (facing LEFT or RIGHT): the legs SCISSOR in profile — in CONTACT frames one leg reaches far forward and the other far back; ` +
+    `in PASSING frames the two legs visually OVERLAP/CROSS under the body so it briefly looks like a single leg. Bend the knees; add a slight up/down body bob through the cycle. ` +
+    // front/back view 좌우 다리 교대.
+    `FRONT/BACK VIEWS (facing the viewer or away): alternate which leg steps forward each half-cycle (front leg in F1, opposite leg in F${contactB}), swing the arms oppositely, and add the same slight up/down body bob. ` +
     (hasDirections
-      ? `Every row uses the SAME ${n}-frame gait cycle and the SAME per-frame leg phase; only the viewing angle differs between rows. `
+      ? `Every row uses this SAME ${n}-frame per-frame leg choreography and the SAME phase alignment; ONLY the camera viewing angle differs between rows. `
       : "")
   );
 }
