@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Edit3, Film, Layers, Maximize2, RotateCw, Scissors, Search, X } from "lucide-react";
+import { Download, Edit3, Film, Image as ImageIcon, Layers, Maximize2, RotateCw, Scissors, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { listGenerations } from "@/lib/api/client";
@@ -94,7 +94,9 @@ export function GallerySheet({ open, onClose, onAction }: Props) {
         className="flex max-h-[85vh] w-full max-w-[1080px] flex-col overflow-hidden rounded-2xl border border-border bg-bg-panel shadow-2xl"
       >
         <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
-          <span className="font-medium text-text-primary">🖼 갤러리</span>
+          <span className="flex items-center gap-1.5 font-medium text-text-primary">
+            <ImageIcon size={14} /> 갤러리
+          </span>
           <span className="ml-2 text-xs text-text-muted/60">{items.length}개 · Esc 닫기</span>
           <button
             onClick={onClose}
