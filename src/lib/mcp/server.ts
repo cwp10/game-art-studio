@@ -944,7 +944,13 @@ async function normalizeSpritesheetCells(
         }
         const cx = sx / compPixels[l].length;
         const cy = sy / compPixels[l].length;
-        if (cx >= exMinX && cx <= exMaxX && cy >= exMinY && cy <= exMaxY) {
+        const inMainBox = cx >= exMinX && cx <= exMaxX && cy >= exMinY && cy <= exMaxY;
+        // 셀 내부 안전영역(가장자리 edge band 제외): 본체와 떨어진 정당한 이펙트
+        // (스파크·번개 줄기)는 보존. edge band 안의 작은 먼 컴포넌트만 인접 셀 bleed 로 삭제.
+        const inSafeZone =
+          cx >= cellX0 + margin && cx <= cellX0 + cellW - margin &&
+          cy >= cellY0 + margin && cy <= cellY0 + cellH - margin;
+        if (inMainBox || inSafeZone) {
           keep.push(l);
         }
       }
