@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import sharp from "sharp";
 import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
+import { getSession } from "@/lib/db/repo/sessions";
 import { newGenerationId } from "@/lib/util/ids";
 import { IMAGES_DIR, ensureDataDirs, imagePath as imagePathFor, toRelative } from "@/lib/util/paths";
 
@@ -16,19 +17,24 @@ export const runtime = "nodejs";
  *   "image" — 외부 이미지 import (Composer 첨부 / EmptyState 업로드). parent 없음.
  *             generations.kind='external', prompt='업로드 이미지',
  *             backend='external', sessionId 있으면 연결.
+ *   "spritesheet" — SpriteCanvas 가 보정한 시트(원본 시트 치수 그대로). parent 선택(lineage).
+ *             generations.kind='spritesheet', params(rows/cols/anchor/directions 등) 보존 →
+ *             재오픈·.json export 가 동작. backend='external'.
  *
- * body (mask):  { kind:"mask", parentGenerationId, dataUrl }
- * body (image): { kind:"image", dataUrl, sessionId?, filename? }
+ * body (mask):        { kind:"mask", parentGenerationId, dataUrl }
+ * body (image):       { kind:"image", dataUrl, sessionId?, filename? }
+ * body (spritesheet): { kind:"spritesheet", dataUrl, parentGenerationId?, sessionId?, params? }
  *
  * dataUrl 은 `data:image/<png|jpeg|webp>;base64,...`. 응답: { generationId, width, height }.
  */
 
 type UploadBody = {
-  kind?: "mask" | "image";
+  kind?: "mask" | "image" | "spritesheet";
   parentGenerationId?: string;
   sessionId?: string;
   filename?: string;
   dataUrl?: string;
+  params?: Record<string, unknown>;
 };
 
 const DATAURL_PREFIX = /^data:image\/(png|jpeg|webp);base64,/;
@@ -40,8 +46,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  if (body.kind !== "mask" && body.kind !== "image") {
-    return Response.json({ error: "kind must be 'mask' or 'image'" }, { status: 400 });
+  if (body.kind !== "mask" && body.kind !== "image" && body.kind !== "spritesheet") {
+    return Response.json({ error: "kind must be 'mask', 'image' or 'spritesheet'" }, { status: 400 });
   }
   if (!body.dataUrl || !DATAURL_PREFIX.test(body.dataUrl)) {
     return Response.json({ error: "dataUrl must be image/(png|jpeg|webp) base64" }, { status: 400 });
@@ -52,6 +58,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "mask dataUrl must be PNG" }, { status: 400 });
   }
 
+  // 전달된 sessionId 가 실존할 때만 사용 — 미존재/stale 세션은 null 로 폴백해
+  // generations.session_id FK(REFERENCES sessions(id)) 위반(500) 방지.
+  const validSessionId = body.sessionId && getSession(body.sessionId) ? body.sessionId : null;
+
   let parent = null;
   if (body.kind === "mask") {
     if (!body.parentGenerationId) {
@@ -59,6 +69,9 @@ export async function POST(req: NextRequest) {
     }
     parent = getGeneration(body.parentGenerationId);
     if (!parent) return Response.json({ error: "parent generation not found" }, { status: 404 });
+  } else if (body.kind === "spritesheet" && body.parentGenerationId) {
+    // 보정본 lineage 는 선택 — 부모가 있으면 input_image_ids 에 기록(없거나 삭제됐어도 저장은 진행).
+    parent = getGeneration(body.parentGenerationId);
   }
 
   const base64Idx = body.dataUrl.indexOf(",") + 1;
@@ -86,33 +99,51 @@ export async function POST(req: NextRequest) {
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
 
-  const gen =
-    body.kind === "mask"
-      ? createGeneration({
-          id: generationId,
-          session_id: parent!.session_id,
-          message_id: null,
-          kind: "mask",
-          prompt: null,
-          input_image_ids: [parent!.id],
-          params: {},
-          image_path: toRelative(destPath),
-          width,
-          height,
-          backend: "external",
-        })
-      : createGeneration({
-          id: generationId,
-          session_id: body.sessionId ?? null,
-          message_id: null,
-          kind: "external",
-          prompt: body.filename ? `업로드: ${body.filename}` : "업로드 이미지",
-          params: { filename: body.filename },
-          image_path: toRelative(destPath),
-          width,
-          height,
-          backend: "external",
-        });
+  let gen;
+  if (body.kind === "mask") {
+    gen = createGeneration({
+      id: generationId,
+      session_id: parent!.session_id,
+      message_id: null,
+      kind: "mask",
+      prompt: null,
+      input_image_ids: [parent!.id],
+      params: {},
+      image_path: toRelative(destPath),
+      width,
+      height,
+      backend: "external",
+    });
+  } else if (body.kind === "spritesheet") {
+    // 보정본 — 부모 params 를 클라이언트가 넘긴 params 로 보존(rows/cols/anchor/directions/fps).
+    // parent 가 있으면 세션·lineage 승계.
+    gen = createGeneration({
+      id: generationId,
+      session_id: parent?.session_id ?? validSessionId,
+      message_id: null,
+      kind: "spritesheet",
+      prompt: parent?.prompt ? `보정: ${parent.prompt}` : "보정된 스프라이트시트",
+      input_image_ids: parent ? [parent.id] : [],
+      params: body.params ?? {},
+      image_path: toRelative(destPath),
+      width,
+      height,
+      backend: "external",
+    });
+  } else {
+    gen = createGeneration({
+      id: generationId,
+      session_id: validSessionId,
+      message_id: null,
+      kind: "external",
+      prompt: body.filename ? `업로드: ${body.filename}` : "업로드 이미지",
+      params: { filename: body.filename },
+      image_path: toRelative(destPath),
+      width,
+      height,
+      backend: "external",
+    });
+  }
 
   return Response.json({ generationId: gen.id, width: gen.width, height: gen.height });
 }

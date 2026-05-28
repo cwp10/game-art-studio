@@ -1,9 +1,25 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, Film, Pause, Play, RefreshCw, SkipBack, SkipForward, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
+import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 
 type Order = "row" | "col";
+
+// make_spritesheet 가 generation.params 에 영속하는 메타(전부 선택 — 구버전 시트는 비어있음).
+type SheetParams = {
+  rows?: number;
+  cols?: number;
+  cellW?: number;
+  cellH?: number;
+  directions?: number;
+  subjectType?: string;
+  anchorStrategy?: string;
+  seamlessLoop?: boolean;
+  anchor?: { x: number; y: number };
+  fps?: number;
+};
 
 type Props = {
   parentGenerationId: string;
@@ -11,7 +27,10 @@ type Props = {
   imageWidth: number;
   imageHeight: number;
   maxDisplayPx?: number;
+  sessionId?: string | null;
   onCancel: () => void;
+  /** 보정본을 새 generation 으로 저장 후 호출 — ChatLayout 이 결과 카드 삽입. */
+  onSaved?: (result: { generationId: string; width: number; height: number }) => void;
 };
 
 export function SpriteCanvas({
@@ -20,18 +39,46 @@ export function SpriteCanvas({
   imageWidth,
   imageHeight,
   maxDisplayPx = 1200,
+  sessionId,
   onCancel,
+  onSaved,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   // 이미지 크기에서 GCD로 셀 크기를 역산해 rows/cols 자동 감지. 감지 실패 시 기본값 6×7.
+  // params(make_spritesheet 영속) 가 있으면 grid source-of-truth 로 그쪽을 우선(아래 fetch effect).
   const detected = detectSpriteGrid(imageWidth, imageHeight);
   const [rows, setRows] = useState(detected?.rows ?? 6);
   const [cols, setCols] = useState(detected?.cols ?? 7);
   const [order, setOrder] = useState<Order>("row");
   const [fps, setFps] = useState(12);
+  // 백엔드가 영속한 생성 메타(rows/cols/cellW/cellH/directions/subjectType/anchor/seamlessLoop/fps).
+  // 없으면 null → GCD 폴백(구버전 외부 업로드 시트).
+  const [params, setParams] = useState<SheetParams | null>(null);
+  // 방향 시트(rows=directions>1)면 특정 방향(행)만 재생; -1 = 전체. directions 없으면 항상 -1.
+  const [dirRow, setDirRow] = useState(-1);
+  const [onion, setOnion] = useState(false);
+  // 행 전체 보정 모드 — 선택 셀이 속한 행의 모든 프레임에 같은 오프셋 일괄 적용(방향 시트용).
+  const [rowMode, setRowMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  // 마운트 시 parentGenerationId 로 params fetch → 있으면 rows/cols/fps 를 그 값으로 동기화.
+  // 사용자 수동 입력은 유지(이후 setRows/setCols 가능)하되 초기값만 params 우선.
+  useEffect(() => {
+    let cancelled = false;
+    getGeneration(parentGenerationId).then(gen => {
+      if (cancelled || !gen) return;
+      const p = gen.params as SheetParams;
+      if (typeof p?.rows === "number" && p.rows >= 1 && p.rows <= 16) setRows(p.rows);
+      if (typeof p?.cols === "number" && p.cols >= 1 && p.cols <= 16) setCols(p.cols);
+      if (typeof p?.fps === "number" && p.fps >= 1 && p.fps <= 30) setFps(p.fps);
+      setParams(p ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [parentGenerationId]);
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
@@ -108,11 +155,34 @@ export function SpriteCanvas({
     ctx.drawImage(img, 0, 0, displayW, displayH);
   }, [imgLoaded, displayW, displayH]);
 
+  // 비정사각 셀 지원 — cellW/cellH 를 각각 독립 역산(정사각 가정 없음).
   const cellW = Math.floor(imageWidth / cols);
   const cellH = Math.floor(imageHeight / rows);
   const frameCount = rows * cols;
   // 드래그 여유 공간: 셀 최소 치수의 25%. 이 범위 안에서 드래그해도 콘텐츠가 잘리지 않음.
   const dragPad = Math.round(Math.min(cellW, cellH) * 0.25);
+
+  // 방향 시트 판정 — params.directions>1 이면 rows=directions(백엔드 보장). 라벨은 게임 관례.
+  // params 없으면(구버전) 행 인덱스로 폴백. order="row" 일 때만 행=방향 매핑이 유효.
+  const directionCount =
+    params && typeof params.directions === "number" && params.directions > 1
+      ? params.directions
+      : 0;
+  const dirLabels = useMemo(() => {
+    if (directionCount && [2, 4, 8].includes(directionCount)) {
+      return directionLabels(directionCount as Directions);
+    }
+    // params 에 directions 가 없거나 비표준이면 행 인덱스 라벨.
+    return directionCount ? Array.from({ length: rows }, (_, i) => `행 ${i + 1}`) : [];
+  }, [directionCount, rows]);
+  const isDirSheet = directionCount > 0 && order === "row";
+  // 방향 시트가 아니거나 dirRow 가 행 범위를 벗어나면(분할 변경) 전체로 리셋.
+  useEffect(() => {
+    if (!isDirSheet || dirRow >= rows) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDirRow(-1);
+    }
+  }, [isDirSheet, rows, dirRow]);
 
   const [frames, setFrames] = useState<HTMLCanvasElement[]>([]);
   useEffect(() => {
@@ -171,16 +241,31 @@ export function SpriteCanvas({
   const exportW = cellW + 2 * dragPad;
   const exportH = cellH + 2 * dragPad;
 
-  // GIF 는 항상 순방향 — AI 가 seamlessLoop 로 설계한 사이클을 그대로 재생
-  const gifFrames = exportFrames;
-
   const thumbs = useMemo(
     () => adjustedFrames.map(f => f.toDataURL("image/png")),
     [adjustedFrames],
   );
 
-  // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames.
-  const previewFrames = adjustedFrames.length > 0 ? adjustedFrames : frames;
+  // 방향(행) 선택 시 그 행의 프레임 인덱스만 재생/GIF 대상. row-order 에서 행 r = [r*cols, r*cols+cols).
+  // dirRow=-1(전체) 또는 방향 시트 아님 → 전체 인덱스.
+  const playIndices = useMemo(() => {
+    const base = adjustedFrames.length > 0 ? adjustedFrames : frames;
+    if (!isDirSheet || dirRow < 0) return base.map((_, i) => i);
+    const start = dirRow * cols;
+    return base.map((_, i) => i).filter(i => i >= start && i < start + cols);
+  }, [adjustedFrames, frames, isDirSheet, dirRow, cols]);
+
+  // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames. 방향 필터 적용.
+  const previewFrames = useMemo(() => {
+    const base = adjustedFrames.length > 0 ? adjustedFrames : frames;
+    return playIndices.map(i => base[i]).filter(Boolean) as HTMLCanvasElement[];
+  }, [adjustedFrames, frames, playIndices]);
+
+  // GIF 는 항상 순방향 — AI 가 seamlessLoop 로 설계한 사이클을 그대로 재생. 방향 선택 시 그 행만.
+  const gifFrames = useMemo(
+    () => playIndices.map(i => exportFrames[i]).filter(Boolean) as HTMLCanvasElement[],
+    [playIndices, exportFrames],
+  );
 
   // 프레임 수가 바뀌면 재생 인덱스를 범위 안으로 클램프.
   useEffect(() => {
@@ -199,6 +284,8 @@ export function SpriteCanvas({
   }, [playing, fps, previewFrames.length]);
 
   // 현재 프레임을 canvas 에 직접 그림 — 투명 알파 보존을 위해 clearRect 선행.
+  // 어니언 스킨 ON: 같은 (방향 필터된) 시퀀스 내 이전/다음 프레임을 30% 반투명으로 깔아
+  // 앵커 보정 정렬을 시각 보조. 현재 프레임은 항상 위에 100% 로.
   useEffect(() => {
     const c = previewRef.current;
     if (!c) return;
@@ -209,19 +296,46 @@ export function SpriteCanvas({
       c.height = exportH;
     }
     ctx.clearRect(0, 0, c.width, c.height);
+    const n = previewFrames.length;
+    if (n === 0) return;
+    if (onion && n > 1) {
+      ctx.globalAlpha = 0.3;
+      const prev = previewFrames[(previewIdx - 1 + n) % n];
+      const next = previewFrames[(previewIdx + 1) % n];
+      if (prev) ctx.drawImage(prev, 0, 0);
+      if (next) ctx.drawImage(next, 0, 0);
+      ctx.globalAlpha = 1;
+    }
     const frame = previewFrames[previewIdx];
     if (frame) ctx.drawImage(frame, 0, 0);
-  }, [previewFrames, previewIdx, exportW, exportH]);
+  }, [previewFrames, previewIdx, exportW, exportH, onion]);
+
+  // 한 셀 인덱스가 속한 (보정 적용 대상) 인덱스들. rowMode=ON 이면 같은 행 전체, 아니면 자기 자신만.
+  // row-order: 행 = floor(i/cols), 같은 행 = [r*cols, r*cols+cols). col-order: 행 = i%rows.
+  const siblingsOf = useCallback(
+    (idx: number): number[] => {
+      if (!rowMode) return [idx];
+      if (order === "row") {
+        const r = Math.floor(idx / cols);
+        return Array.from({ length: cols }, (_, c) => r * cols + c);
+      }
+      const r = idx % rows;
+      return Array.from({ length: cols }, (_, c) => c * rows + r);
+    },
+    [rowMode, order, cols, rows],
+  );
 
   // 드래그 — window 이벤트로 썸네일 밖에서도 추적. 선택은 mouseDown 시점에 끝났음.
+  // rowMode 면 같은 행의 모든 프레임에 동일 오프셋 일괄 적용(방향 시트 행 보정).
   useEffect(() => {
     if (!dragging) return;
+    const sibs = new Set(siblingsOf(dragging.idx));
     const onMove = (e: MouseEvent) => {
       const dx = e.clientX - dragging.startX;
       const dy = e.clientY - dragging.startY;
       setOffsets(prev =>
         prev.map((o, i) =>
-          i === dragging.idx ? { x: dragging.origX + dx, y: dragging.origY + dy } : o,
+          sibs.has(i) ? { x: dragging.origX + dx, y: dragging.origY + dy } : o,
         ),
       );
     };
@@ -232,9 +346,9 @@ export function SpriteCanvas({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [dragging]);
+  }, [dragging, siblingsOf]);
 
-  // 키보드 — selectedIdx 가 있을 때 화살표 키로 위치 미세 조정
+  // 키보드 — selectedIdx 가 있을 때 화살표 키로 위치 미세 조정. rowMode 면 같은 행 일괄.
   useEffect(() => {
     if (selectedIdx === null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -252,15 +366,16 @@ export function SpriteCanvas({
       } else return;
       const step = e.shiftKey ? 10 : 1;
       e.preventDefault();
+      const sibs = new Set(siblingsOf(selectedIdx));
       setOffsets(prev =>
         prev.map((o, i) =>
-          i === selectedIdx ? { x: o.x + dx * step, y: o.y + dy * step } : o,
+          sibs.has(i) ? { x: o.x + dx * step, y: o.y + dy * step } : o,
         ),
       );
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedIdx]);
+  }, [selectedIdx, siblingsOf]);
 
   // 선택된 셀에서 인접 셀로부터 넘어온 작은 픽셀 덩어리(=잔재) 제거.
   // connected components 분석으로 가장 큰 덩어리의 10% 미만 크기인 컴포넌트만 알파 0.
@@ -496,6 +611,74 @@ export function SpriteCanvas({
     }
   }
 
+  // ⑧ 아틀라스 메타데이터(.json) — 엔진(Unity/Godot/Phaser)에서 바로 슬라이싱.
+  // params 우선, 없으면(구버전) 현재 rows/cols/fps 로 최선. anchor 는 셀-로컬 피벗.
+  function buildAtlasJson(): Record<string, unknown> {
+    const directions =
+      isDirSheet && dirLabels.length === rows
+        ? dirLabels
+        : directionCount && dirLabels.length
+          ? dirLabels
+          : undefined;
+    return {
+      image: `${parentGenerationId}.png`,
+      cellWidth: cellW,
+      cellHeight: cellH,
+      rows,
+      cols,
+      subjectType: params?.subjectType ?? undefined,
+      directions, // rows=방향일 때 행 순서 라벨, 아니면 생략
+      framesPerDirection: directions ? cols : undefined,
+      fps,
+      loop: params?.seamlessLoop ?? true,
+      anchor: params?.anchor ?? undefined, // 셀-로컬 피벗(발/엉덩이 라인)
+    };
+  }
+
+  function downloadAtlasJson() {
+    const json = JSON.stringify(buildAtlasJson(), null, 2);
+    triggerDownload(new Blob([json], { type: "application/json" }), `${parentGenerationId}.json`);
+  }
+
+  // ⑤ 보정본 저장 — adjustedFrames 를 원본 시트 치수(cols*cellW × rows*cellH)로 재배치한
+  // PNG 를 새 generation(kind='spritesheet')으로 저장. 원본 보존(비파괴). params 보존.
+  async function saveCorrected() {
+    if (frames.length === 0 || saving) return;
+    setSaving(true);
+    setSavedMsg(null);
+    try {
+      const sheetW = cols * cellW;
+      const sheetH = rows * cellH;
+      const c = document.createElement("canvas");
+      c.width = sheetW;
+      c.height = sheetH;
+      const ctx = c.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      ctx.clearRect(0, 0, sheetW, sheetH);
+      // 각 패딩 프레임의 셀-원점(dragPad,dragPad)을 셀 위치(c*cellW,r*cellH)에 맞춰 그림.
+      // 패딩 밴드는 이미 maskToCellComponent 로 이웃 잔재가 제거돼 자기 오버플로만 보존.
+      adjustedFrames.forEach((frame, i) => {
+        const { r, col } = framePos(i, rows, cols, order);
+        ctx.drawImage(frame, col * cellW - dragPad, r * cellH - dragPad);
+      });
+      const dataUrl = c.toDataURL("image/png");
+      // params 에 보정 후 현재 fps 반영(나머지 grid/anchor/directions 는 그대로 보존).
+      const savedParams = { ...(params ?? {}), rows, cols, cellW, cellH, fps };
+      const res = await uploadSpritesheet({
+        dataUrl,
+        parentGenerationId,
+        sessionId,
+        params: savedParams,
+      });
+      setSavedMsg("보정본 저장됨");
+      onSaved?.(res);
+    } catch (e) {
+      setSavedMsg(`저장 실패: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
@@ -516,7 +699,8 @@ export function SpriteCanvas({
 
       <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">
-          행·열을 지정해서 시트를 N×M 프레임으로 분할합니다. 클라이언트 처리 — DB 저장 없음.
+          행·열을 지정해서 시트를 N×M 프레임으로 분할합니다. 다운로드는 클라이언트 처리,
+          [보정본 저장]만 새 generation 으로 기록합니다(원본 보존).
         </p>
 
         <div
@@ -570,12 +754,41 @@ export function SpriteCanvas({
               <ArrowDown size={12} /> 세로
             </button>
           </div>
+          {/* 방향 시트(rows=directions>1): 행=방향. 선택 시 미리보기/GIF 가 해당 행만 재생. */}
+          {isDirSheet && (
+            <div className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-text-muted">방향</span>
+              <select
+                value={dirRow}
+                onChange={e => { setDirRow(Number(e.target.value)); setPreviewIdx(0); }}
+                className="h-7 flex-1 rounded border border-border bg-bg-app px-1 text-text-primary"
+              >
+                <option value={-1}>전체 ({rows}방향)</option>
+                {dirLabels.map((label, i) => (
+                  <option key={i} value={i}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
           <div className="flex items-center justify-between">
             <span className="text-text-muted">분할 결과 ({thumbs.length}프레임)</span>
             <div className="flex gap-1">
+              {/* 행 전체 보정 — 선택/드래그 시 같은 행 모든 프레임에 동일 오프셋 일괄(방향 시트). */}
+              <button
+                onClick={() => setRowMode(m => !m)}
+                disabled={frames.length === 0}
+                className={`h-6 rounded border px-2 disabled:opacity-40 ${
+                  rowMode
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border text-text-muted hover:text-text-primary"
+                }`}
+                title="행 전체 보정: 한 행의 모든 프레임에 같은 오프셋 일괄 적용"
+              >
+                행 보정
+              </button>
               <button
                 onClick={autoAlign}
                 disabled={frames.length === 0}
@@ -596,6 +809,7 @@ export function SpriteCanvas({
           </div>
           <p className="text-[11px] text-text-muted/60">
             드래그 또는 클릭으로 셀 선택 후 화살표 키(Shift = 10px)로 미세 조정. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
+            {rowMode && <span className="text-[color:var(--accent)]"> 행 보정 ON — 조정이 같은 행 전체에 적용됩니다.</span>}
           </p>
           {selectedIdx !== null && (
             <div className="space-y-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
@@ -763,6 +977,19 @@ export function SpriteCanvas({
                 >
                   <SkipForward size={12} />
                 </button>
+                {/* ⑪ 어니언 스킨 — 인접 프레임 30% 반투명 오버레이로 앵커 보정 정렬 보조. */}
+                <button
+                  onClick={() => setOnion(o => !o)}
+                  disabled={previewFrames.length <= 1}
+                  className={`flex h-7 items-center justify-center gap-1 rounded border px-2 disabled:opacity-40 ${
+                    onion
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-border text-text-muted hover:text-text-primary"
+                  }`}
+                  title="어니언 스킨: 이전/다음 프레임을 반투명으로 겹쳐 보기"
+                >
+                  <Layers size={12} /> 어니언
+                </button>
               </div>
               {(gifBusy || gifError) && (
                 <span className="text-center text-[11px] text-text-muted/60">
@@ -774,27 +1001,52 @@ export function SpriteCanvas({
         </div>
       </div>
 
-      <footer className="flex gap-2 border-t border-border p-3">
-        <button
-          onClick={onCancel}
-          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
-        >
-          ✕ 닫기
-        </button>
-        <button
-          onClick={downloadZip}
-          disabled={adjustedFrames.length === 0 || !!downloading}
-          className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
-        >
-          <FileArchive size={14} /> {downloading === "zip" ? "..." : "프레임 zip"}
-        </button>
-        <button
-          onClick={downloadGif}
-          disabled={!gifUrl || !!downloading}
-          className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-        >
-          <Download size={14} /> {downloading === "gif" ? "..." : "GIF 저장"}
-        </button>
+      <footer className="flex flex-col gap-2 border-t border-border p-3">
+        {/* ⑤ 보정본 저장 — 현재 오프셋 반영한 전체 시트를 새 generation 으로(원본 보존). */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={saveCorrected}
+            disabled={frames.length === 0 || saving}
+            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+          >
+            <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
+          </button>
+          {savedMsg && (
+            <span className={`text-xs ${savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}>
+              {savedMsg}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
+          >
+            ✕ 닫기
+          </button>
+          <button
+            onClick={downloadAtlasJson}
+            disabled={frames.length === 0}
+            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+            title="셀·그리드·방향·앵커 메타데이터 .json (엔진 슬라이싱용)"
+          >
+            <FileJson size={14} /> .json
+          </button>
+          <button
+            onClick={downloadZip}
+            disabled={adjustedFrames.length === 0 || !!downloading}
+            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+          >
+            <FileArchive size={14} /> {downloading === "zip" ? "..." : "프레임 zip"}
+          </button>
+          <button
+            onClick={downloadGif}
+            disabled={!gifUrl || !!downloading}
+            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+          >
+            <Download size={14} /> {downloading === "gif" ? "..." : "GIF"}
+          </button>
+        </div>
       </footer>
     </aside>
   );
@@ -955,4 +1207,11 @@ function detectSpriteGrid(
 
 function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b);
+}
+
+// 프레임 빌드 순서(order)에 맞춘 인덱스 → (행 r, 열 col) 역산. push 루프와 정확히 대응.
+//   row-order: r*cols + col / col-order: col*rows + r.
+function framePos(i: number, rows: number, cols: number, order: Order): { r: number; col: number } {
+  if (order === "row") return { r: Math.floor(i / cols), col: i % cols };
+  return { r: i % rows, col: Math.floor(i / rows) };
 }

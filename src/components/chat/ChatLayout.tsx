@@ -843,6 +843,20 @@ export function ChatLayout() {
             imageUrl={editing.imageUrl}
             imageWidth={editing.width}
             imageHeight={editing.height}
+            sessionId={state.activeSessionId}
+            onSaved={res => {
+              // 보정본을 결과 카드로 chat 에 삽입(reskin b-precise 패턴). 패널은 계속 열린 채로
+              // 유지 — 사용자가 추가 방향 보정을 이어갈 수 있게.
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: "🎞️ 보정된 스프라이트시트",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "spritesheet",
+              });
+            }}
             onCancel={() => setEditing(null)}
           />
         </div>

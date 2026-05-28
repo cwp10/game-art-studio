@@ -263,6 +263,56 @@ export async function bumpPromptUse(id: string): Promise<void> {
   });
 }
 
+/** 단일 generation 조회 — params(스프라이트 그리드/방향/앵커 등) 포함. 없으면 null. */
+export async function getGeneration(id: string): Promise<{
+  id: string;
+  kind: string;
+  params: Record<string, unknown>;
+  width: number | null;
+  height: number | null;
+  imageUrl: string;
+} | null> {
+  const r = await fetch(`/api/generations/${id}`);
+  if (!r.ok) return null;
+  return (await r.json()) as {
+    id: string;
+    kind: string;
+    params: Record<string, unknown>;
+    width: number | null;
+    height: number | null;
+    imageUrl: string;
+  };
+}
+
+/**
+ * SpriteCanvas 가 보정한 스프라이트시트 PNG 를 새 generation(kind='spritesheet')으로 저장.
+ * 원본 보존(비파괴) — 보정본은 별도 행. params(rows/cols/anchor/directions 등)를 보존해
+ * 재오픈·.json export 가 동작. parentGenerationId 는 lineage(input_image_ids) 기록.
+ */
+export async function uploadSpritesheet(args: {
+  dataUrl: string;
+  parentGenerationId?: string;
+  sessionId?: string | null;
+  params?: Record<string, unknown>;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      kind: "spritesheet",
+      dataUrl: args.dataUrl,
+      parentGenerationId: args.parentGenerationId,
+      sessionId: args.sessionId ?? undefined,
+      params: args.params,
+    }),
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(`uploadSpritesheet failed: ${error ?? r.statusText}`);
+  }
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
 export async function listGenerations(opts?: { sessionId?: string; kind?: string; search?: string; limit?: number }): Promise<Generation[]> {
   const sp = new URLSearchParams();
   if (opts?.sessionId) sp.set("sessionId", opts.sessionId);
