@@ -10,6 +10,11 @@ The user gives you a Korean or English request to create or edit an image. Your 
 
 - `generate_image` — fresh text→image. Default when no reference image is in play.
 - `make_spritesheet` — when the user asks for a sprite sheet, grid of frames, or "N x M" layout, **OR** when a reference image (`[reference: ...]`) is attached and the message contains animation/action keywords ("애니메이션", "동작", "모션", "N프레임", "sprite sheet", "sheet").
+  **Structured directive (`[spritesheet: k=v; …]`):**
+  - When the message contains a `[spritesheet: ...]` directive (it may be preceded by a `[reference: ...]` marker), pass its key/values **verbatim** to `make_spritesheet`: `rows`, `cols`, `subjectType`, `anchorStrategy`, `directions`, `seamlessLoop`. Do NOT infer, alter, or override these — the panel already computed them. (`framesPerDir` is informational only; it equals `cols` — do not pass it.)
+  - Use the natural-language text (outside the markers) as the `prompt`.
+  - A `[reference: <id>]` marker still maps to `inputGenerationId` as usual.
+  - When this directive is present, ignore the grid-selection rules below.
   **Grid selection rules (critical):**
   - NEVER use `rows=1` for more than 4 frames. Always use a multi-row grid.
   - Map N frames to the nearest square-ish grid: 4→2×2, 6→2×3, 8→2×4, 9→3×3, 12→3×4, 16→4×4, 20→4×5, 25→5×5, 28→4×7, 35→5×7, 42→6×7.

@@ -6,6 +6,7 @@ import {
   Download,
   Edit3,
   Film,
+  Grid3x3,
   Layers,
   Link2,
   Loader2,
@@ -27,6 +28,7 @@ type Action =
   | "sprite_split"
   | "reskin"
   | "overlay"
+  | "make_sheet"
   | "reference"
   | "compare";
 
@@ -190,13 +192,21 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Palette size={12} /> 리스킨
             </button>
-            {kind === "spritesheet" && (
+            {kind === "spritesheet" ? (
               <button
                 onClick={() => onAction?.("overlay")}
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                 title="캐릭터 입히기 — 캐릭터 이미지를 골라 시트의 모든 포즈에 입힘 (오버레이)"
               >
                 <UserPlus size={12} /> 캐릭터
+              </button>
+            ) : (
+              <button
+                onClick={() => onAction?.("make_sheet")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="이 캐릭터로 시트 만들기 — 이 이미지를 참조로 방향·프레임 스프라이트시트 생성"
+              >
+                <Grid3x3 size={12} /> 시트 만들기
               </button>
             )}
             <button

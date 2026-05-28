@@ -10,6 +10,12 @@ import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
+import {
+  SpriteGenPanel,
+  buildSpriteMessage,
+  resolveStyleSuffix,
+  type SpriteGenSubmit,
+} from "@/components/editor/SpriteGenPanel";
 import { CompareSheet } from "@/components/library/CompareSheet";
 import { GallerySheet } from "@/components/library/GallerySheet";
 import { LogsPanel } from "@/components/library/LogsPanel";
@@ -58,6 +64,9 @@ type Editing =
 export function ChatLayout() {
   const [state, dispatch] = useReducer(chatReducer, initialState);
   const [editing, setEditing] = useState<Editing>(null);
+  // 스프라이트시트 생성 패널 — fresh 생성은 EditTarget(기존 generation) 불필요해 별도 상태.
+  // 비null 이면 열림. reference 있으면 결과카드 단축어로 들어온 캐릭터 참조.
+  const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
@@ -361,6 +370,7 @@ export function ChatLayout() {
         | "sprite_split"
         | "reskin"
         | "overlay"
+        | "make_sheet"
         | "reference"
         | "compare",
       payload: {
@@ -403,6 +413,17 @@ export function ChatLayout() {
           width: payload.width,
           height: payload.height,
           kind: payload.kind,
+        });
+      } else if (action === "make_sheet" && payload.generationId && payload.width && payload.height) {
+        // 단일 이미지(비-시트) → 이 캐릭터를 참조로 스프라이트시트 생성 패널 오픈(fresh+ref).
+        setSpriteGen({
+          reference: {
+            generationId: payload.generationId,
+            imageUrl: `/api/images/${payload.generationId}`,
+            width: payload.width,
+            height: payload.height,
+            kind: payload.kind,
+          },
         });
       } else if (
         (action === "edit" ||
@@ -549,6 +570,21 @@ export function ChatLayout() {
       }
     },
     [editing, handleSend],
+  );
+
+  // SpriteGenPanel 이 submit 한 구조화 payload → 마커+자연어 합성해 handleSend.
+  // reskin 패턴과 동일: 패널은 구조화 선택만 넘기고, 마커 directive + 자연어 조립은 여기서.
+  // 마커는 오케스트레이터가 그대로 make_spritesheet 에 전달(rows/cols/subjectType/
+  // anchorStrategy/directions/seamlessLoop). 참조는 attachmentGenerationIds 로 → inputGenerationId.
+  const handleSpriteGen = useCallback(
+    async (payload: SpriteGenSubmit) => {
+      setSpriteGen(null);
+      // 스타일 프리셋 suffix 를 클라이언트에서 해석해 자연어에 결합(Composer 흐름과 동일 — 서버는 preset 모름).
+      const suffix = await resolveStyleSuffix(payload.stylePresetId);
+      const { message, attachmentGenerationIds } = buildSpriteMessage(payload, suffix);
+      handleSend(message, { attachmentGenerationIds });
+    },
+    [handleSend],
   );
 
   // LayerCanvas 가 submit 한 결과 처리.
@@ -769,6 +805,7 @@ export function ChatLayout() {
           prefill={composerPrefill}
           attachment={composerAttachment}
           onAskSuggestions={handleAskSuggestions}
+          onOpenSpriteGen={() => setSpriteGen({})}
         />
       </div>
       {editing?.mode === "inpaint" && (
@@ -822,6 +859,16 @@ export function ChatLayout() {
             sessionId={state.activeSessionId}
             onSubmit={handleReskin}
             onClose={() => setEditing(null)}
+          />
+        </div>
+      )}
+      {spriteGen && (
+        <div className="fixed inset-0 z-40">
+          <SpriteGenPanel
+            reference={spriteGen.reference}
+            sessionId={state.activeSessionId}
+            onSubmit={handleSpriteGen}
+            onClose={() => setSpriteGen(null)}
           />
         </div>
       )}

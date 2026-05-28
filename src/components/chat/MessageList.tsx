@@ -20,6 +20,7 @@ type Props = {
       | "sprite_split"
       | "reskin"
       | "overlay"
+      | "make_sheet"
       | "reference"
       | "compare",
     payload: {

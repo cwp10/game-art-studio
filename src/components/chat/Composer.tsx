@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
+import { Grid3x3, LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -37,6 +37,8 @@ type Props = {
   attachment?: ComposerAttachment | null;
   /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
   onAskSuggestions?: (text: string) => void;
+  /** [▦ 시트] 클릭 시 부모가 스프라이트시트 생성 패널(fresh)을 연다. */
+  onOpenSpriteGen?: () => void;
 };
 
 export function Composer({
@@ -47,6 +49,7 @@ export function Composer({
   prefill,
   attachment,
   onAskSuggestions,
+  onOpenSpriteGen,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -237,6 +240,16 @@ export function Composer({
                   ))}
                 </select>
               </label>
+            )}
+            {onOpenSpriteGen && (
+              <button
+                type="button"
+                onClick={onOpenSpriteGen}
+                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs leading-none text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+                title="스프라이트시트 생성 — 방향·프레임·앵커를 구조화 패널로 설정해 생성"
+              >
+                <Grid3x3 size={12} /> 시트
+              </button>
             )}
             <button
               type="button"
