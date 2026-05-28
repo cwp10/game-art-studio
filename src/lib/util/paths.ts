@@ -32,6 +32,11 @@ export function thumbnailPath(id: string): string {
   return path.join(THUMBS_DIR, `${id}.webp`);
 }
 
+/** DB 의 image_path(상대 또는 절대)를 디스크 절대 경로로 변환. */
+export function resolveImagePath(imagePath: string): string {
+  return path.isAbsolute(imagePath) ? imagePath : path.join(DATA_DIR, imagePath);
+}
+
 /** Codex job 작업 디렉토리 (data/tmp/job-{id}). 호출자가 mkdir 한다. */
 export function jobDir(jobId: string): string {
   return path.join(TMP_DIR, `job-${jobId}`);

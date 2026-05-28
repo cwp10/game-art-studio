@@ -8,13 +8,21 @@
  *       삭제하지 않고 크기 상한(LOG_CAP) 초과 시 tail 만 남기고 truncate.
  *   (c) 오래된 jobs 행 — 터미널(succeeded/failed/cancelled) + pending 좀비 중 started_at 이 N일 이전
  *   (d) data/tmp/job-* — N일 이전 작업 디렉토리 (tmp-cleanup 재사용)
+ *   (e) 파일 없는 generation 행 — image_path 원본이 디스크에 없는 DB 행 + 해당 썸네일
  *
  * --dry-run 이면 아무것도 지우지 않고 건수만 출력.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { getDb } from "@/lib/db/client";
-import { IMAGES_DIR, THUMBS_DIR, LOGS_DIR, TMP_DIR } from "@/lib/util/paths";
+import {
+  IMAGES_DIR,
+  THUMBS_DIR,
+  LOGS_DIR,
+  TMP_DIR,
+  resolveImagePath,
+  thumbnailPath,
+} from "@/lib/util/paths";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MCP_LOG = "mcp-server.log";
@@ -147,8 +155,26 @@ function main() {
     }
   }
 
+  // ── (e) 파일 없는 generation 행 ───────────────────────────────────────────
+  // image_path 의 원본이 디스크에 없으면(수동 삭제 등) DB 행 + 썸네일을 정리.
+  let deadRows = 0;
+  const allGens = db
+    .prepare("SELECT id, image_path FROM generations")
+    .all() as { id: string; image_path: string }[];
+  for (const g of allGens) {
+    if (fs.existsSync(resolveImagePath(g.image_path))) continue;
+    deadRows++;
+    const thumb = thumbnailPath(g.id);
+    freedBytes += statSizeQuiet(thumb);
+    if (!dry) {
+      db.prepare("DELETE FROM generations WHERE id = ?").run(g.id);
+      fs.rmSync(thumb, { force: true });
+    }
+  }
+
   console.log(`${tag} 고아 이미지: ${orphanImages}개`);
   console.log(`${tag} 고아 썸네일: ${orphanThumbs}개`);
+  console.log(`${tag} 파일 없는 generation 행: ${deadRows}개`);
   console.log(`${tag} 오래된 로그: ${oldLogs}개${truncatedLog ? ` + ${MCP_LOG} truncate` : ""}`);
   console.log(`${tag} 오래된 jobs 행: ${oldJobsCount}개`);
   console.log(`${tag} 오래된 tmp/job-* 디렉토리: ${oldTmp}개`);
