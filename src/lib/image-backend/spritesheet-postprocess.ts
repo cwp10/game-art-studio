@@ -213,6 +213,43 @@ export async function chromaKeyFile(
   log(`chromaKeyFile(${keyColor}): hardThresh=${hardThresh} keyedOut=${keyedOut}/${N}`);
 }
 
+/**
+ * 참조 이미지의 본체(콘텐츠 픽셀)가 녹색 우세인지 판정 (결정적·side-effect 없음).
+ * WHY: 캐릭터 자체가 녹색(녹색 슬라임 등)이면 기본 green chroma-key 가 본체를 같이
+ *   키아웃하므로, 호출측이 magenta 키로 폴백하도록 신호를 준다. 참조 캐릭터가 녹색일 때만
+ *   true 가 되도록 보수적으로(콘텐츠의 35% 이상이 녹색) 판정 — 녹색 악센트 정도론 false.
+ *
+ * 판정식: 콘텐츠 픽셀(알파>10, 알파 없으면 흰 배경 아닌 픽셀)별 greenness = g - max(r,b).
+ *   greenness > 40 && g > 90 인 픽셀을 "녹색 픽셀" 로 카운트, 콘텐츠 대비 비율 ≥ 0.35 → true.
+ *   분석은 폭 256 으로 다운샘플(정확도 충분, 비용↓).
+ */
+export async function isGreenDominant(filePath: string, log: Logger = noop): Promise<boolean> {
+  const { data, info } = await sharp(filePath)
+    .resize(256, undefined, { fit: "inside", withoutEnlargement: true })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const N = info.width * info.height;
+  const hasAlpha = ch === 4;
+
+  let content = 0;
+  let green = 0;
+  for (let p = 0; p < N; p++) {
+    const i = p * ch;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    // 콘텐츠 픽셀: 알파>10, 알파 없으면 흰 배경 제외.
+    const isContent = hasAlpha ? data[i + 3] > 10 : !(r > 240 && g > 240 && b > 240);
+    if (!isContent) continue;
+    content++;
+    if (g - Math.max(r, b) > 40 && g > 90) green++;
+  }
+  if (content === 0) return false; // 빈/투명 이미지
+  const ratio = green / content;
+  log(`isGreenDominant: green=${green}/${content} ratio=${ratio.toFixed(3)}`);
+  return ratio >= 0.35;
+}
+
 /** auto → subjectType 기반 구체 전략. character=feet, effect=center. */
 function resolveAnchor(strategy: AnchorStrategy, subjectType: SubjectType): Exclude<AnchorStrategy, "auto"> {
   if (strategy !== "auto") return strategy;

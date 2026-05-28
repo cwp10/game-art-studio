@@ -36,6 +36,7 @@ import sharp from "sharp";
 import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
 import {
   chromaKeyFile,
+  isGreenDominant,
   normalizeSpritesheetCells,
   type AnchorStrategy,
   type ChromaKeyColor,
@@ -395,7 +396,21 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const greenSubject = /녹색|초록|연두|green|슬라임|slime|잎|leaf|이끼|moss/.test(
           userPrompt.toLowerCase(),
         );
-        const chromaKeyColor: ChromaKeyColor = greenSubject ? "magenta" : "green";
+        // 참조 이미지가 있으면 그 본체 색을 분석 — 사용자가 "green" 이라 안 써도 참조
+        // 캐릭터가 녹색 우세면 자동으로 마젠타 키로 폴백(녹색 본체 보존). 키워드 OR 결합.
+        let refIsGreen = false;
+        if (refId) {
+          const rg = getGeneration(refId);
+          if (rg) {
+            try {
+              refIsGreen = await isGreenDominant(path.join(DATA_DIR, rg.image_path), log);
+            } catch {
+              /* 분석 실패 시 키워드 경로 유지 */
+            }
+            if (refIsGreen) log(`make_spritesheet: ref ${refId} green-dominant → magenta key`);
+          }
+        }
+        const chromaKeyColor: ChromaKeyColor = greenSubject || refIsGreen ? "magenta" : "green";
 
         // 투명 배경은 chroma-key 방식: 모델에게 키색 위에 그리게 하고 후처리로 keying.
         // 모델이 직접 알파를 그리면 흰색 fringe / 회색 잔재가 남음.
