@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useCopyPrompt } from "@/lib/hooks/useCopyPrompt";
 
 type Action =
   | "duplicate"
@@ -53,7 +54,7 @@ function formatCreatedAt(ms: number): string {
 }
 
 export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, kind, prompt, onAction }: Props) {
-  const [copied, setCopied] = useState(false);
+  const { copy: copyPrompt, copied, analyzing, failed } = useCopyPrompt(generationId, prompt);
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -70,15 +71,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
   function openLightbox() {
     setLightboxLoaded(false);
     setLightbox(true);
-  }
-
-  function copyPrompt() {
-    if (!prompt) return;
-    navigator.clipboard.writeText(prompt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-    onAction?.("copy_prompt");
   }
 
   function download() {
@@ -145,13 +137,20 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
           <div className="flex items-start gap-2">
             <button
               onClick={copyPrompt}
-              className="mt-0.5 rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="프롬프트 복사"
+              disabled={analyzing}
+              className="mt-0.5 rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:opacity-60"
+              title="이미지 분석 → ChatGPT/DALL·E용 영어 프롬프트 복사"
             >
-              <Copy size={12} />
+              {analyzing ? <Loader2 size={12} className="animate-spin" /> : <Copy size={12} />}
             </button>
             <p className="flex-1 font-mono text-[11px] leading-relaxed text-text-muted">
-              {copied ? "복사됨" : prompt}
+              {analyzing
+                ? "분석 중… (이미지 → 영어 프롬프트)"
+                : failed
+                  ? "분석 실패 — 다시 시도"
+                  : copied
+                    ? "복사됨"
+                    : prompt}
             </p>
           </div>
         )}
@@ -239,15 +238,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
               {downloading ? "저장 중" : "저장"}
             </button>
-            {prompt && (
-              <button
-                onClick={copyPrompt}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="이 이미지의 프롬프트를 클립보드에 복사"
-              >
-                <Copy size={12} /> {copied ? "복사됨" : "프롬프트 복사"}
-              </button>
-            )}
           </div>
         </div>
       </figcaption>

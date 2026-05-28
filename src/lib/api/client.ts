@@ -159,6 +159,24 @@ export async function suggestPrompts(input: string, signal?: AbortSignal): Promi
 }
 
 /**
+ * 이미지를 비전 분석해 외부 t2i 모델(ChatGPT/DALL·E)용 영어 프롬프트를 추출.
+ * 저장된 원본 프롬프트와 무관하게 픽셀에서 뽑으므로 업로드 이미지에도 동작. 수 초~수십 초 소요.
+ */
+export async function describePrompt(generationId: string, signal?: AbortSignal): Promise<string> {
+  const r = await fetch("/api/describe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ generationId }),
+    signal,
+  });
+  if (!r.ok) {
+    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
+    throw new Error(error ?? r.statusText);
+  }
+  return ((await r.json()) as { prompt: string }).prompt;
+}
+
+/**
  * 레이어 분리용 "분리 가능한 부위" 라벨 4-6개 제안. generation 의 생성 prompt 를 보고
  * Claude 가 추론 (이미지 vision 아님). LayerCanvas 의 부위명 chip 에 사용.
  *

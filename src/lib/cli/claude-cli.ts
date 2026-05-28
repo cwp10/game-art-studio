@@ -291,18 +291,22 @@ export function claudeRunSimple(opts: {
   userMessage: string;
   model?: string;
   signal?: AbortSignal;
+  /** 허용 도구. 지정 시 --allowedTools + bypassPermissions 로 도구 사용 활성화(예: ["Read"] 비전 분석). */
+  allowedTools?: string[];
+  /** 작업 디렉토리. 기본 process.cwd(). */
+  cwd?: string;
 }): Promise<string> {
   ensureDataDirs();
-  const args = [
-    "-p",
-    "--system-prompt",
-    opts.systemPrompt,
-    "--model",
-    opts.model ?? "sonnet",
-    opts.userMessage,
-  ];
+  const args = ["-p", "--system-prompt", opts.systemPrompt, "--model", opts.model ?? "sonnet"];
+  if (opts.allowedTools?.length) {
+    // 도구를 쓰려면 권한 게이트를 통과해야 함 — 로컬 개인용이라 bypass(orchestrator 와 동일 정책).
+    args.push("--allowedTools", opts.allowedTools.join(","), "--permission-mode", "bypassPermissions");
+  }
+  // user message 는 마지막 positional argument.
+  args.push(opts.userMessage);
   return new Promise((resolve, reject) => {
     const child = spawn("claude", args, {
+      cwd: opts.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
