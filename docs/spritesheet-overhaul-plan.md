@@ -90,37 +90,58 @@
 ---
 
 ### ③ 캐릭터 시트에 공격/스킬 이펙트가 끼어드는 문제
-**진단.** 사용자가 "캐릭터 4방향 걷기" 같은 운동(locomotion) 시트를 만들 때,
-모델이 자체 판단으로 마법 오라·발광 무기·이펙트 입자를 추가. 캐릭터-only
+**진단.** 사용자가 "캐릭터 4프레임 걷기" / "캐릭터 공격" 등의 시트를 만들 때,
+모델이 자체 판단으로 마법 오라·발광 무기·이펙트 입자·궤적을 추가. 캐릭터-only
 시트가 더러워짐.
 
-**기본값 (확정).** **이펙트는 사용자가 명시한 경우에만 포함**한다. 명시 경로:
-(a) 패널에서 `combat` 카테고리 + 공격/스킬 류 액션 선택, 또는
-(b) 자연어 프롬프트에 명시 키워드(`공격`/`attack`/`스킬`/`skill`/`주문`/`spell`/
-`시전`/`cast`/`발사`/`충전`/`마법 사용` 등) 포함.
-둘 다 없으면 → 카테고리 불명도 기본 `locomotion` 으로 폴백 → 이펙트 금지.
-근거: 잘못 추가(이펙트가 캐릭터에 끼어듦)는 명백한 오작동이지만 누락(이펙트
-원했는데 없음)은 사용자가 한 번에 명시해 복구 가능.
+**핵심 원칙 (확정, 2026-05-28).**
+**캐릭터 시트와 이펙트 시트는 항상 분리. 캐릭터 시트엔 어떤 액션(걷기·대기·
+공격·스킬 캐스팅 모두 포함) 이라도 이펙트가 들어가지 않는다.** 2D 게임 파이프라인
+관례 — 캐릭터(몸·동작)와 이펙트(VFX)는 별도 시트로 생성해 런타임에 합성/오버레이.
 
-**권장 해법 (의미 분리, 두 층 모두).**
-1. **액션 카테고리 도입** (UI + 라우팅) — 확장 목록:
-   - `locomotion`: walk / run / idle / jump / crouch / sneak / climb — 이펙트 금지
-   - `reaction`: **hit** (피격) / **death** (사망) / **dodge** (회피) /
-     **block** (가드) / **stagger** (비틀) — 이펙트 금지 (단, 사망 시 작은
-     충격 입자는 허용)
-   - `combat`: attack / skill / spell / charge / projectile — 이펙트 허용/요구
-   - `gesture`: wave / nod / interact / **victory** (승리 포즈) /
-     **taunt** (도발) — 이펙트 금지
-2. **프롬프트 가드**: locomotion/gesture 일 때 codex 프롬프트에 음성 명시
-   추가:
-   `"Character only — NO magic effects, NO auras, NO glowing weapons,
-   NO spell particles, NO motion lines, NO extra decorative elements.
-   Just the character body performing the action."`
-3. **classifyAnchor 확장**: 현재는 character/effect 만 구분. **subjectType**
-   로 확장 → `character-locomotion` / `character-combat` / `effect-only`.
+| 시트 종류 | subjectType | 내용 | 이펙트 |
+|---|---|---|---|
+| 캐릭터 시트 | `character` | 캐릭터 몸·동작만 (걷기·대기·공격 모션·스킬 시전 포즈) | ❌ **항상 금지** |
+| 이펙트 시트 | `effect` | 이펙트/VFX 만 (슬래시 궤적·폭발·번개) | 캐릭터 ❌ |
 
-**결정 사항.** 액션 카테고리는 UI 선택 드롭다운으로 노출. 자유 텍스트만으로
-는 모델 자의에 맡기지 않고 코드가 결정.
+→ 공격 동작 + 이펙트가 필요하면 **두 장 따로 생성**: ① 캐릭터 공격 모션 시트
+(휘두르는 자세만), ② 슬래시/폭발 이펙트 시트 — 게임에서 합성. 재사용성 ↑
+(같은 이펙트를 여러 캐릭터에 재활용).
+
+**권장 해법.**
+1. **subjectType 명시 입력**: 패널에서 `종류 = 캐릭터 | 이펙트` 양자택일.
+   자연어 진입 시엔 키워드 추론 (캐릭터 명사 / 이펙트 명사). 모호하면
+   character 폴백(보수적).
+2. **액션 카테고리** (캐릭터 시트 안에서만, 모션 유형 묘사용 — 이펙트 유무와
+   무관):
+   - `locomotion`: walk / run / idle / jump / crouch / sneak / climb
+   - `reaction`: hit / death / dodge / block / stagger
+   - `combat`: attack / skill / spell / charge / projectile (이펙트 없는
+     **캐릭터 동작만** — 칼 휘두름·주문 시전 포즈)
+   - `gesture`: wave / nod / interact / victory / taunt
+   카테고리는 codex 프롬프트의 동작 묘사를 정밀하게 만들 뿐, **이펙트 가드는
+   subjectType=character 이면 액션과 무관하게 항상 강제 주입.**
+3. **프롬프트 가드 (캐릭터 시트 무조건)**:
+   ```
+   Character body ONLY — NO magic effects, NO auras, NO glowing weapons,
+   NO spell particles, NO motion lines, NO trails, NO sparkles, NO smoke,
+   NO impact effects, NO extra decorative elements. Render only the
+   character's body performing the action (joint motion, weapon pose if any).
+   Visual effects belong on a SEPARATE effect sprite sheet.
+   ```
+   combat 카테고리의 attack/skill 도 동일 가드 — 모션만, 이펙트 금지.
+
+**예시.**
+- "마법사 4프레임" → character (action 모호) → locomotion idle 폴백 → 이펙트 없음
+- "마법사 걷기 4프레임" → character + walk → 이펙트 없음
+- "마법사 공격 4프레임" → character + attack → **휘두르는 자세만, 이펙트 없음**
+- "마법사 마법 시전 4프레임" → character + spell cast → **시전 포즈만, 이펙트 없음**
+- "슬래시 이펙트 4프레임" → effect → 이펙트 시트 (캐릭터 없음, ⑦ 적용)
+- "번개 이펙트 4프레임" → effect → 이펙트 시트
+
+**결정 사항.** 캐릭터 시트는 어떤 카테고리든 이펙트 가드 강제. 액션 카테고리는
+캐릭터 동작 묘사용 메타데이터일 뿐, 이펙트 가드를 풀지 않는다. 이펙트가 필요하면
+사용자가 별도 이펙트 시트를 명시적으로 생성.
 
 **의존.** ②(방향) 과 같은 패널. ④(프레임 옵션) 의 액션 선택과 통합.
 
@@ -134,18 +155,21 @@
 새 **"스프라이트시트 생성" 전용 패널** (현재 채팅 + 자연어 입력 외에 추가):
 ```
 ┌─ 스프라이트시트 생성 ───────────────────┐
-│ [○ 캐릭터  ○ 이펙트]   ← 종류 (subject)  │
+│ [● 캐릭터  ○ 이펙트]   ← 종류 (subject)  │
 │                                          │
-│ [캐릭터일 때 보임]                       │
-│   액션: [걷기 ▾]   (walk/run/idle/...)   │
+│ [캐릭터일 때 — 캐릭터 몸/동작만, 이펙트 ❌]│
+│   액션: [공격 ▾]   (walk/idle/attack/    │
+│                    skill cast/...)       │
 │   방향: [4방향 ▾] (1/2/4/8)              │
 │   프레임/방향: [6 ▾] (4/6/8/12)          │
 │   → 그리드: 4×6                          │
+│   ⓘ 공격/스킬도 캐릭터 모션만 — 이펙트는  │
+│     별도 [이펙트] 시트로 생성하세요       │
 │                                          │
-│ [이펙트일 때 보임]                       │
-│   이펙트: [슬래시 ▾] (slash/explosion…)  │
+│ [이펙트일 때 — VFX 만, 캐릭터 ❌]         │
+│   이펙트 종류: [슬래시 ▾]                │
 │   프레임 수: [4 ▾] (4/6/8/12/16)         │
-│   레이아웃: [2×2 ▾] (자동/사용자선택)    │
+│   레이아웃: [2×2 ▾]                       │
 │                                          │
 │ 설명(선택): [텍스트]                     │
 │ 참조 이미지(선택): [드롭/업로드]         │
@@ -245,7 +269,7 @@ mainCenterX 로 중앙. **검증으로 PASS 확인 완료** (bboxOffsetY ≈ 0).
 |------|------|
 | 컨테인먼트 | **시트 전체 단일 축소율** scale-to-fit (aspect 보존, nearest 보간). 가장 큰 셀 bbox 기준 — 프레임 간 캐릭터 크기 일관성 보존 |
 | 방향 | rows=방향, cols=프레임/방향. 4방향=하/좌/우/상, 8방향=시계 |
-| 캐릭터-이펙트 | UI 에서 종류 명시 선택(자유 텍스트 폴백). 액션 카테고리로 이펙트 가드 |
+| 캐릭터-이펙트 | **시트 종류 완전 분리** — 캐릭터 시트는 어떤 액션이든 이펙트 가드 강제(공격·스킬도 모션만). 이펙트는 별도 effect 시트로 생성, 런타임 합성 |
 | 프레임 옵션 | 패널: 종류·액션·방향·프레임/방향(or 이펙트면 N프레임 + 레이아웃) |
 | 캐릭터 앵커 | normalize 가 footY 중앙값을 글로벌 ground line 으로 사용 |
 | 잔재 제거 | 적응적 임계값 + despill + 본체 보호. 슬라이더 유지 |
@@ -256,7 +280,7 @@ mainCenterX 로 중앙. **검증으로 PASS 확인 완료** (bboxOffsetY ≈ 0).
 | 항목 | 결정 |
 |------|------|
 | 2방향 의미 | **좌·우** (게임 관례) |
-| 액션 카테고리 | **확장 목록** — locomotion + reaction(피격·사망·회피·블록·비틀) + combat + gesture(승리·도발 포함) |
+| 액션 카테고리 | **확장 목록** — locomotion + reaction(피격·사망·회피·블록·비틀) + combat + gesture(승리·도발). **모두 캐릭터 동작 묘사용** — 이펙트 가드는 액션 무관하게 캐릭터 시트면 항상 강제 |
 | 패널 위치 | **우측 전용 패널** (editor 패턴) |
 | 녹색 캐릭터 폴백 | **Phase 1 포함** — 키워드 기반 마젠타 키 자동 선택 |
 
@@ -349,10 +373,12 @@ mainCenterX 로 중앙. **검증으로 PASS 확인 완료** (bboxOffsetY ≈ 0).
   + 녹색 캐릭터(마젠타 키) 1장. 회귀: 기존 reskin 시트 1장.
 
 ### Phase 2 — 의미 분리 (오케스트레이터·프롬프트)
-- ③ subjectType + 액션 카테고리 + 이펙트 가드 프롬프트
-- 자연어 키워드 → 카테고리 매핑 (패널 없을 때 폴백)
-- **검증**: "마법사 걷기" → 이펙트 없는 캐릭터 시트, "마법사 마법 시전" → 이펙트
-  허용.
+- ③ subjectType=character|effect 양자택일. 캐릭터 시트엔 액션 무관하게 이펙트
+  가드 무조건 주입. 이펙트는 별도 effect 시트.
+- 액션 카테고리는 캐릭터 동작 묘사용 메타데이터(이펙트 가드 풀지 않음).
+- 자연어 키워드 → subjectType 매핑 (패널 없을 때 폴백, 모호하면 character).
+- **검증**: "마법사 걷기" / "마법사 공격" / "마법사 마법 시전" 모두 → 이펙트
+  없는 캐릭터 시트. "슬래시 이펙트" → 캐릭터 없는 이펙트 시트.
 
 ### Phase 3 — UI 패널 (풀스택)
 - ④ 스프라이트시트 생성 패널 (우측 전용, editor 패턴): 종류·액션·방향·프레임
