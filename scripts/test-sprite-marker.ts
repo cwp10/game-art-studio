@@ -5,7 +5,11 @@
  *
  * 실행: npx tsx --tsconfig tsconfig.json scripts/test-sprite-marker.ts
  */
-import { buildSpriteMessage, type SpriteGenSubmit } from "@/components/editor/SpriteGenPanel";
+import {
+  buildSpriteMessage,
+  buildSpriteMessagesPerDirection,
+  type SpriteGenSubmit,
+} from "@/components/editor/SpriteGenPanel";
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -132,6 +136,61 @@ console.log("[Case 5] white background");
   const { message } = buildSpriteMessage(p);
   const nl = message.split("\n")[1];
   assert(nl.includes("white background") && !nl.includes("transparent background"), "white background");
+}
+
+// ── Case 6: 방향별 개별 생성 (4방향) → 4개 메시지, 각 단일방향 + facing 자연어 ──
+console.log("[Case 6] perDirection 4-way");
+{
+  const p: SpriteGenSubmit = {
+    ...base(),
+    subjectType: "character",
+    preset: "walk",
+    anchorStrategy: "feet",
+    directions: 4,
+    framesPerDir: 6,
+    rows: 4,
+    cols: 6,
+    seamlessLoop: true,
+    perDirection: true,
+    description: "파란 갑옷 기사",
+    background: "transparent",
+  };
+  const msgs = buildSpriteMessagesPerDirection(p, "pixel art 16-bit");
+  assert(msgs.length === 4, "4방향 → 4개 메시지");
+  // directionLabels(4) = [DOWN, LEFT, RIGHT, UP] → facing 구 정합
+  const facings = ["facing DOWN (front view)", "facing LEFT (side view)", "facing RIGHT (side view)", "facing UP (back view)"];
+  msgs.forEach((m, i) => {
+    const [directive, nl] = m.message.split("\n");
+    assert(directive.includes("directions=1"), `[${i}] directions=1`);
+    assert(directive.includes("rows=1"), `[${i}] rows=1`);
+    assert(directive.includes("cols=6"), `[${i}] cols=framesPerDir(6)`);
+    assert(directive.includes("anchorStrategy=feet"), `[${i}] anchorStrategy 전달`);
+    assert(directive.includes("seamlessLoop=true"), `[${i}] seamlessLoop 전달`);
+    assert(nl.includes(facings[i]), `[${i}] facing 자연어: ${facings[i]}`);
+    assert(nl.includes("walking"), `[${i}] 액션구(walking) 포함`);
+    assert(nl.includes("파란 갑옷 기사"), `[${i}] 설명 포함`);
+    assert(nl.includes("pixel art 16-bit"), `[${i}] style suffix 포함`);
+    assert(nl.includes("transparent background"), `[${i}] 배경 포함`);
+  });
+}
+
+// ── Case 7: 방향별 + referenceId → 매 방향에 동일 첨부 ──
+console.log("[Case 7] perDirection reference attach");
+{
+  const p: SpriteGenSubmit = {
+    ...base(),
+    directions: 2,
+    framesPerDir: 8,
+    perDirection: true,
+    referenceId: "gen-ref-9",
+  };
+  const msgs = buildSpriteMessagesPerDirection(p);
+  assert(msgs.length === 2, "2방향 → 2개 메시지");
+  assert(
+    msgs.every(m => m.attachmentGenerationIds.length === 1 && m.attachmentGenerationIds[0] === "gen-ref-9"),
+    "매 방향에 동일 referenceId 첨부",
+  );
+  assert(msgs.every(m => m.message.split("\n")[0].includes("cols=8")), "cols=framesPerDir(8)");
 }
 
 console.log("");

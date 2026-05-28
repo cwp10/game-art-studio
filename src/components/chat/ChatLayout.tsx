@@ -13,6 +13,7 @@ import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import {
   SpriteGenPanel,
   buildSpriteMessage,
+  buildSpriteMessagesPerDirection,
   resolveStyleSuffix,
   type SpriteGenSubmit,
 } from "@/components/editor/SpriteGenPanel";
@@ -581,6 +582,17 @@ export function ChatLayout() {
       setSpriteGen(null);
       // 스타일 프리셋 suffix 를 클라이언트에서 해석해 자연어에 결합(Composer 흐름과 동일 — 서버는 preset 모름).
       const suffix = await resolveStyleSuffix(payload.stylePresetId);
+      // 방향별 개별 생성 — 캐릭터 다방향 시트를 방향마다 단일방향 시트로 순차 N장 생성.
+      // 한 장에 모든 방향을 그리면 프레임 차별화가 희석돼 측면 보행 발 교차가 약하므로
+      // 방향마다 집중 생성한다. 한 장 스티칭은 범위 밖 — 각 방향이 별도 결과 카드로 누적.
+      // 순차 await 는 layer-split 와 동일한 검증된 패턴(각 완료 후 다음, generating 충돌 없음).
+      if (payload.perDirection && payload.subjectType === "character" && payload.directions > 1) {
+        const msgs = buildSpriteMessagesPerDirection(payload, suffix);
+        for (const m of msgs) {
+          await handleSend(m.message, { attachmentGenerationIds: m.attachmentGenerationIds });
+        }
+        return;
+      }
       const { message, attachmentGenerationIds } = buildSpriteMessage(payload, suffix);
       handleSend(message, { attachmentGenerationIds });
     },

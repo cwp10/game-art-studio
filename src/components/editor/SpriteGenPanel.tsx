@@ -4,6 +4,7 @@ import { Grid3x3, Sparkles, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
+import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 
 /**
  * SpriteGenPanel — Composer 의 [스프라이트시트 생성] 버튼 / 결과카드 [시트 만들기]
@@ -33,6 +34,12 @@ export type SpriteGenSubmit = {
   framesPerDir: number;
   /** effect 전용 총 프레임 수 → rows×cols. */
   effectFrames: number;
+  /**
+   * character & directions>1 전용. true 면 방향별로 directions=1 시트를 따로 N장 생성.
+   * 한 장에 24포즈를 그리면 프레임 차별화가 희석돼 측면 보행 발 교차가 약해지므로,
+   * 방향마다 집중 생성해 gait 품질을 높인다(부모가 순차 멀티 메시지로 분기).
+   */
+  perDirection?: boolean;
   /** 최종 그리드 (그리드 미리보기·마커 rows/cols 와 동일). */
   rows: number;
   cols: number;
@@ -138,8 +145,11 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
   const [description, setDescription] = useState("");
   const [background, setBackground] = useState<"transparent" | "white">("transparent");
   const [seamlessLoop, setSeamlessLoop] = useState(true);
+  const [perDirection, setPerDirection] = useState(false);
 
   const isCharacter = subjectType === "character";
+  // 방향별 개별 생성은 캐릭터 다방향에서만 의미 있음(directions=1·effect 면 숨김).
+  const canPerDirection = isCharacter && directions > 1;
   const preset = isCharacter ? charAction : effectKind;
   const isCustom = preset === "custom";
 
@@ -167,6 +177,7 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
       description: description.trim(),
       background,
       seamlessLoop,
+      perDirection: canPerDirection && perDirection,
       referenceId: reference?.generationId,
     });
   }
@@ -318,6 +329,25 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
             <p className="text-[11px] text-[color:var(--danger)]/90">
               ⓘ 공격·스킬도 캐릭터 모션만 그려집니다 — 슬래시·폭발 등 VFX 는 별도 [이펙트] 시트로 생성하세요.
             </p>
+
+            {/* 방향별 개별 생성 — 다방향에서만. 한 장에 모든 방향을 그리면 프레임 차별화가
+                희석돼 측면 보행 발 교차가 약해지므로, 방향마다 집중 생성해 품질↑(부모가 순차 N장). */}
+            {canPerDirection && (
+              <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={perDirection}
+                  onChange={e => setPerDirection(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-text-primary">방향별로 따로 생성 (품질↑)</span>
+                  <span className="block text-[11px] text-text-muted/70">
+                    각 방향을 따로 생성해 발 교차 품질↑ ({directions}장 생성)
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
         )}
 
@@ -520,6 +550,60 @@ export function buildSpriteMessage(
     message: `${directive}\n${nl}`,
     attachmentGenerationIds: payload.referenceId ? [payload.referenceId] : [],
   };
+}
+
+/**
+ * directionLabels(n) 의 행 라벨(예: "DOWN (toward viewer)", "LEFT", "DOWN-LEFT") →
+ * 단일 방향 시트 자연어용 facing 구. 측면(LEFT/RIGHT)은 side view, 정/후면은 front/back view.
+ */
+function facingPhrase(label: string): string {
+  if (label.startsWith("DOWN-")) return `facing ${label} (3/4 front view)`;
+  if (label.startsWith("UP-")) return `facing ${label} (3/4 back view)`;
+  if (label.startsWith("DOWN")) return "facing DOWN (front view)";
+  if (label.startsWith("UP")) return "facing UP (back view)";
+  if (label === "LEFT") return "facing LEFT (side view)";
+  if (label === "RIGHT") return "facing RIGHT (side view)";
+  return `facing ${label}`;
+}
+
+/**
+ * 방향별 개별 생성 — directions>1 캐릭터 시트를 방향마다 directions=1·rows=1·cols=framesPerDir
+ * 단일 방향 시트로 쪼갠 N개 메시지 빌더. 한 장에 모든 방향을 그리면 프레임 차별화가
+ * 희석돼(측면 보행 발 교차 약함) 방향마다 집중 생성한다. 부모(ChatLayout)가 순차 await 로
+ * N장을 개별 결과 카드로 생성한다(한 장 스티칭은 범위 밖 — 사용자가 개별 사용/조합).
+ *
+ * 각 메시지 마커는 단일 방향(directions=1, rows=1, cols=framesPerDir) — 백엔드가 cols>4 면
+ * auto-reshape(2×3 등) 처리. 자연어엔 buildSpriteMessage 와 동일한 액션/설명/스타일/배경에
+ * 더해 해당 방향 facing 구를 명시. 참조는 매 방향에 동일 첨부.
+ */
+export function buildSpriteMessagesPerDirection(
+  payload: SpriteGenSubmit,
+  stylePresetSuffix?: string | null,
+): Array<{ message: string; attachmentGenerationIds: string[] }> {
+  const labels = directionLabels(payload.directions as Directions);
+  // 방어: 단일 방향이거나 라벨이 없으면 단일 메시지로 폴백(분기 진입 조건은 부모가 게이팅).
+  if (labels.length === 0) return [buildSpriteMessage(payload, stylePresetSuffix)];
+
+  const { framesPerDir, anchorStrategy, seamlessLoop } = payload;
+  const directive =
+    `[spritesheet: subjectType=character; anchorStrategy=${anchorStrategy}; ` +
+    `directions=1; framesPerDir=${framesPerDir}; rows=1; cols=${framesPerDir}; seamlessLoop=${seamlessLoop}]`;
+
+  const actionPhrase = lookupPhrase(payload);
+  const attachmentGenerationIds = payload.referenceId ? [payload.referenceId] : [];
+
+  return labels.map(label => {
+    const nlParts: string[] = [];
+    nlParts.push(actionPhrase ? `캐릭터 ${actionPhrase} 모션 스프라이트 시트` : "캐릭터 모션 스프라이트 시트");
+    nlParts.push(facingPhrase(label));
+    if (payload.description) nlParts.push(payload.description);
+    if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
+    nlParts.push(payload.background === "white" ? "white background" : "transparent background");
+    return {
+      message: `${directive}\n${nlParts.join(", ")}`,
+      attachmentGenerationIds,
+    };
+  });
 }
 
 // 프리셋 key → 영문 자연어 구. custom 이면 customText 그대로.
