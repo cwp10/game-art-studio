@@ -75,6 +75,16 @@ function getSystemPrompt(): string {
   return cachedSystemPrompt!;
 }
 
+/**
+ * 세션 제목 — 선행 directive/attachment 마커([spritesheet: ...], [reference: ...],
+ * [mask: ...])를 벗겨 자연어 앞부분만 쓴다. 패널 생성 메시지가 마커로 시작해도
+ * 사이드바 제목이 "[spritesheet: subjectTy..." 로 더러워지지 않게.
+ */
+function deriveSessionTitle(message: string): string {
+  const cleaned = message.replace(/^(?:\s*\[[^\]]*\]\s*)+/, "").trim();
+  return (cleaned || message.trim()).slice(0, 40) || "새 세션";
+}
+
 export async function POST(req: NextRequest) {
   let body: ChatRequest;
   try {
@@ -108,7 +118,7 @@ async function runChat(
   let isNewSession = false;
   if (sessionId && !getSession(sessionId)) sessionId = undefined;
   if (!sessionId) {
-    const titleSeed = body.message.trim().slice(0, 40) || "새 세션";
+    const titleSeed = deriveSessionTitle(body.message);
     sessionId = createSession(titleSeed).id;
     isNewSession = true;
   }
@@ -292,7 +302,7 @@ async function runChat(
 
     send({ type: "message_completed", messageId: assistantMsg.id });
 
-    if (isNewSession) renameSession(sessionId, body.message.trim().slice(0, 40));
+    if (isNewSession) renameSession(sessionId, deriveSessionTitle(body.message));
     touchSession(sessionId);
   } catch (err) {
     const msg = (err as Error).message;
