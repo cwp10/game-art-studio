@@ -239,6 +239,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
               {downloading ? "저장 중" : "저장"}
             </button>
+            {prompt && (
+              <button
+                onClick={copyPrompt}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="이 이미지의 프롬프트를 클립보드에 복사"
+              >
+                <Copy size={12} /> {copied ? "복사됨" : "프롬프트 복사"}
+              </button>
+            )}
           </div>
         </div>
       </figcaption>
