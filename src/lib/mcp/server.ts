@@ -41,6 +41,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
+import { inferSubjectType } from "./spritesheet-classify.js";
 import { createGeneration, getGeneration } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -399,7 +400,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 피사체 종류·앵커 전략 해석 — 명시 param 우선, 없으면 키워드 추론 폴백.
         // subjectType 은 normalize 정렬·이펙트 가드의 결정적 입력 신호.
         const subjectType: SubjectType =
-          args.subjectType ?? (classifyAnchor(userPrompt, !!refId) === "effect" ? "effect" : "character");
+          args.subjectType ?? inferSubjectType(userPrompt, !!refId);
         const anchorStrategy: AnchorStrategy = args.anchorStrategy ?? "auto";
         // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
         const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
@@ -417,17 +418,39 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           : `(5) CHARACTER ANCHOR — keep the hip/waist near X=${cx}, Y=${cy}, feet on a consistent ground line, ` +
             `and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
 
+        // rule (1)/(3) 의 콘텐츠 열거는 시트 종류에 따라 분기.
+        // character 시트는 발산 VFX 를 콘텐츠로 전제하면 안 됨(③) — 몸·무기·천만 나열.
+        const containedContent = isEffectAnchor
+          ? "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes"
+          : "the character's body, weapon, and any flowing cape or robe";
+        const oversizeContent = isEffectAnchor
+          ? "especially a sweeping effect like a slash, blast, beam, or trail"
+          : "especially a large pose or a wide weapon swing";
+
+        // ③ 캐릭터 시트 이펙트 가드 — subjectType=character 면 액션 무관하게 항상 주입.
+        // 외부로 발산되는 액션/능력 VFX 만 금지, 캐릭터 고유 디자인은 허용.
+        const effectGuard = isEffectAnchor
+          ? ""
+          : `Render the character's body and its INTRINSIC design only. ` +
+            `Do NOT add action or ability visual effects: NO attack slash trails, ` +
+            `NO spell or magic particles, NO projectiles, NO emitted auras around the body, ` +
+            `NO motion lines, NO impact flashes, NO smoke, NO sparkles, NO extra decorative VFX. ` +
+            `The character's OWN intrinsic material is fine (e.g. a robot's status lights or ` +
+            `glowing core, a fire creature's flame body, a weapon that glows as part of its ` +
+            `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `;
+
         const decorated =
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           `Place exactly one animation frame per cell, filling every cell. ` +
           `CRITICAL framing rules (apply to EVERY cell): ` +
-          `(1) The ENTIRE frame content — the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
+          `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
           `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
-          `(3) If the content would be large (especially a sweeping effect like a slash, blast, beam, or trail), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
+          `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
           `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
           anchorRule +
+          effectGuard +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
@@ -772,40 +795,6 @@ async function generateGridTemplate(
     .toFile(cachePath);
   log(`generateGridTemplate v3: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
   return cachePath;
-}
-
-/**
- * 스프라이트시트 피사체 앵커 분류. "effect" 면 중앙 앵커(바닥 앵커 제거), 그 외 "character"(기존 동작).
- *
- * 결정적·보수적: 명백한 이펙트 키워드가 있고 캐릭터 키워드·참조 이미지가 없을 때만 "effect".
- * 캐릭터 단어가 함께 있으면(예: "화염 마법사") 캐릭터가 우선 → 회귀 방지. 모호하면 character.
- */
-function classifyAnchor(prompt: string, hasRef: boolean): "effect" | "character" {
-  if (hasRef) return "character"; // 참조 캐릭터가 있으면 캐릭터 시트
-  // 오케스트레이터가 모든 시트 프롬프트에 강제 주입하는 보일러플레이트는 분류에서 제외.
-  // (구버전 "character consistent across frames" 의 'character' 가 분류를 오염시킴.)
-  const p = prompt
-    .toLowerCase()
-    .replace(/(uniform cells,?\s*)?(character|subject) consistent across frames/g, "");
-  // 캐릭터를 명확히 가리키는 단어 — 있으면 항상 character.
-  const CHAR_WORDS = [
-    "캐릭터", "캐릭", "character", "소녀", "소년", "girl", "boy", "기사", "knight",
-    "전사", "warrior", "마법사", "wizard", "mage", "궁수", "archer", "사람", "인물",
-    "person", "man", "woman", "hero", "영웅", "몬스터", "monster", "동물", "animal",
-    "creature", "갑옷", "armor", "걷기", "walk", "run", "달리기", "점프", "jump",
-    "idle", "대기", "걸음", "뛰기",
-  ];
-  if (CHAR_WORDS.some(w => p.includes(w))) return "character";
-  // 명백한 VFX/이펙트 단어 — 캐릭터 단어가 없을 때만 효과로 판정.
-  const EFFECT_WORDS = [
-    "이펙트", "이팩트", "effect", "vfx", "슬래시", "slash", "베기", "참격", "검기",
-    "검광", "폭발", "폭팔", "explosion", "blast", "burst", "충격파", "shockwave",
-    "투사체", "projectile", "빔", "beam", "광선", "오라", "aura", "잔상", "trail",
-    "임팩트", "impact", "타격", "회오리", "소용돌이", "swirl", "스파크", "spark",
-    "파티클", "particle", "폭염", "불기둥", "화염구", "fireball",
-  ];
-  if (EFFECT_WORDS.some(w => p.includes(w))) return "effect";
-  return "character"; // 모호 → 기존(캐릭터) 동작 유지
 }
 
 /**
