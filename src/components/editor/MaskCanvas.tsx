@@ -2,6 +2,7 @@
 
 import { Brush, ChevronDown, Edit3, Eraser, Loader2, Maximize2, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { fitBox, rectRatioPoint, useZoomPan, ZoomPanControls } from "./useZoomPan";
 
 /**
  * MaskCanvas — 인페인트 마스크를 그리는 작은 캔버스 + 컨트롤.
@@ -123,10 +124,15 @@ export function MaskCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // 화면 표시 크기: 가로폭을 기준으로 등비 축소 → 패널 전체 폭 사용.
-  const scale = avail ? Math.min(1, avail.w / imageWidth) : Math.min(1, maxDisplayPx / imageWidth);
-  const displayW = Math.max(1, Math.round(imageWidth * scale));
-  const displayH = Math.max(1, Math.round(imageHeight * scale));
+  // 16:10 뷰박스 + contain-fit. fitScale 은 export 의 scale 로 재사용(inv=1/fitScale).
+  const zp = useZoomPan();
+  const { viewW, viewH, fitScale, displayW, displayH } = fitBox(
+    avail?.w ?? maxDisplayPx,
+    avail?.h ?? (maxDisplayPx * 10) / 16,
+    imageWidth,
+    imageHeight,
+  );
+  const scale = fitScale;
 
   // 1-a. 원본 이미지 load — imageUrl 변경 시만. (displayW/H 변경에 따른 redraw 와 분리해
   //       race 회피: 이전엔 displayW 가 useLayoutEffect 의 setAvail 로 바뀔 때마다 새 Image
@@ -210,10 +216,9 @@ export function MaskCanvas({
     if (s && s.points.length > 0) setStrokes(prev => [...prev, s]);
   }, []);
 
-  function pointerPos(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
+  // rect-ratio 매핑: getBoundingClientRect 가 zoom/pan transform 을 반영하므로 비율 역산으로
+  // 어떤 줌·팬에서도 정확한 display-px 좌표를 얻는다. (export 의 1/scale 역산은 그대로.)
+  const pointerPos = rectRatioPoint;
 
   // ── export & submit ────────────────────────────────────────────────────────
   function exportMaskDataUrl(): string {
@@ -287,46 +292,82 @@ export function MaskCanvas({
       <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">다시 그릴 영역을 brush 로 칠하세요.</p>
 
-        {/* 캔버스 영역 — flex-col 에서 squeeze 안 되게 shrink-0 */}
+        {/* 16:10 뷰박스 — 이미지를 contain-fit + 줌/팬. overflow-hidden 으로 줌 넘침 클립. */}
         <div
-          className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
-          style={{ width: displayW, height: displayH }}
+          className="relative mx-auto shrink-0 select-none overflow-hidden rounded-lg border border-border bg-bg-app"
+          style={{ width: viewW, height: viewH }}
         >
-          <canvas
-            ref={baseRef}
-            className="pointer-events-none absolute inset-0"
-            width={displayW}
-            height={displayH}
-          />
-          <canvas
-            ref={maskRef}
-            className="absolute inset-0 cursor-crosshair touch-none"
-            width={displayW}
-            height={displayH}
-            onPointerDown={e => {
-              // setPointerCapture 는 inactive pointer (합성 PointerEvent / 일부 brower edge case) 에서
-              // NotFoundError throw. capture 실패해도 stroke 자체는 진행하도록 silent skip.
-              try {
-                e.currentTarget.setPointerCapture(e.pointerId);
-              } catch {}
-              const { x, y } = pointerPos(e);
-              startStroke(x, y);
+          {/* 캔버스 스택 — 뷰박스 중앙에 두고 translate+scale 로 줌/팬. */}
+          <div
+            className="absolute"
+            style={{
+              width: displayW,
+              height: displayH,
+              left: "50%",
+              top: "50%",
+              transform: `translate(-50%, -50%) translate(${zp.pan.x}px, ${zp.pan.y}px) scale(${zp.zoom})`,
+              transformOrigin: "center",
             }}
-            onPointerMove={e => {
-              if (drawingRef.current == null) return;
-              const { x, y } = pointerPos(e);
-              continueStroke(x, y);
-            }}
-            onPointerUp={endStroke}
-            onPointerCancel={endStroke}
-          />
-          {/* 실행 중 오버레이 — 멈춘 게 아니라 생성 중임을 명확히 표시. */}
+          >
+            <canvas
+              ref={baseRef}
+              className="pointer-events-none absolute inset-0 bg-bg-card"
+              width={displayW}
+              height={displayH}
+            />
+            <canvas
+              ref={maskRef}
+              className={`absolute inset-0 touch-none ${zp.panMode ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"}`}
+              width={displayW}
+              height={displayH}
+              onPointerDown={e => {
+                // 이동 모드면 팬으로 소비하고 그리기 스킵.
+                if (zp.panMode) {
+                  zp.onPanPointerDown(e);
+                  return;
+                }
+                // setPointerCapture 는 inactive pointer (합성 PointerEvent / 일부 brower edge case) 에서
+                // NotFoundError throw. capture 실패해도 stroke 자체는 진행하도록 silent skip.
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {}
+                const { x, y } = pointerPos(e);
+                startStroke(x, y);
+              }}
+              onPointerMove={e => {
+                if (zp.panMode) {
+                  zp.onPanPointerMove(e);
+                  return;
+                }
+                if (drawingRef.current == null) return;
+                const { x, y } = pointerPos(e);
+                continueStroke(x, y);
+              }}
+              onPointerUp={e => {
+                if (zp.panMode) {
+                  zp.onPanPointerUp(e);
+                  return;
+                }
+                endStroke();
+              }}
+              onPointerCancel={e => {
+                if (zp.panMode) {
+                  zp.onPanPointerUp(e);
+                  return;
+                }
+                endStroke();
+              }}
+            />
+          </div>
+          {/* 실행 중 오버레이 — 멈춘 게 아니라 생성 중임을 명확히 표시. transform 밖(뷰박스 기준). */}
           {busy && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg bg-black/55 text-white">
               <Loader2 size={28} className="animate-spin" />
               <span className="text-xs">생성 중…</span>
             </div>
           )}
+          {/* 줌/팬 컨트롤 — 뷰박스 우하단, transform 밖이라 줌에 안 딸려감. */}
+          <ZoomPanControls zp={zp} />
         </div>
 
         {/* 도구 toolbar */}

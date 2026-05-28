@@ -3,6 +3,7 @@
 import { ChevronDown, ChevronUp, Download, Eraser, Layers, Loader2, RotateCcw, Scissors, Sparkles, Trash2, X, Zap } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { suggestLayerParts } from "@/lib/api/client";
+import { fitBox, rectRatioPoint, useZoomPan, ZoomPanControls } from "./useZoomPan";
 
 /**
  * LayerCanvas — 원본 이미지를 4색 brush 로 칠해 부위별 레이어로 분리.
@@ -161,10 +162,15 @@ export function LayerCanvas({
     setAvail({ w, h });
   }, []);
 
-  const cap = avail ? Math.min(maxDisplayPx, avail.w, avail.h) : maxDisplayPx;
-  const scale = Math.min(1, cap / Math.max(imageWidth, imageHeight));
-  const displayW = Math.max(1, Math.round(imageWidth * scale));
-  const displayH = Math.max(1, Math.round(imageHeight * scale));
+  // 16:10 뷰박스 + contain-fit. fitScale 은 export(buildColorMask) 의 scale 로 재사용.
+  const zp = useZoomPan();
+  const { viewW, viewH, fitScale, displayW, displayH } = fitBox(
+    avail?.w ?? maxDisplayPx,
+    avail?.h ?? maxDisplayPx,
+    imageWidth,
+    imageHeight,
+  );
+  const scale = fitScale;
 
   // 1-a. 원본 이미지 load
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -271,10 +277,9 @@ export function LayerCanvas({
     if (s && s.points.length > 0) setStrokes(prev => [...prev, s]);
   }, []);
 
-  function pointerPos(e: React.PointerEvent<HTMLCanvasElement>): { x: number; y: number } {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
+  // rect-ratio 매핑: getBoundingClientRect 가 zoom/pan transform 을 반영 → 비율 역산으로
+  // 어떤 줌·팬에서도 정확한 display-px 좌표. (export 의 1/scale 역산은 그대로.)
+  const pointerPos = rectRatioPoint;
 
   // ── export ────────────────────────────────────────────────────────────────
   // 색별 binary mask (원본 해상도, white=영역, transparent=그 외). 색 stroke 가 없거나
@@ -484,36 +489,72 @@ export function LayerCanvas({
               부위별로 색을 바꿔가며 칠하세요. 색마다 별도 PNG 가 생성됩니다.
             </p>
 
+            {/* 16:10 뷰박스 — contain-fit + 줌/팬. overflow-hidden 으로 줌 넘침 클립. */}
             <div
-              className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
-              style={{ width: displayW, height: displayH }}
+              className="relative mx-auto shrink-0 select-none overflow-hidden rounded-lg border border-border bg-bg-app"
+              style={{ width: viewW, height: viewH }}
             >
-              <canvas
-                ref={baseRef}
-                className="pointer-events-none absolute inset-0"
-                width={displayW}
-                height={displayH}
-              />
-              <canvas
-                ref={maskRef}
-                className="absolute inset-0 cursor-crosshair touch-none"
-                width={displayW}
-                height={displayH}
-                onPointerDown={e => {
-                  try {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                  } catch {}
-                  const { x, y } = pointerPos(e);
-                  startStroke(x, y);
+              {/* 캔버스 스택 — 뷰박스 중앙에 두고 translate+scale 로 줌/팬. */}
+              <div
+                className="absolute"
+                style={{
+                  width: displayW,
+                  height: displayH,
+                  left: "50%",
+                  top: "50%",
+                  transform: `translate(-50%, -50%) translate(${zp.pan.x}px, ${zp.pan.y}px) scale(${zp.zoom})`,
+                  transformOrigin: "center",
                 }}
-                onPointerMove={e => {
-                  if (drawingRef.current == null) return;
-                  const { x, y } = pointerPos(e);
-                  continueStroke(x, y);
-                }}
-                onPointerUp={endStroke}
-                onPointerCancel={endStroke}
-              />
+              >
+                <canvas
+                  ref={baseRef}
+                  className="pointer-events-none absolute inset-0 bg-bg-card"
+                  width={displayW}
+                  height={displayH}
+                />
+                <canvas
+                  ref={maskRef}
+                  className={`absolute inset-0 touch-none ${zp.panMode ? "cursor-grab active:cursor-grabbing" : "cursor-crosshair"}`}
+                  width={displayW}
+                  height={displayH}
+                  onPointerDown={e => {
+                    if (zp.panMode) {
+                      zp.onPanPointerDown(e);
+                      return;
+                    }
+                    try {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    } catch {}
+                    const { x, y } = pointerPos(e);
+                    startStroke(x, y);
+                  }}
+                  onPointerMove={e => {
+                    if (zp.panMode) {
+                      zp.onPanPointerMove(e);
+                      return;
+                    }
+                    if (drawingRef.current == null) return;
+                    const { x, y } = pointerPos(e);
+                    continueStroke(x, y);
+                  }}
+                  onPointerUp={e => {
+                    if (zp.panMode) {
+                      zp.onPanPointerUp(e);
+                      return;
+                    }
+                    endStroke();
+                  }}
+                  onPointerCancel={e => {
+                    if (zp.panMode) {
+                      zp.onPanPointerUp(e);
+                      return;
+                    }
+                    endStroke();
+                  }}
+                />
+              </div>
+              {/* 줌/팬 컨트롤 — 뷰박스 우하단, transform 밖이라 줌에 안 딸려감. */}
+              <ZoomPanControls zp={zp} />
             </div>
 
             <div
