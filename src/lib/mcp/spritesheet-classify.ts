@@ -123,14 +123,14 @@ export function directionLabels(n: Directions): string[] {
       return ["DOWN (toward viewer)", "LEFT", "RIGHT", "UP (away from viewer)"];
     case 8:
       return [
-        "DOWN (toward viewer)",
-        "DOWN-LEFT",
-        "LEFT",
-        "UP-LEFT",
-        "UP (away from viewer)",
-        "UP-RIGHT",
-        "RIGHT",
-        "DOWN-RIGHT",
+        "DOWN — walking straight toward the viewer, full front view, both legs visible",
+        "DOWN-LEFT — walking diagonally toward viewer-left (3/4 front-left view); body turned ~45° left, treat like a side-left view slightly angled toward the viewer; legs clearly stride forward-left",
+        "LEFT — walking directly left, pure side view, legs scissor in profile",
+        "UP-LEFT — walking diagonally away from viewer toward upper-left (3/4 back-left view); body turned ~45° left away from viewer; legs clearly stride",
+        "UP — walking directly away from viewer, full back view, both legs visible",
+        "UP-RIGHT — walking diagonally away from viewer toward upper-right (3/4 back-right view); body turned ~45° right away from viewer; legs clearly stride",
+        "RIGHT — walking directly right, pure side view, legs scissor in profile",
+        "DOWN-RIGHT — walking diagonally toward viewer-right (3/4 front-right view); body turned ~45° right, treat like a side-right view slightly angled toward the viewer; legs clearly stride forward-right",
       ];
     default:
       return [];
@@ -156,6 +156,9 @@ export function buildDirectionPrompt(n: Directions, framesPerDir: number): strin
     `Draw ALL ${n} rows — do NOT merge, skip, drop, or compress any row, and do NOT spread the characters into fewer than ${n} rows. ` +
     `Space the ${n} rows at EQUAL vertical intervals so each row occupies one horizontal band of the sheet; there must be ${n} distinct horizontal bands of characters, no more and no fewer. ` +
     `${rowLines} ` +
+    `DIAGONAL rows (DOWN-LEFT, DOWN-RIGHT, UP-LEFT, UP-RIGHT) are 3/4 perspective views — draw them like a side view rotated 45°: ` +
+    `the character walks at a diagonal angle, legs still scissor with clear stride (one leg forward, one back), ` +
+    `body is upright and walking normally (NOT crouching, NOT hunching). ` +
     `Keep identical character, identical action phase alignment across rows; only the viewing angle differs. `
   );
 }
