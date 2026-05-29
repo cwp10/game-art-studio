@@ -530,6 +530,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         const decorated =
           `${userPrompt}. ` +
+          gaitPrompt +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
@@ -543,7 +544,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           anchorRule +
           directionPrompt +
           effectGuard +
-          gaitPrompt +
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;

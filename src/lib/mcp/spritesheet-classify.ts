@@ -83,27 +83,77 @@ export function isLocomotion(prompt: string): boolean {
  */
 export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): string {
   const n = Math.max(2, framesPerDir);
-  const contactB = Math.floor(n / 2) + 1; // 반대 발이 닿는 프레임(대략 사이클 절반)
 
-  // 좌우 발 교대(alternation)가 gait 의 1순위 목표.
-  // 핵심 통찰: 모델이 망토·방패 흔들림을 걷기의 주 표현으로 대체하는 경향이 있다.
-  // "다리·발이 걷기의 유일한 척도"임을 명시하고, 망토 등 장신구는 다리 움직임의 부산물임을 못박는다.
+  // 앵커 배치 공식: extra=N-3 을 [seg1,seg2,seg3] 균등 배분.
+  // N=4→R=2,L=4 / N=6→R=3,L=5 / N=8→R=4,L=7 / N=10→R=4,L=8
+  const extra = Math.max(0, n - 3);
+  const base  = Math.floor(extra / 3);
+  const rem   = extra % 3;
+  const seg1  = base + (rem > 1 ? 1 : 0);
+  const seg2  = base + (rem > 0 ? 1 : 0);
+  const rightF = 1 + seg1 + 1;
+  const leftF  = rightF + seg2 + 1;
+
+  // 프레임 라벨 — 핵심 두 앵커만 상세히, 나머지는 간결하게.
+  const labels: string[] = [];
+  for (let f = 1; f <= n; f++) {
+    if (f === 1) {
+      labels.push(`F1=NEUTRAL(both feet together, upright)`);
+    } else if (f === rightF) {
+      labels.push(
+        `F${f}=★RIGHT-PLANT: RIGHT leg extended FORWARD(heel down), ` +
+        `LEFT leg pushed BEHIND(toe off) — widest stride, legs in a clear V shape`,
+      );
+    } else if (f === leftF) {
+      labels.push(
+        `F${f}=★LEFT-PLANT: LEFT leg extended FORWARD(heel down), ` +
+        `RIGHT leg pushed BEHIND(toe off) — exact mirror of F${rightF}`,
+      );
+    } else if (f < rightF) {
+      // idle → right: 오른발이 앞으로 열리는 중
+      const t = (f - 1) / (rightF - 1);
+      labels.push(
+        t < 0.5
+          ? `F${f}=right-opening(legs still close, right foot just lifting forward)`
+          : `F${f}=right-opening(right foot swinging forward, left foot pushing off)`,
+      );
+    } else if (f < leftF) {
+      // right → left: 다리가 몸 아래로 모이는 통과 단계 → 왼발이 앞으로 나감
+      const t = (f - rightF) / (leftF - rightF);
+      if (t <= 0.5) {
+        labels.push(
+          `F${f}=PASSING(legs converging under body — both feet nearly together below hips, ` +
+          `body at peak height; SIDE VIEW: legs form an X crossing under torso)`,
+        );
+      } else {
+        labels.push(
+          `F${f}=left-opening(left foot now swinging ahead of center, right foot planted; ` +
+          `legs beginning to separate again toward F${leftF})`,
+        );
+      }
+    } else {
+      // left → idle
+      const t = (f - leftF) / (n - leftF + 1);
+      labels.push(
+        t < 0.5
+          ? `F${f}=closing(left planted, right swinging forward, legs converging)`
+          : `F${f}=closing(both feet nearly together again, returning to neutral)`,
+      );
+    }
+  }
+
   return (
-    `WALK GAIT — the ONLY measure of a correct walk is the LEGS AND FEET. Cape, shield, weapon, and hair movement are secondary effects that follow the legs — they do NOT substitute for leg movement. ` +
-    `The character must visibly STEP by alternating which foot is forward each half of the cycle. ` +
-    // ① 좌우 발 교대 — 가장 중요, 발 위치로만 판정
-    `RULE 1 — ALTERNATING FEET (most important): F1 has ONE foot clearly forward and the OTHER foot clearly back (heel strike / toe-off). At F${contactB} the feet SWAP — the previously-back foot is now forward, the previously-front foot is now back. If F1 and F${contactB} show the same foot in front, the animation FAILS regardless of how much the cape moves. ` +
-    // ② 발이 보여야 함 — 가려지면 안 됨
-    `RULE 2 — FEET MUST BE VISIBLE: both feet must be clearly visible in every frame. Do NOT let capes, robes, shields, or weapons cover or hide the feet and lower legs. The feet are the proof of alternation — if they are hidden, the walk is unreadable. ` +
-    // ③ 큰 stride + 프레임 구분
-    `RULE 3 — BIG STRIDE AND DISTINCT FRAMES: in CONTACT frames the legs are WIDE apart (one clearly forward, one clearly back — never a narrow upright stance). Between contact frames the swinging leg passes under the body. Each frame must show a different leg position from its neighbors; do not repeat the same pose or make tiny jitter. ` +
-    // 측면 뷰 — 발 교차 scissor
-    `SIDE VIEWS (LEFT/RIGHT): legs SCISSOR in profile — CONTACT frames show one foot far forward and one far back on the ground line; between frames the legs cross under the torso. The feet must touch or approach the ground line and alternate which foot is leading. ` +
-    // 정면/후면 뷰 — 발이 가려지면 안 됨
-    `FRONT/BACK VIEWS: both feet must protrude clearly below the costume — draw the lower legs and feet explicitly; the cape/cloak must be SHORT enough that both feet are always visible below its hem (raise or trim the cape if needed). Left foot forward in F1, right foot forward in F${contactB}. ` +
-    `BACK VIEW (character walking away): this is especially important — do NOT let the cape cover the feet; the feet must clearly alternate left-right below the cape hem in every frame. ` +
+    `WALK CYCLE ALTERNATION — THE ONLY RULE THAT MATTERS: ` +
+    `frame F${rightF} has RIGHT foot forward / LEFT foot behind; ` +
+    `frame F${leftF} has LEFT foot forward / RIGHT foot behind. ` +
+    `F${rightF} and F${leftF} are MIRROR IMAGES at the legs — the leading foot is SWAPPED. ` +
+    `If F${rightF} and F${leftF} show the same foot leading, the animation is BROKEN — do not draw it that way. ` +
+    `Frame sequence: ${labels.join('; ')}. ` +
+    `SIDE VIEW: the silhouette of legs in F${rightF} is the reverse of F${leftF}. ` +
+    `FRONT/3-QUARTER VIEW: in F${rightF} the right boot protrudes forward; in F${leftF} the left boot protrudes forward. ` +
+    `Feet must be visible every frame (shorten cape/raise hem if needed). ` +
     (hasDirections
-      ? `Every row uses this SAME ${n}-frame foot-alternation cycle; only the camera angle differs between rows. `
+      ? `All direction rows use this same F1–F${n} sequence; only camera angle differs. `
       : "")
   );
 }
@@ -128,7 +178,7 @@ export function directionLabels(n: Directions): string[] {
         "DOWN-LEFT — walking diagonally toward viewer-left (3/4 front-left view); body turned ~45° left, treat like a side-left view slightly angled toward the viewer; legs clearly stride forward-left",
         "LEFT — walking directly left, pure side view, legs scissor in profile",
         "UP-LEFT — walking diagonally away from viewer toward upper-left (3/4 back-left view); body turned ~45° left away from viewer; legs clearly stride",
-        "UP — walking directly away from viewer, full back view; the cape/cloak is SHORT or RAISED so BOTH FEET and lower legs are fully visible below it; legs stride with clear left-right alternation",
+        "UP — walking directly away from viewer, full back view; both feet must peek out below the hem in every frame; legs stride with clear left-right alternation",
         "UP-RIGHT — walking diagonally away from viewer toward upper-right (3/4 back-right view); body turned ~45° right away from viewer; legs clearly stride",
         "RIGHT — walking directly right, pure side view, legs scissor in profile",
         "DOWN-RIGHT — walking diagonally toward viewer-right (3/4 front-right view); body turned ~45° right, treat like a side-right view slightly angled toward the viewer; legs clearly stride forward-right",
@@ -160,6 +210,8 @@ export function buildDirectionPrompt(n: Directions, framesPerDir: number): strin
     `DIAGONAL rows (DOWN-LEFT, DOWN-RIGHT, UP-LEFT, UP-RIGHT) are 3/4 perspective views — draw them like a side view rotated 45°: ` +
     `the character walks at a diagonal angle, legs still scissor with clear stride (one leg forward, one back), ` +
     `body is upright and walking normally (NOT crouching, NOT hunching). ` +
+    `BACK-FACING rows (UP, UP-LEFT, UP-RIGHT): both feet must be visible below the costume hem in every frame — ` +
+    `the feet peek out as they step, even if the cape is long. ` +
     `Keep identical character, identical action phase alignment across rows; only the viewing angle differs. `
   );
 }
