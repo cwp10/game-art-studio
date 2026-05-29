@@ -85,55 +85,24 @@ export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): s
   const n = Math.max(2, framesPerDir);
   const contactB = Math.floor(n / 2) + 1; // 반대 발이 닿는 프레임(대략 사이클 절반)
 
-  // 프레임별 다리 상태 표 — contact(WIDE) ↔ passing(crossing) 교대.
-  // 두 contact(F1, F(contactB))를 앵커로 잡고, 그 사이를 passing→swing 보간으로 채운다.
-  // 측면 기준 좌/우 발의 전후 위치를 프레임마다 명시해 모델이 near-duplicate 를 못 내게 강제.
-  const frameLines: string[] = [];
-  for (let f = 1; f <= n; f++) {
-    if (f === 1) {
-      frameLines.push(
-        `F1 CONTACT — front leg fully extended FORWARD (heel strike), back leg fully extended BEHIND (toe off); legs WIDE apart, maximum stride.`,
-      );
-    } else if (f === contactB) {
-      frameLines.push(
-        `F${f} CONTACT (mirror of F1) — the OTHER leg now fully FORWARD, the previously-front leg now BEHIND; legs WIDE apart, maximum stride, opposite of F1.`,
-      );
-    } else if (f < contactB) {
-      // F1 → contactB 사이: 앞다리가 닫히고 뒷다리가 몸 아래로 올라오는 first-half passing.
-      const half = (f - 1) / (contactB - 1); // 0..1
-      frameLines.push(
-        half < 0.5
-          ? `F${f} PUSH-OFF — back leg lifts off the ground and starts swinging forward; front leg bears weight; stance narrowing from F1.`
-          : `F${f} PASSING — the swinging leg crosses UNDER the torso, both knees close together and overlapping in profile; nearly single-leg silhouette.`,
-      );
-    } else {
-      // contactB → N 사이: mirror half 의 push-off/passing(F1 으로 다시 닫힘).
-      const half = (f - contactB) / (n - contactB + 1); // 0..1
-      frameLines.push(
-        half < 0.5
-          ? `F${f} PUSH-OFF (mirror) — the other back leg lifts and swings forward; opposite weight-bearing leg from the first half.`
-          : `F${f} PASSING (mirror) — legs cross UNDER the torso again, knees overlapping; this pose flows straight back into F1.`,
-      );
-    }
-  }
-
+  // 좌우 발 교대(alternation)가 gait 의 1순위 목표. 사이클의 두 CONTACT 앵커
+  // (F1, F(contactB))를 "반대 발이 앞으로" 로 못박고, 그 사이는 PASSING 으로 연결한다.
+  // 장황한 per-frame 표 대신 두 앵커 + PASSING 만 명시 → 모델 혼란 최소화.
   return (
-    `WALK/RUN GAIT (CRITICAL — every frame MUST be a DISTINCTLY different leg pose): ` +
-    `Across these ${n} frames depict ONE full walk cycle as a strict per-frame leg choreography. ` +
-    `Use this EXACT per-frame leg phase: ${frameLines.join(" ")} ` +
-    // 차별화 강제 — near-duplicate 금지.
-    `DIFFERENTIATION (non-negotiable): NO two frames may look the same or near-duplicate. ` +
-    `If any two frames have a similar leg pose the animation FAILS — each frame must be visibly distinguishable by leg position alone. ` +
-    `Do NOT keep a foot static, do NOT merely twitch one leg, do NOT draw the same standing pose with small jitter. ` +
-    // stride 크기 강제.
-    `STRIDE: in the CONTACT frames the legs must be WIDE apart with a LARGE stride — clearly one leg forward and one leg back, never a narrow upright stance. ` +
-    // 측면 crossing 강조.
-    `SIDE VIEWS (facing LEFT or RIGHT): the legs SCISSOR in profile — in CONTACT frames one leg reaches far forward and the other far back; ` +
-    `in PASSING frames the two legs visually OVERLAP/CROSS under the body so it briefly looks like a single leg. Bend the knees; add a slight up/down body bob through the cycle. ` +
-    // front/back view 좌우 다리 교대.
-    `FRONT/BACK VIEWS (facing the viewer or away): alternate which leg steps forward each half-cycle (front leg in F1, opposite leg in F${contactB}), swing the arms oppositely, and add the same slight up/down body bob. ` +
+    `WALK GAIT — the #1 goal is ALTERNATING FEET. The character must clearly STEP, swapping which foot is forward each half of the cycle. ` +
+    `THREE rules, in priority order: ` +
+    // ① 좌우 발 교대 (최우선·최강조)
+    `(1) ALTERNATION (most important): across these ${n} frames there are two CONTACT poses — at F1 ONE foot is planted FAR FORWARD, and at F${contactB} the OPPOSITE foot is FAR FORWARD (LEFT foot forward in F1, then RIGHT foot forward in F${contactB}, then back to LEFT). The forward foot MUST swap between these two frames; if the same foot leads in both, the walk FAILS. ` +
+    // ② 큰 stride
+    `(2) BIG STRIDE: in both CONTACT frames the legs are WIDE apart — one leg reaching clearly forward, the other clearly back. Never a narrow upright standing stance. ` +
+    // ③ 인접 프레임 구분 (near-duplicate 금지)
+    `(3) DISTINCT FRAMES: every frame must differ from its neighbors by LEG POSITION alone. Between the two CONTACT frames the swinging leg PASSES under the body (knees together, briefly a near-single-leg silhouette) and the legs open back out to the opposite contact. NO two frames may look the same; do not draw the same standing pose with small jitter, do not keep a foot static. ` +
+    // 측면: scissor 교차 유지
+    `SIDE VIEWS (facing LEFT or RIGHT): the legs SCISSOR in profile — in CONTACT frames one leg far forward and one far back, in the between frames they OVERLAP/CROSS under the body. Bend the knees and add a slight up/down body bob. ` +
+    // 정면/후면: 다리·발이 망토에 가려지지 않게 + 발 교대 가시화
+    `FRONT/BACK VIEWS (facing the viewer or away): the legs and feet must remain CLEARLY VISIBLE below the cape — do not let the cape cover the legs. Clearly alternate which foot steps forward each half-cycle (one foot forward in F1, the other foot forward in F${contactB}), keep the stride wide so both legs read distinctly, and swing the arms oppositely. ` +
     (hasDirections
-      ? `Every row uses this SAME ${n}-frame per-frame leg choreography and the SAME phase alignment; ONLY the camera viewing angle differs between rows. `
+      ? `Every row uses this SAME ${n}-frame cycle with the SAME alternating-foot phase; ONLY the camera viewing angle differs between rows. `
       : "")
   );
 }
@@ -182,7 +151,11 @@ export function buildDirectionPrompt(n: Directions, framesPerDir: number): strin
   return (
     `This is a DIRECTIONAL sheet: each ROW is one facing direction, ` +
     `the SAME character and the SAME ${framesPerDir}-frame action cycle, ` +
-    `only the camera facing changes between rows. ${rowLines} ` +
+    `only the camera facing changes between rows. ` +
+    `The image has EXACTLY ${n} horizontal rows (bands), one per direction, stacked top to bottom. ` +
+    `Draw ALL ${n} rows — do NOT merge, skip, drop, or compress any row, and do NOT spread the characters into fewer than ${n} rows. ` +
+    `Space the ${n} rows at EQUAL vertical intervals so each row occupies one horizontal band of the sheet; there must be ${n} distinct horizontal bands of characters, no more and no fewer. ` +
+    `${rowLines} ` +
     `Keep identical character, identical action phase alignment across rows; only the viewing angle differs. `
   );
 }

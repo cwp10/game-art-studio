@@ -36,6 +36,7 @@ import sharp from "sharp";
 import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
 import {
   chromaKeyFile,
+  detectFill,
   isGreenDominant,
   normalizeSpritesheetCells,
   type AnchorStrategy,
@@ -49,7 +50,7 @@ import {
   buildGaitPrompt,
   type Directions,
 } from "./spritesheet-classify.js";
-import { createGeneration, getGeneration } from "../db/repo/generations.js";
+import { createGeneration, getGeneration, deleteGeneration } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
 import {
@@ -349,10 +350,18 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           log(`make_spritesheet auto-reshape: 1×${n} → ${rows}×${cols}`);
         }
 
-        // cellHeight: 2048 기준 정사각형. rows=1(4프레임 이하 가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
+        // cellHeight: 정사각형. rows=1(4프레임 이하 가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
+        // 다행 그리드: 후처리(line 575)가 결과를 canvasW×canvasH 로 강제 리사이즈하므로 캔버스 총크기는
+        // 다운스트림 작업 픽셀량만 좌우한다. 셀당 최소 256px 를 보장(MIN_CELL)해 후처리·익스포트가
+        // 충분한 해상도를 받게 하되, max(rows,cols) 가 적은 그리드는 셀을 512 까지 키운다.
+        // NOTE: codex 백엔드(gpt-image image_gen)의 네이티브 출력은 1536×1024 계열로 고정 — 장축 1536px 가
+        // 모델이 실제로 그릴 수 있는 상한이다(data/logs codex 로그 pixelWidth:1536 / 기존 비시트 출력
+        // 1024·1536 으로 확인). 따라서 셀 수가 많으면(예: 8×12 → 장축 12셀 → 모델 실효 셀 1536/12≈128px)
+        // 캔버스를 키워도 모델이 그 안에 더 디테일하게 못 그린다. 이 경우 방향(행)단위 분할 생성(2)이 필요.
+        const MIN_CELL = 256;
         const cellH = rows === 1
           ? 768
-          : Math.min(512, Math.floor(2048 / Math.max(rows, cols)));
+          : Math.max(MIN_CELL, Math.min(512, Math.floor(2048 / Math.max(rows, cols))));
         const cellW = rows === 1
           ? Math.min(Math.round(cellH * 2), Math.floor(6144 / cols))
           : cellH;
@@ -495,6 +504,22 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const directionPrompt =
           isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
 
+        // ②-b 행(방향) 개수 강제 — 모델이 directions 행을 fewer 줄로 압축하는 회귀 방지.
+        // directionPrompt 와 동일 가드(isCharacter && directions). 레이아웃 설명에 직접 주입.
+        const rowCountRule =
+          isCharacter && directions
+            ? `The sheet MUST have EXACTLY ${rows} horizontal rows of cells (one row per direction), filled from top to bottom. ` +
+              `Draw all ${rows} rows — do NOT compress, merge, or omit rows, do NOT leave any row empty, and keep EQUAL vertical spacing between the ${rows} rows. `
+            : "";
+
+        // ②-c 열(프레임) 개수 강제 — 모델이 cols 프레임을 fewer 열로 압축(중앙/끝 빈 열)하는 회귀 방지.
+        // rowCountRule 과 동일 가드·대칭 문구. 각 방향 행이 cols 프레임을 가로로 빠짐없이 채우게 한다.
+        const colCountRule =
+          isCharacter && directions
+            ? `Each row MUST contain EXACTLY ${cols} frames placed left to right, filling every column. ` +
+              `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
+            : "";
+
         // 걷기/달리기 등 보행: 한 사이클의 프레임 수 인지형 gait — 좌우 발 교차 강제.
         // 방향 시트면 한 행(=cols 프레임)이 한 사이클; 비방향 시트는 전체 셀(rows*cols)이
         // 행 우선 순서로 한 사이클. (rows=1 auto-reshape 후에도 총 프레임 기준으로 일관.)
@@ -507,6 +532,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           `${userPrompt}. ` +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
+          rowCountRule +
+          colCountRule +
           `Place exactly one animation frame per cell, filling every cell. ` +
           `CRITICAL framing rules (apply to EVERY cell): ` +
           `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
@@ -544,46 +571,111 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                 : cellH - paddingBottom - 1; // feet
         const anchorPivot = { x: cx, y: anchorY };
 
-        const mcpResult = await runImageTool({
-          name,
-          kind: "spritesheet",
-          prompt: decorated,
-          inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
-          overrideInputPaths,                         // Codex 실제 입력 순서 제어
-          params: {
-            seamlessLoop,
-            subjectType,
-            anchorStrategy,
-            directions: directions ?? undefined,
-            anchor: anchorPivot,
-            rows,
-            cols,
-            cellW,
-            cellH,
-            fps: 12,
-          },
-          sessionId,
-        });
-        // ── 후처리 파이프라인 ──────────────────────────────────────────────
-        // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
-        // 2) wantsTransparent: #00ff00 chroma-key → alpha 0 변환
-        const genId: string | undefined = mcpResult?.structuredContent?.generationId;
-        if (genId) {
-          const filePath = imagePathFor(genId);
-          try {
-            const resizeTmp = `${filePath}.resize.tmp`;
-            await sharp(filePath)
-              .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
-              .png()
-              .toFile(resizeTmp);
-            fs.renameSync(resizeTmp, filePath);
-            log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
+        // ── 빈 셀 자동 재생성 루프 ──────────────────────────────────────────
+        // 모델이 그리드를 100% 못 채우는 가챠(신뢰성 ~50%)를 재시도로 흡수한다.
+        // 방향 캐릭터 시트(isCharacter && directions)에서만 재시도 — 단일/이펙트 등 비방향
+        // 시트는 1회로(불필요한 재생성·과금 방지). decorated/overrideInputPaths/anchorPivot 은
+        // 시도 간 불변(같은 프롬프트로 재생성).
+        const retryEnabled = isCharacter && !!directions;
+        const MAX_RETRIES = retryEnabled ? 2 : 0; // 총 최대 3시도(방향 시트), 1시도(그 외)
+        const spritesheetParams = {
+          seamlessLoop,
+          subjectType,
+          anchorStrategy,
+          directions: directions ?? undefined,
+          anchor: anchorPivot,
+          rows,
+          cols,
+          cellW,
+          cellH,
+          fps: 12,
+        };
 
-            if (wantsTransparent) {
-              // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
-              await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
-              log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
+        let best: Awaited<ReturnType<typeof runImageTool>> | null = null;
+        let bestFilled = -1;
+        let cumulativeMs = 0;
+        let lastStats: Awaited<ReturnType<typeof detectFill>> | null = null;
+
+        const cleanupResult = (r: Awaited<ReturnType<typeof runImageTool>>) => {
+          const gid = r?.structuredContent?.generationId;
+          if (!gid) return;
+          try {
+            const fp = imagePathFor(gid);
+            if (fs.existsSync(fp)) fs.unlinkSync(fp);
+            deleteGeneration(gid);
+            log(`make_spritesheet retry: discarded gen=${gid} (lower fill)`);
+          } catch (e) {
+            log(`make_spritesheet retry cleanup fail gen=${gid}: ${(e as Error).message}`);
+          }
+        };
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+          const mcpResult = await runImageTool({
+            name,
+            kind: "spritesheet",
+            prompt: decorated,
+            inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
+            overrideInputPaths,                         // Codex 실제 입력 순서 제어
+            params: spritesheetParams,
+            sessionId,
+            progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
+          });
+          cumulativeMs += mcpResult?.structuredContent?.elapsedMs ?? 0;
+
+          // ── 후처리 1단계: 리사이즈 + chroma-key (normalize 는 best 선택 후 1회만) ──
+          // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
+          // 2) wantsTransparent: chroma-key → alpha 0 변환
+          const genId: string | undefined = mcpResult?.structuredContent?.generationId;
+          let stats: Awaited<ReturnType<typeof detectFill>> | null = null;
+          if (genId) {
+            const filePath = imagePathFor(genId);
+            try {
+              const resizeTmp = `${filePath}.resize.tmp`;
+              await sharp(filePath)
+                .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
+                .png()
+                .toFile(resizeTmp);
+              fs.renameSync(resizeTmp, filePath);
+              log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
+
+              if (wantsTransparent) {
+                // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
+                await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
+                log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
+              }
+              // 빈 셀 감지 — 방향 시트만(비방향은 항상 1회 채택이라 측정 불필요).
+              if (retryEnabled) {
+                stats = await detectFill(filePath, rows, cols, log);
+              }
+            } catch (e) {
+              log(`make_spritesheet post-process fail: ${(e as Error).message}`);
             }
+          }
+
+          // best 선택: filledCells 가 더 크면 교체(이전 best 정리), 아니면 이번 결과 정리.
+          // 비방향(stats=null)은 첫 결과를 그대로 best 로(MAX_RETRIES=0 이라 루프 1회).
+          const filled = stats ? stats.filledCells : Number.MAX_SAFE_INTEGER;
+          if (filled > bestFilled) {
+            if (best) cleanupResult(best);
+            best = mcpResult;
+            bestFilled = filled;
+            lastStats = stats;
+          } else {
+            cleanupResult(mcpResult);
+          }
+
+          if (!stats || stats.complete) break;
+          log(
+            `make_spritesheet attempt ${attempt + 1}/${MAX_RETRIES + 1}: ` +
+              `${stats.filledCells}/${stats.expected} cells — ${stats.complete ? "complete" : "retrying"}`,
+          );
+        }
+
+        // ── 후처리 2단계: best 에만 normalize 적용 → 최종 반환 ──
+        const finalGenId: string | undefined = best?.structuredContent?.generationId;
+        if (finalGenId) {
+          const filePath = imagePathFor(finalGenId);
+          try {
             // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 시트-전역 단일
             // scale-to-fit + 앵커 전략별 정렬. 셀 경계 이탈·잔재를 후처리로 흡수한다.
             await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
@@ -591,12 +683,24 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               subjectType,
               log,
             });
-            log(`make_spritesheet normalized gen=${genId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
+            log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
+          // 미완으로 재시도 소진 시 경고(몇/몇 셀) — 무한루프·과금폭주 금지, best 로 진행.
+          if (retryEnabled && lastStats && !lastStats.complete) {
+            log(
+              `make_spritesheet WARNING: ${MAX_RETRIES + 1} attempts exhausted, ` +
+                `best fill ${lastStats.filledCells}/${lastStats.expected} cells (incomplete) — proceeding with best`,
+            );
+          }
         }
-        return mcpResult;
+
+        // structuredContent shape 불변. elapsedMs 만 누적값으로 덮어쓴다(재시도 총 소요).
+        if (best?.structuredContent) {
+          best.structuredContent.elapsedMs = cumulativeMs;
+        }
+        return best!;
       }
 
       case "edit_image":
@@ -943,8 +1047,10 @@ async function runImageTool(spec: {
   paletteOnly?: boolean;
   params?: Record<string, unknown>;
   sessionId: string | null;
+  /** 진행 보고 detail 에 붙일 접두사(예: 재시도 "attempt 2/3"). 사용자가 재시도 중임을 알게. */
+  progressPrefix?: string;
 }) {
-  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId } = spec;
+  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId, progressPrefix } = spec;
   const persistedKind = storeKind ?? kind;
 
   // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
@@ -995,8 +1101,9 @@ async function runImageTool(spec: {
   const backend = await selectImageBackend();
   const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths, styleRefPath, paletteOnly, params };
   const result = await backend.execute(job, (stage, detail) => {
-    log(`  ${jobId} stage=${stage}${detail ? " " + detail : ""}`);
-    appendProgress(stage, detail);
+    const d = progressPrefix ? `[${progressPrefix}]${detail ? " " + detail : ""}` : detail;
+    log(`  ${jobId} stage=${stage}${d ? " " + d : ""}`);
+    appendProgress(stage, d);
   });
 
   const gen = createGeneration({
