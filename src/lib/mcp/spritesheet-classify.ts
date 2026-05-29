@@ -85,24 +85,24 @@ export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): s
   const n = Math.max(2, framesPerDir);
   const contactB = Math.floor(n / 2) + 1; // 반대 발이 닿는 프레임(대략 사이클 절반)
 
-  // 좌우 발 교대(alternation)가 gait 의 1순위 목표. 사이클의 두 CONTACT 앵커
-  // (F1, F(contactB))를 "반대 발이 앞으로" 로 못박고, 그 사이는 PASSING 으로 연결한다.
-  // 장황한 per-frame 표 대신 두 앵커 + PASSING 만 명시 → 모델 혼란 최소화.
+  // 좌우 발 교대(alternation)가 gait 의 1순위 목표.
+  // 핵심 통찰: 모델이 망토·방패 흔들림을 걷기의 주 표현으로 대체하는 경향이 있다.
+  // "다리·발이 걷기의 유일한 척도"임을 명시하고, 망토 등 장신구는 다리 움직임의 부산물임을 못박는다.
   return (
-    `WALK GAIT — the #1 goal is ALTERNATING FEET. The character must clearly STEP, swapping which foot is forward each half of the cycle. ` +
-    `THREE rules, in priority order: ` +
-    // ① 좌우 발 교대 (최우선·최강조)
-    `(1) ALTERNATION (most important): across these ${n} frames there are two CONTACT poses — at F1 ONE foot is planted FAR FORWARD, and at F${contactB} the OPPOSITE foot is FAR FORWARD (LEFT foot forward in F1, then RIGHT foot forward in F${contactB}, then back to LEFT). The forward foot MUST swap between these two frames; if the same foot leads in both, the walk FAILS. ` +
-    // ② 큰 stride
-    `(2) BIG STRIDE: in both CONTACT frames the legs are WIDE apart — one leg reaching clearly forward, the other clearly back. Never a narrow upright standing stance. ` +
-    // ③ 인접 프레임 구분 (near-duplicate 금지)
-    `(3) DISTINCT FRAMES: every frame must differ from its neighbors by LEG POSITION alone. Between the two CONTACT frames the swinging leg PASSES under the body (knees together, briefly a near-single-leg silhouette) and the legs open back out to the opposite contact. NO two frames may look the same; do not draw the same standing pose with small jitter, do not keep a foot static. ` +
-    // 측면: scissor 교차 유지
-    `SIDE VIEWS (facing LEFT or RIGHT): the legs SCISSOR in profile — in CONTACT frames one leg far forward and one far back, in the between frames they OVERLAP/CROSS under the body. Bend the knees and add a slight up/down body bob. ` +
-    // 정면/후면: 다리·발이 망토에 가려지지 않게 + 발 교대 가시화
-    `FRONT/BACK VIEWS (facing the viewer or away): the legs and feet must remain CLEARLY VISIBLE below the cape — do not let the cape cover the legs. Clearly alternate which foot steps forward each half-cycle (one foot forward in F1, the other foot forward in F${contactB}), keep the stride wide so both legs read distinctly, and swing the arms oppositely. ` +
+    `WALK GAIT — the ONLY measure of a correct walk is the LEGS AND FEET. Cape, shield, weapon, and hair movement are secondary effects that follow the legs — they do NOT substitute for leg movement. ` +
+    `The character must visibly STEP by alternating which foot is forward each half of the cycle. ` +
+    // ① 좌우 발 교대 — 가장 중요, 발 위치로만 판정
+    `RULE 1 — ALTERNATING FEET (most important): F1 has ONE foot clearly forward and the OTHER foot clearly back (heel strike / toe-off). At F${contactB} the feet SWAP — the previously-back foot is now forward, the previously-front foot is now back. If F1 and F${contactB} show the same foot in front, the animation FAILS regardless of how much the cape moves. ` +
+    // ② 발이 보여야 함 — 가려지면 안 됨
+    `RULE 2 — FEET MUST BE VISIBLE: both feet must be clearly visible in every frame. Do NOT let capes, robes, shields, or weapons cover or hide the feet and lower legs. The feet are the proof of alternation — if they are hidden, the walk is unreadable. ` +
+    // ③ 큰 stride + 프레임 구분
+    `RULE 3 — BIG STRIDE AND DISTINCT FRAMES: in CONTACT frames the legs are WIDE apart (one clearly forward, one clearly back — never a narrow upright stance). Between contact frames the swinging leg passes under the body. Each frame must show a different leg position from its neighbors; do not repeat the same pose or make tiny jitter. ` +
+    // 측면 뷰 — 발 교차 scissor
+    `SIDE VIEWS (LEFT/RIGHT): legs SCISSOR in profile — CONTACT frames show one foot far forward and one far back on the ground line; between frames the legs cross under the torso. The feet must touch or approach the ground line and alternate which foot is leading. ` +
+    // 정면/후면 뷰 — 발이 가려지면 안 됨
+    `FRONT/BACK VIEWS: both feet must protrude clearly below the costume — draw the lower legs and feet explicitly; shorten or raise the cape so the feet are never hidden. Left foot forward in F1, right foot forward in F${contactB}. ` +
     (hasDirections
-      ? `Every row uses this SAME ${n}-frame cycle with the SAME alternating-foot phase; ONLY the camera viewing angle differs between rows. `
+      ? `Every row uses this SAME ${n}-frame foot-alternation cycle; only the camera angle differs between rows. `
       : "")
   );
 }
