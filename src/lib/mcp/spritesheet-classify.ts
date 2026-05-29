@@ -100,7 +100,8 @@ export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): s
     // 측면 뷰 — 발 교차 scissor
     `SIDE VIEWS (LEFT/RIGHT): legs SCISSOR in profile — CONTACT frames show one foot far forward and one far back on the ground line; between frames the legs cross under the torso. The feet must touch or approach the ground line and alternate which foot is leading. ` +
     // 정면/후면 뷰 — 발이 가려지면 안 됨
-    `FRONT/BACK VIEWS: both feet must protrude clearly below the costume — draw the lower legs and feet explicitly; shorten or raise the cape so the feet are never hidden. Left foot forward in F1, right foot forward in F${contactB}. ` +
+    `FRONT/BACK VIEWS: both feet must protrude clearly below the costume — draw the lower legs and feet explicitly; the cape/cloak must be SHORT enough that both feet are always visible below its hem (raise or trim the cape if needed). Left foot forward in F1, right foot forward in F${contactB}. ` +
+    `BACK VIEW (character walking away): this is especially important — do NOT let the cape cover the feet; the feet must clearly alternate left-right below the cape hem in every frame. ` +
     (hasDirections
       ? `Every row uses this SAME ${n}-frame foot-alternation cycle; only the camera angle differs between rows. `
       : "")
@@ -127,7 +128,7 @@ export function directionLabels(n: Directions): string[] {
         "DOWN-LEFT — walking diagonally toward viewer-left (3/4 front-left view); body turned ~45° left, treat like a side-left view slightly angled toward the viewer; legs clearly stride forward-left",
         "LEFT — walking directly left, pure side view, legs scissor in profile",
         "UP-LEFT — walking diagonally away from viewer toward upper-left (3/4 back-left view); body turned ~45° left away from viewer; legs clearly stride",
-        "UP — walking directly away from viewer, full back view, both legs visible",
+        "UP — walking directly away from viewer, full back view; the cape/cloak is SHORT or RAISED so BOTH FEET and lower legs are fully visible below it; legs stride with clear left-right alternation",
         "UP-RIGHT — walking diagonally away from viewer toward upper-right (3/4 back-right view); body turned ~45° right away from viewer; legs clearly stride",
         "RIGHT — walking directly right, pure side view, legs scissor in profile",
         "DOWN-RIGHT — walking diagonally toward viewer-right (3/4 front-right view); body turned ~45° right, treat like a side-right view slightly angled toward the viewer; legs clearly stride forward-right",

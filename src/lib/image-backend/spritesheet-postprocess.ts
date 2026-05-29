@@ -149,7 +149,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = 3;
+  const DESPILL_RADIUS = 5; // 3→5: 발/테두리 2~3px fringe 녹색 잔재 흡수
   const bgDist = new Uint8Array(N).fill(255);
   {
     const bfs: number[] = [];
