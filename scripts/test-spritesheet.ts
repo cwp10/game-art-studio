@@ -11,6 +11,7 @@ import path from "node:path";
 import sharp from "sharp";
 import {
   chromaKeyFile,
+  detectFill,
   normalizeSpritesheetCells,
 } from "../src/lib/image-backend/spritesheet-postprocess";
 
@@ -451,6 +452,65 @@ async function caseF() {
   assert(haloGreen < 30, `F3: 옷 외부 녹색 잔여(halo+포켓) 미미 (${haloGreen}px < 30)`);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// CASE G: detectFill — 빈 셀 감지(합성: 완전 8×12 vs 7×11 누락) + 실파일 회귀
+// ════════════════════════════════════════════════════════════════════════════
+async function caseG() {
+  console.log("\n=== CASE G: detectFill — 빈 셀 감지 (8x12 완전 / 7x11 누락) ===");
+  const cols = 12, rows = 8, cellW = 128, cellH = 128;
+  const W = cellW * cols, H = cellH * rows;
+  const TRANSPARENT: RGBA = [0, 0, 0, 0];
+
+  // 셀(c,r) 중앙에 유의미 블록(셀의 ~14% — substantialPx=1% 임계 한참 위)을 투명 배경에 그린다.
+  function drawFilled(buf: Buffer, c: number, r: number) {
+    const bw = Math.round(cellW * 0.38), bh = Math.round(cellH * 0.38);
+    const x0 = c * cellW + Math.round((cellW - bw) / 2);
+    const y0 = r * cellH + Math.round((cellH - bh) / 2);
+    fillRect(buf, W, x0, y0, x0 + bw, y0 + bh, GRAY);
+  }
+
+  // (1) 완전 8×12 → complete=true, filledCells=96.
+  {
+    const buf = makeCanvas(W, H, TRANSPARENT);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) drawFilled(buf, c, r);
+    const fp = await writePng(buf, W, H, "caseG_full.png");
+    const s = await detectFill(fp, rows, cols, log);
+    assert(s.complete === true, `G1: 완전 8×12 → complete=true (got ${s.complete})`);
+    assert(s.filledCells === 96, `G1b: 완전 8×12 → filledCells=96 (got ${s.filledCells})`);
+    assert(s.rowBands === 8 && s.minColBandsPerRow === 12,
+      `G1c: rowBands=8 minColBandsPerRow=12 (got ${s.rowBands}/${s.minColBandsPerRow})`);
+  }
+
+  // (2) 7행×11열만 (마지막 행 r7 통째 + 마지막 열 c11 전체 빔) → complete=false, filledCells=77.
+  {
+    const buf = makeCanvas(W, H, TRANSPARENT);
+    for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols - 1; c++) drawFilled(buf, c, r);
+    const fp = await writePng(buf, W, H, "caseG_partial.png");
+    const s = await detectFill(fp, rows, cols, log);
+    assert(s.complete === false, `G2: 7×11 누락 → complete=false (got ${s.complete})`);
+    assert(s.filledCells === 77, `G2b: 7×11 누락 → filledCells=77 (got ${s.filledCells})`);
+    assert(s.rowBands === 7, `G2c: rowBands=7 (got ${s.rowBands})`);
+  }
+
+  // (3) 실파일 회귀(이미 생성된 파일이라 codex 한도 0): h41e=완전 / jiao9=7×11 누락.
+  const real: [string, number, number, boolean, number][] = [
+    ["h41e5gnfthzzcc1x", 8, 12, true, 96],
+    ["jiao9uuc72qb1nb3", 8, 12, false, 77],
+  ];
+  for (const [id, rr, cc, wantComplete, wantFilled] of real) {
+    const fp = path.resolve(process.cwd(), "data/images", id + ".png");
+    if (!fs.existsSync(fp)) {
+      console.log(`      (skip real-file ${id}: not found)`);
+      continue;
+    }
+    const s = await detectFill(fp, rr, cc, log);
+    assert(s.complete === wantComplete,
+      `G3-${id}: complete=${wantComplete} (got ${s.complete}, ${s.filledCells}/${s.expected})`);
+    assert(s.filledCells === wantFilled,
+      `G3b-${id}: filledCells=${wantFilled} (got ${s.filledCells})`);
+  }
+}
+
 async function main() {
   console.log("spritesheet-postprocess 결정적 검증");
   console.log("출력 디렉토리:", OUT);
@@ -459,6 +519,7 @@ async function main() {
   await caseD();
   await caseE();
   await caseF();
+  await caseG();
   console.log(`\n=========================================`);
   console.log(`총: ${passCount} PASS / ${failCount} FAIL`);
   console.log(`=========================================`);

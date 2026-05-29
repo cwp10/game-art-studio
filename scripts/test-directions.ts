@@ -111,31 +111,32 @@ check('"running soldier" → true', isLocomotion("running soldier"));
 check('"마법사 공격" → false (보행 아님)', !isLocomotion("마법사 공격"));
 check('"idle 대기" → false', !isLocomotion("idle 대기"));
 
-console.log("── buildGaitPrompt: 프레임수 인지 + scissor + 행 일관성 ──");
+console.log("── buildGaitPrompt: 좌우 발 교대(최우선) + scissor + 행 일관성 ──");
 {
   const g6 = buildGaitPrompt(6, true);
-  check('gait(6): "WALK/RUN GAIT" 헤더', g6.includes("WALK/RUN GAIT"));
-  check('gait(6): "ONE full walk cycle"', g6.includes("ONE full walk cycle"));
+  check('gait(6): "WALK GAIT" 헤더', g6.includes("WALK GAIT"));
+  check('gait(6): ALTERNATING FEET 최우선 강조', g6.includes("ALTERNATING FEET"));
   check('gait(6): N=6 반영 ("these 6 frames")', g6.includes("these 6 frames"));
   // contact mirror 프레임 = floor(6/2)+1 = 4
-  check('gait(6): mid-cycle contact = F4 (mirror of F1)', g6.includes("F4 CONTACT (mirror of F1)"));
-  check('gait(6): F1 contact 명시', g6.includes("F1 CONTACT"));
+  check('gait(6): 반대 발 앞으로 = F4', g6.includes("at F4 the OPPOSITE foot is FAR FORWARD"));
+  check('gait(6): F1 contact 명시', g6.includes("at F1 ONE foot is planted FAR FORWARD"));
   check('gait(6): SCISSOR 측면 지시', g6.includes("SCISSOR"));
-  check('gait(6): near-duplicate 금지 강제', g6.includes("near-duplicate"));
+  check('gait(6): near-duplicate 금지 강제', g6.includes("NO two frames may look the same"));
   check('gait(6): WIDE stride 강제', g6.includes("WIDE apart"));
-  check('gait(6): directions=true → 행 일관성 문구', g6.includes("Every row uses this SAME 6-frame per-frame leg choreography"));
+  check('gait(6): 정면/후면 망토 가림 금지', g6.includes("CLEARLY VISIBLE below the cape"));
+  check('gait(6): directions=true → 행 일관성 문구', g6.includes("Every row uses this SAME 6-frame cycle"));
 }
 {
   const g8 = buildGaitPrompt(8, false);
   check('gait(8): N=8 반영', g8.includes("these 8 frames"));
   // contact mirror = floor(8/2)+1 = 5
-  check('gait(8): mid-cycle contact = F5 (mirror of F1)', g8.includes("F5 CONTACT (mirror of F1)"));
+  check('gait(8): 반대 발 앞으로 = F5', g8.includes("at F5 the OPPOSITE foot is FAR FORWARD"));
   check('gait(8): directions=false → 행 일관성 문구 없음', !g8.includes("Every row uses this SAME"));
 }
 {
   const g4 = buildGaitPrompt(4, true);
   // contact mirror = floor(4/2)+1 = 3
-  check('gait(4): mid-cycle contact = F3 (mirror of F1)', g4.includes("F3 CONTACT (mirror of F1)"));
+  check('gait(4): 반대 발 앞으로 = F3', g4.includes("at F3 the OPPOSITE foot is FAR FORWARD"));
 }
 
 console.log("── Directions 타입 가드(컴파일 단언): 1|2|4|8 만 허용 ──");
