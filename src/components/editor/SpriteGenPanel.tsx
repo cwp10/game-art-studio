@@ -100,7 +100,7 @@ const EFFECT_KINDS: Array<{ key: string; label: string; phrase: string }> = [
 ];
 
 const DIRECTION_OPTS: SpriteDirections[] = [1, 2, 4, 8];
-const FRAMES_PER_DIR_OPTS = [4, 6, 8, 12] as const;
+const FRAMES_PER_DIR_OPTS = [4, 6, 8] as const;
 const EFFECT_FRAME_OPTS = [4, 6, 8, 12, 16] as const;
 
 const ANCHOR_OPTS: Array<{ key: SpriteAnchor; label: string }> = [

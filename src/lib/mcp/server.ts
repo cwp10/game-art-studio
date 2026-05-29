@@ -108,7 +108,7 @@ const SCHEMAS = {
     properties: {
       ...PROMPT_PROP,
       rows: { type: "integer", minimum: 1, maximum: 16, description: "세로 셀 개수" },
-      cols: { type: "integer", minimum: 1, maximum: 16, description: "가로 셀 개수" },
+      cols: { type: "integer", minimum: 1, maximum: 16, description: "가로 셀 개수. 방향 캐릭터 시트(directions≥2)는 최대 8 권장 — 12 이상은 모델이 발 교대를 제대로 못 그림." },
       inputGenerationId: {
         type: "string",
         description:
