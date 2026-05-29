@@ -250,6 +250,138 @@ export async function isGreenDominant(filePath: string, log: Logger = noop): Pro
   return ratio >= 0.35;
 }
 
+/** detectFill 반환 — 모델이 실제로 그린 그리드 충족도 측정 결과. */
+export type FillStats = {
+  rowBands: number; // 모델이 그린 가로(행) 밴드 수
+  minColBandsPerRow: number; // 행들 중 최소 열 밴드 수 (0 = 빈 행 존재)
+  filledCells: number; // 유의미 컴포넌트가 채운 (행밴드×열밴드) 셀의 총 개수
+  expected: number; // rows*cols (기대치)
+  complete: boolean; // 모든 행이 cols 개 밴드를 가질 때 true
+};
+
+/**
+ * 빈 셀 감지 — chroma-key 후(투명 배경) 시트에서 모델이 실제로 그린 행/열 밴드를 측정한다.
+ *
+ * WHY: rowCountRule/colCountRule + 적응형 후처리가 있어도 모델이 가끔 그리드를 덜 채운다
+ *   (예: 8×12 요청에 7행×11열만). 적응형 후처리는 "내부 구멍"만 메우지 normalize 전에
+ *   모델이 덜 그린 개수 자체는 못 채운다. 이 함수로 충족 여부를 측정해 재시도를 트리거한다.
+ *
+ * 측정(고정 그리드 다수결이 아니라 콘텐츠 밴드 기준 — 모델 표류 때문):
+ *   1. 비배경(alpha>10) 픽셀을 4-connectivity 로 라벨링, 셀 면적의 1% 이상인 유의미
+ *      컴포넌트만 채택(키잉 잔재·노이즈 스펙 배제 — normalizeSpritesheetCells 4a 와 동일 임계).
+ *   2. 컴포넌트 y-중심을 정렬해 간격>cellH*0.5 이면 새 행 밴드(적응형 4b 와 동일 갭).
+ *   3. 각 행 밴드 안에서 x-중심을 정렬해 간격>cellW*0.5 이면 새 열 밴드(적응형 4c 와 동일 갭).
+ *
+ * 반환: { rowBands, minColBandsPerRow, filledCells, expected, complete }.
+ *   complete = rowBands===rows && 모든 행이 cols 개 밴드를 가질 때.
+ *
+ * NOTE: alpha 채널이 없는(흰 배경) 시트는 흰색 아닌 픽셀을 콘텐츠로 본다.
+ */
+export async function detectFill(
+  filePath: string,
+  rows: number,
+  cols: number,
+  log: Logger = noop,
+): Promise<FillStats> {
+  const expected = rows * cols;
+  const { data, info } = await sharp(filePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const H = info.height;
+  const ch = info.channels;
+  const cellW = Math.floor(W / cols);
+  const cellH = Math.floor(H / rows);
+  const N = W * H;
+
+  // chroma-key 후엔 알파>10 이 콘텐츠. 흰 배경 시트(알파 없음→ensureAlpha 로 255)는 흰색 제외.
+  const isContent = (i: number) =>
+    data[i + 3] > 10 && !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
+
+  // 1. 비배경 마스크 → 4-connectivity 컴포넌트 라벨링(normalize 패스2 와 동일 구조).
+  const mask = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    if (isContent(i * ch)) mask[i] = 1;
+  }
+  const labels = new Int32Array(N);
+  const sizes: number[] = [0];
+  const sumX: number[] = [0];
+  const sumY: number[] = [0];
+  let next = 1;
+  const stack: number[] = [];
+  for (let start = 0; start < N; start++) {
+    if (mask[start] === 0 || labels[start] !== 0) continue;
+    labels[start] = next;
+    let size = 0, sx = 0, sy = 0;
+    stack.push(start);
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      const x = p % W;
+      const y = (p - x) / W;
+      size++;
+      sx += x;
+      sy += y;
+      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) { labels[p - 1] = next; stack.push(p - 1); }
+      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) { labels[p + 1] = next; stack.push(p + 1); }
+      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) { labels[p - W] = next; stack.push(p - W); }
+      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) { labels[p + W] = next; stack.push(p + W); }
+    }
+    sizes.push(size);
+    sumX.push(sx);
+    sumY.push(sy);
+    next++;
+  }
+
+  // 유의미 컴포넌트(셀 면적의 1% 이상)만 — normalizeSpritesheetCells 4a 의 substantialPx 와 동일.
+  const substantialPx = cellW * cellH * 0.01;
+  const comps: { cx: number; cy: number }[] = [];
+  for (let l = 1; l < sizes.length; l++) {
+    if (sizes[l] < substantialPx) continue;
+    comps.push({ cx: sumX[l] / sizes[l], cy: sumY[l] / sizes[l] });
+  }
+  if (comps.length === 0) {
+    log(`detectFill: empty sheet — 0/${expected} cells`);
+    return { rowBands: 0, minColBandsPerRow: 0, filledCells: 0, expected, complete: false };
+  }
+
+  // 2. 행 밴드: y-중심 정렬 → 갭>cellH*0.5 분할(적응형 4b 와 동일 갭).
+  const rowGap = cellH * 0.5;
+  const colGap = cellW * 0.5;
+  const byCy = [...comps].sort((a, b) => a.cy - b.cy);
+  const bands: { cx: number; cy: number }[][] = [[byCy[0]]];
+  for (let i = 1; i < byCy.length; i++) {
+    if (byCy[i].cy - byCy[i - 1].cy > rowGap) bands.push([]);
+    bands[bands.length - 1].push(byCy[i]);
+  }
+
+  // 3. 각 행 밴드 안 열 밴드: x-중심 정렬 → 갭>cellW*0.5 분할(적응형 4c 와 동일 갭).
+  let minColBandsPerRow = Infinity;
+  let filledCells = 0;
+  const perRow: number[] = [];
+  for (const band of bands) {
+    const byCx = [...band].sort((a, b) => a.cx - b.cx);
+    let colBands = 1;
+    for (let i = 1; i < byCx.length; i++) {
+      if (byCx[i].cx - byCx[i - 1].cx > colGap) colBands++;
+    }
+    // 한 행이 cols 보다 많이 분할되는 경우(과분할)는 cols 로 클램프 — 충족도 측정엔 상한 cols.
+    const counted = Math.min(cols, colBands);
+    perRow.push(colBands);
+    filledCells += counted;
+    if (counted < minColBandsPerRow) minColBandsPerRow = counted;
+  }
+  if (!Number.isFinite(minColBandsPerRow)) minColBandsPerRow = 0;
+
+  const rowBands = bands.length;
+  const complete = rowBands >= rows && perRow.every((cb) => cb >= cols);
+  log(
+    `detectFill: rowBands=${rowBands}/${rows} colBandsPerRow=[${perRow.join(",")}] ` +
+      `filledCells=${filledCells}/${expected} complete=${complete}`,
+  );
+  return { rowBands, minColBandsPerRow, filledCells, expected, complete };
+}
+
 /** auto → subjectType 기반 구체 전략. character=feet, effect=center. */
 function resolveAnchor(strategy: AnchorStrategy, subjectType: SubjectType): Exclude<AnchorStrategy, "auto"> {
   if (strategy !== "auto") return strategy;
@@ -361,19 +493,160 @@ export async function normalizeSpritesheetCells(
     compCellCount[l].set(ci, (compCellCount[l].get(ci) ?? 0) + 1);
   }
 
-  // 4. 각 컴포넌트 → 가장 많은 픽셀이 있는 셀에 할당
-  const labelsPerCell = new Map<number, number[]>();
+  // 4. 각 컴포넌트 → 셀 할당. 기본은 다수결 고정 그리드 셀.
+  //   단, 모델이 캐릭터를 고정 그리드선에 안 맞추고 세로/가로로 표류시켜 그리면 어떤 그리드
+  //   행/열이 0개가 되어 통째로 빈다(빈 행/빈 열 버그). 그 표류가 감지될 때만(내부 빈 행/열)
+  //   row(4a/4b)·col(4c) 을 콘텐츠 밴드 기준으로 재배정한다. well-behaved 시트는 다수결 유지.
+  type Comp = { l: number; row: number; col: number; cy: number; cx: number };
+  const comps: Comp[] = [];
   for (let l = 1; l < sizes.length; l++) {
     let maxCount = 0;
-    let assigned = 0;
+    let majCell = 0;
     for (const [ci, count] of compCellCount[l]) {
       if (count > maxCount) {
         maxCount = count;
-        assigned = ci;
+        majCell = ci;
       }
     }
-    if (!labelsPerCell.has(assigned)) labelsPerCell.set(assigned, []);
-    labelsPerCell.get(assigned)!.push(l);
+    comps.push({
+      l,
+      row: Math.floor(majCell / cols),
+      col: majCell % cols,
+      cy: (compMinY[l] + compMaxY[l]) / 2,
+      cx: (compMinX[l] + compMaxX[l]) / 2,
+    });
+  }
+
+  // 4a. 빈 "내부" 그리드 행 탐지 — 콘텐츠가 있는 행들 사이에 끼어 비어버린 행(=표류로 인한
+  //   빈 행 버그의 서명). 검출·재배정은 "유의미한" 컴포넌트(셀 면적의 1% 이상)만 기준으로
+  //   한다. 작은 노이즈 스펙(키잉 잔재 수십 px)이 어떤 행에 떨어져 빈 행을 가리거나 밴드
+  //   경계를 흔들지 않도록(노이즈는 패스1 keep 필터에서 어차피 탈락).
+  const substantialPx = (cellW * cellH) * 0.01;
+  const substantial = comps.filter((c) => sizes[c.l] >= substantialPx);
+  const rowHasContent = new Array(rows).fill(false);
+  for (const c of substantial) rowHasContent[c.row] = true;
+  let firstFilled = -1, lastFilled = -1;
+  for (let r = 0; r < rows; r++) {
+    if (rowHasContent[r]) {
+      if (firstFilled < 0) firstFilled = r;
+      lastFilled = r;
+    }
+  }
+  let hasInteriorEmptyRow = false;
+  for (let r = firstFilled; r >= 0 && r <= lastFilled; r++) {
+    if (!rowHasContent[r]) hasInteriorEmptyRow = true;
+  }
+
+  // 4b. 재배정(필요 시만): 유의미 컴포넌트 y-중심을 정렬해 인접 간격이 bandGap(셀 높이의
+  //   절반)보다 크면 새 밴드로 분리(그리디 갭 분할). 표류해도 밴드는 콘텐츠를 따라가므로
+  //   빈 밴드가 안 생김. 밴드 순서를 그대로 row 0..n-1 에 채우고, 밴드 수가 rows 보다 적으면
+  //   남는 행은 빈 채로 둔다(억지로 채우지 않음). 밴드 수가 rows 초과(과분할)면 마지막 행으로
+  //   클램프. 노이즈 스펙은 y-중심 기준 가장 가까운 밴드의 row 를 따라간다.
+  if (hasInteriorEmptyRow && substantial.length > 0) {
+    const sortedByCy = [...substantial].sort((a, b) => a.cy - b.cy);
+    const bandGap = cellH * 0.5;
+    const bandRowByCy: { cy: number; row: number }[] = [];
+    let band = 0;
+    sortedByCy[0].row = 0;
+    bandRowByCy.push({ cy: sortedByCy[0].cy, row: 0 });
+    for (let i = 1; i < sortedByCy.length; i++) {
+      if (sortedByCy[i].cy - sortedByCy[i - 1].cy > bandGap) band++;
+      const row = Math.min(rows - 1, band);
+      sortedByCy[i].row = row;
+      bandRowByCy.push({ cy: sortedByCy[i].cy, row });
+    }
+    // 노이즈(비-유의미) 컴포넌트는 가장 가까운 유의미 컴포넌트의 row 로.
+    for (const c of comps) {
+      if (sizes[c.l] >= substantialPx) continue;
+      let best = bandRowByCy[0].row, bestD = Infinity;
+      for (const b of bandRowByCy) {
+        const d = Math.abs(b.cy - c.cy);
+        if (d < bestD) { bestD = d; best = b.row; }
+      }
+      c.row = best;
+    }
+    log(
+      `normalizeSpritesheetCells: interior empty row detected → row-band re-cluster ` +
+        `(${band + 1} bands, rows=${rows}, bandGap=${Math.round(bandGap)})`,
+    );
+  }
+
+  // 4c. col 재배정 — 4a/4b 의 row 대칭판. 모델이 캐릭터를 가로로도 표류시켜(좌우로 벌려)
+  //   그리면 어떤 그리드 열이 0개가 되어 통째로 빈다(중앙 빈 열 버그). row 와 동일하게
+  //   "유의미 컴포넌트 사이에 낀 빈 그리드 열" 이 있을 때만 발동하고, well-behaved 시트·
+  //   effect(center 앵커)는 기존 col 다수결을 유지한다.
+  //
+  //   행그룹 내 독립 정렬을 택한 이유: 캐릭터 그리드는 행마다 x-정렬이 미세하게 다르다
+  //   (망토 펼침·자세 차이). 전역 x-중심으로 묶으면 행별 갭 위치 차이가 서로 메워져
+  //   빈 열을 가린다(실측: 시트-전역 프로파일은 12밴드처럼 보이나 행별로는 11밴드 + 중앙 갭).
+  //   행그룹 내 갭 분할이 각 행의 실제 콘텐츠 열을 충실히 따라가 더 견고하다.
+  if (cols > 1) {
+    // 4b 가 row 를 바꿨을 수 있으니, 현재 row 값으로 행 그룹을 묶는다.
+    const rowGroups = new Map<number, Comp[]>();
+    for (const c of substantial) {
+      if (!rowGroups.has(c.row)) rowGroups.set(c.row, []);
+      rowGroups.get(c.row)!.push(c);
+    }
+    // col 갭 임계: 셀 폭의 절반(row 가 cellH*0.5 인 것과 대칭). 인접 캐릭터 x-중심 간격은
+    //   ~cellW 라 항상 초과 → 캐릭터마다 개별 밴드. 좁은 다중 컴포넌트(머리/몸통 분리 등)는
+    //   이미 패스1 에서 한 셀로 묶이고, 여기 substantial 은 보통 셀당 1개라 과분할 위험 낮음.
+    const colGap = cellW * 0.5;
+    let firedAnyCol = false;
+    let totalColBands = 0;
+    for (const [, group] of rowGroups) {
+      if (group.length < 2) continue;
+      const sortedByCx = [...group].sort((a, b) => a.cx - b.cx);
+      // 이 행의 콘텐츠 grid-col 점유 → 콘텐츠 열 사이에 낀 빈 grid-col 이 있을 때만 발동.
+      const colHasContent = new Array(cols).fill(false);
+      for (const c of group) colHasContent[c.col] = true;
+      let firstC = -1, lastC = -1;
+      for (let cc = 0; cc < cols; cc++) {
+        if (colHasContent[cc]) { if (firstC < 0) firstC = cc; lastC = cc; }
+      }
+      let interiorEmptyCol = false;
+      for (let cc = firstC; cc >= 0 && cc <= lastC; cc++) {
+        if (!colHasContent[cc]) interiorEmptyCol = true;
+      }
+      if (!interiorEmptyCol) continue; // 이 행은 well-behaved → 기존 col 유지
+
+      // 갭 분할로 col 밴드 → col 0..n-1 재배정(밴드 수<cols 면 끝 열을 빈 채로, >cols 면 클램프).
+      let cband = 0;
+      const bandColByCx: { cx: number; col: number }[] = [];
+      sortedByCx[0].col = 0;
+      bandColByCx.push({ cx: sortedByCx[0].cx, col: 0 });
+      for (let i = 1; i < sortedByCx.length; i++) {
+        if (sortedByCx[i].cx - sortedByCx[i - 1].cx > colGap) cband++;
+        const col = Math.min(cols - 1, cband);
+        sortedByCx[i].col = col;
+        bandColByCx.push({ cx: sortedByCx[i].cx, col });
+      }
+      // 이 행의 노이즈(비-유의미) 컴포넌트는 x-중심 기준 가장 가까운 밴드의 col 로.
+      for (const c of comps) {
+        if (c.row !== group[0].row) continue;
+        if (sizes[c.l] >= substantialPx) continue;
+        let best = bandColByCx[0].col, bestD = Infinity;
+        for (const b of bandColByCx) {
+          const d = Math.abs(b.cx - c.cx);
+          if (d < bestD) { bestD = d; best = b.col; }
+        }
+        c.col = best;
+      }
+      firedAnyCol = true;
+      totalColBands += cband + 1;
+    }
+    if (firedAnyCol) {
+      log(
+        `normalizeSpritesheetCells: interior empty col detected → per-row col-band re-cluster ` +
+          `(cols=${cols}, colGap=${Math.round(colGap)}, ~${totalColBands} bands total)`,
+      );
+    }
+  }
+
+  const labelsPerCell = new Map<number, number[]>();
+  for (const comp of comps) {
+    const cellIdx = comp.row * cols + comp.col;
+    if (!labelsPerCell.has(cellIdx)) labelsPerCell.set(cellIdx, []);
+    labelsPerCell.get(cellIdx)!.push(comp.l);
   }
 
   // ── 패스 1: 측정·추출 ──────────────────────────────────────────────────────
