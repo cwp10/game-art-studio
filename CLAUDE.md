@@ -12,3 +12,4 @@ image-generator — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
 | 2026-05-27 | 초기 구성 (pipeline-engineer / fullstack-engineer / visual-qa + imggen-feature-dev 오케스트레이터) | 전체 | - |
+| 2026-05-29 | TeamCreate/SendMessage 제거 → Agent 도구 직접 스폰 모델로 전환; 에이전트 간 직접 통신 → 오케스트레이터 중재 방식으로 전환 | imggen-feature-dev, agents/*.md, 서브 스킬 | Claude 4.x 하네스 업데이트 반영 |

@@ -767,25 +767,30 @@ export function ChatLayout() {
   );
 
   const hasItems = state.items.length > 0;
+  // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
+  // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
+  const editorPanelOpen = editing !== null || spriteGen !== null;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
-      <SessionList
-        sessions={state.sessions}
-        activeId={state.activeSessionId}
-        search={sessionSearch}
-        onSearch={setSessionSearch}
-        onNew={handleNew}
-        onSelect={handleSelect}
-        onDelete={handleDelete}
-        onRename={handleRename}
-        onOpenGallery={() => setGalleryOpen(true)}
-      />
+      {!editorPanelOpen && (
+        <SessionList
+          sessions={state.sessions}
+          activeId={state.activeSessionId}
+          search={sessionSearch}
+          onSearch={setSessionSearch}
+          onNew={handleNew}
+          onSelect={handleSelect}
+          onDelete={handleDelete}
+          onRename={handleRename}
+          onOpenGallery={() => setGalleryOpen(true)}
+        />
+      )}
       {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
           중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
       <div
-        className="relative flex flex-1 flex-col"
+        className={`relative flex flex-col ${editorPanelOpen ? "w-1/2" : "flex-1"}`}
         onDragEnter={e => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
@@ -845,11 +850,11 @@ export function ChatLayout() {
           prefill={composerPrefill}
           attachment={composerAttachment}
           onAskSuggestions={handleAskSuggestions}
-          onOpenSpriteGen={() => setSpriteGen({})}
+          onUploadImage={handleUploadImage}
         />
       </div>
       {editing?.mode === "inpaint" && (
-        <div className="fixed inset-0 z-40">
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <MaskCanvas
             key={editing.generationId}
             parentGenerationId={editing.generationId}
@@ -864,7 +869,7 @@ export function ChatLayout() {
         </div>
       )}
       {editing?.mode === "layer" && (
-        <div className="fixed inset-0 z-40">
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <LayerCanvas
             parentGenerationId={editing.generationId}
             imageUrl={editing.imageUrl}
@@ -877,7 +882,7 @@ export function ChatLayout() {
         </div>
       )}
       {editing?.mode === "sprite" && (
-        <div className="fixed inset-0 z-40">
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <SpriteCanvas
             parentGenerationId={editing.generationId}
             imageUrl={editing.imageUrl}
@@ -902,7 +907,7 @@ export function ChatLayout() {
         </div>
       )}
       {editing?.mode === "reskin" && (
-        <div className="fixed inset-0 z-40">
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <ReskinPanel
             generationId={editing.generationId}
             imageUrl={editing.imageUrl}
@@ -917,7 +922,7 @@ export function ChatLayout() {
         </div>
       )}
       {spriteGen && (
-        <div className="fixed inset-0 z-40">
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <SpriteGenPanel
             reference={spriteGen.reference}
             sessionId={state.activeSessionId}

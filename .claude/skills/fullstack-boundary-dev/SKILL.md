@@ -46,6 +46,6 @@ React(components) ⇄ lib/api/client.ts ⇄ app/api/* (Next)
 
 ## 변경 후 필수 절차
 
-1. MCP 도구 입력/출력 계약을 바꾸려면 → **pipeline-engineer와 먼저 합의**(후처리 소유자).
-2. 경계면 shape을 바꿨다면 변경 요약에 "어느 shape이 바뀌어 어느 반대편을 같이 고쳤는지" 명시 → **visual-qa에 교차 검증 요청**.
-3. 풀스택 변경은 visual-qa에 `pnpm build`·`pnpm lint` 게이트 요청.
+1. MCP 도구 입력/출력 계약 변경 시 → `_workspace/` 요약에 변경된 shape을 명시한다. 오케스트레이터가 pipeline-engineer와 조율한다.
+2. 경계면 shape을 바꿨다면 변경 요약에 "어느 shape이 바뀌어 어느 반대편을 같이 고쳤는지" 명시 → 오케스트레이터가 visual-qa를 스폰해 교차 검증한다.
+3. 풀스택 변경은 `_workspace/` 요약에 `pnpm build`·`pnpm lint` 게이트 검증 항목을 명시한다.

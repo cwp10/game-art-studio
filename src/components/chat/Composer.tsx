@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid3x3, LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
+import { LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -37,8 +37,8 @@ type Props = {
   attachment?: ComposerAttachment | null;
   /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
   onAskSuggestions?: (text: string) => void;
-  /** [▦ 시트] 클릭 시 부모가 스프라이트시트 생성 패널(fresh)을 연다. */
-  onOpenSpriteGen?: () => void;
+  /** 입력창에 이미지 파일을 드롭하면 업로드 → 다음 메시지의 reference 로 자동 첨부. */
+  onUploadImage?: (file: File) => void;
 };
 
 export function Composer({
@@ -49,7 +49,7 @@ export function Composer({
   prefill,
   attachment,
   onAskSuggestions,
-  onOpenSpriteGen,
+  onUploadImage,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -61,6 +61,10 @@ export function Composer({
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
   const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // 입력창 드래그-드롭 업로드 — child(텍스트영역/버튼) 위 enter/leave 깜빡임 방지에 counter 사용.
+  // 이벤트는 stopPropagation 으로 가둬, 중앙 컬럼 전역 드롭과 이중 업로드되지 않게 한다.
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
 
   // textarea 자동 높이
   useEffect(() => {
@@ -179,7 +183,46 @@ export function Composer({
         ) : null}
         {/* 상단: textarea (전체 폭). 하단: 좌측 modifier (스타일/방향) + 우측 액션 (제안/전송).
             가로 한 줄 배치 → 좁은 화면에서 textarea 가 비좁아지던 것 해소. */}
-        <div className="flex flex-col gap-2 rounded-xl border border-border bg-bg-card p-3 focus-within:border-[color:var(--accent)]/60">
+        <div
+          className={`relative flex flex-col gap-2 rounded-xl border bg-bg-card p-3 transition-colors ${
+            dragOver
+              ? "border-[color:var(--accent)] bg-[color:var(--accent)]/5"
+              : "border-border focus-within:border-[color:var(--accent)]/60"
+          }`}
+          onDragEnter={e => {
+            if (!onUploadImage || !e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter.current += 1;
+            setDragOver(true);
+          }}
+          onDragOver={e => {
+            if (!onUploadImage || !e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={e => {
+            if (!onUploadImage || !e.dataTransfer.types.includes("Files")) return;
+            e.stopPropagation();
+            dragCounter.current = Math.max(0, dragCounter.current - 1);
+            if (dragCounter.current === 0) setDragOver(false);
+          }}
+          onDrop={e => {
+            if (!onUploadImage || !e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragCounter.current = 0;
+            setDragOver(false);
+            const f = [...e.dataTransfer.files].find(x => /^image\/(png|jpeg|webp)$/.test(x.type));
+            if (f) onUploadImage(f);
+          }}
+        >
+          {dragOver && (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[color:var(--accent)] bg-bg-card/85 text-xs font-medium text-text-primary">
+              🖼 이미지를 드롭해 첨부 (PNG · JPEG · WebP)
+            </div>
+          )}
           <textarea
             ref={ref}
             value={text}
@@ -240,16 +283,6 @@ export function Composer({
                   ))}
                 </select>
               </label>
-            )}
-            {onOpenSpriteGen && (
-              <button
-                type="button"
-                onClick={onOpenSpriteGen}
-                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs leading-none text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
-                title="스프라이트시트 생성 — 방향·프레임·앵커를 구조화 패널로 설정해 생성"
-              >
-                <Grid3x3 size={12} /> 시트
-              </button>
             )}
             <button
               type="button"

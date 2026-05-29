@@ -87,12 +87,13 @@ export function useZoomPan(): ZoomPan {
 }
 
 /**
- * 16:10 contain-fit 산출. 가용공간에서 최대 16:10 박스를 잡고 그 안에 이미지를 종횡비 유지로
- * 넣는다 (레터박스 허용). fitScale 은 export 의 scale 로 재사용된다.
+ * contain-fit 산출. 뷰박스는 가용 폭(=UI 너비) 전체를 쓰고, 높이는 16:10 기준이되 가용
+ * 높이를 넘지 않게 클램프한다(가용 높이가 짧으면 더 납작한 박스). 그 안에 이미지를 종횡비
+ * 유지로 넣는다(레터박스 허용). fitScale 은 export 의 scale 로 재사용된다.
  */
 export function fitBox(availW: number, availH: number, imageWidth: number, imageHeight: number) {
-  const viewW = Math.max(1, Math.floor(Math.min(availW, (availH * 16) / 10)));
-  const viewH = Math.max(1, Math.round((viewW * 10) / 16));
+  const viewW = Math.max(1, Math.floor(availW));
+  const viewH = Math.max(1, Math.min(Math.round((viewW * 10) / 16), Math.floor(availH)));
   const fitScale = Math.min(viewW / imageWidth, viewH / imageHeight);
   const displayW = Math.max(1, Math.round(imageWidth * fitScale));
   const displayH = Math.max(1, Math.round(imageHeight * fitScale));

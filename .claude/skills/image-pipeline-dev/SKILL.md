@@ -48,8 +48,8 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 
 ## 변경 후 필수 절차
 
-1. 도구 입력 스키마나 `structuredContent` shape을 바꿨다면 → **fullstack-engineer에 통지**(API/UI가 의존).
-2. 후처리 로직을 바꿨다면 → **visual-qa에 검증 요청**. 코드 리뷰로는 시각 회귀를 못 잡는다. 검증 항목을 명시:
+1. 도구 입력 스키마나 `structuredContent` shape을 바꿨다면 → `_workspace/` 요약에 변경 내역 명시. 오케스트레이터가 fullstack-engineer에 전달한다.
+2. 후처리 로직을 바꿨다면 → `_workspace/` 요약에 visual-qa 검증 항목 명시:
    - 어떤 kind/프롬프트/프레임수로 생성할지
    - 무엇을 눈으로 볼지 (셀 정렬, chroma 잔여, cross-cell 보존, loop 연속성)
 3. 로그 위치: `data/logs/codex-{jobId}.log`, `data/logs/mcp-server.log`.

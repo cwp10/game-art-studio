@@ -184,7 +184,7 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Grid3x3 size={14} /> 스프라이트시트 생성
         </span>
@@ -202,7 +202,7 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
         </button>
       </header>
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         {/* 종류 토글 — 캐릭터/이펙트별 옵션 게이팅. */}
         <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
           {(["character", "effect"] as const).map(s => (
@@ -465,7 +465,7 @@ export function SpriteGenPanel({ reference, onSubmit, onClose }: Props) {
         </div>
       </div>
 
-      <footer className="flex gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
         <button
           onClick={onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"

@@ -273,7 +273,7 @@ export function MaskCanvas({
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Edit3 size={14} /> 인페인트
         </span>
@@ -289,7 +289,7 @@ export function MaskCanvas({
         </button>
       </header>
 
-      <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div ref={sizerRef} className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">다시 그릴 영역을 brush 로 칠하세요.</p>
 
         {/* 16:10 뷰박스 — 이미지를 contain-fit + 줌/팬. overflow-hidden 으로 줌 넘침 클립. */}
@@ -499,7 +499,7 @@ export function MaskCanvas({
         </div>
       </div>
 
-      <footer className="flex gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
         {/* 실행 중에는 생성 취소(abort), 평소에는 패널 닫기. */}
         <button
           onClick={busy ? (onCancelGeneration ?? onCancel) : onCancel}

@@ -466,7 +466,7 @@ export function LayerCanvas({
   // ── render ─────────────────────────────────────────────────────────────────
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-12 items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Layers size={14} /> 레이어 분리
         </span>
@@ -482,7 +482,7 @@ export function LayerCanvas({
         </button>
       </header>
 
-      <div ref={sizerRef} className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div ref={sizerRef} className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         {phase === "draw" ? (
           <>
             <p className="text-xs text-text-muted">
@@ -799,7 +799,7 @@ export function LayerCanvas({
         )}
       </div>
 
-      <footer className="flex gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
         {phase === "draw" ? (
           <>
             <button
