@@ -218,6 +218,14 @@ export function SpriteCanvas({
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
   }, [imgLoaded, rows, cols, order, cellW, cellH, dragPad]);
 
+  // 프레임 선택 해제 — 클릭으로 개별 프레임을 애니메이션/내보내기에서 제외. frames 가 새로
+  // 분할되면(개수 변화) 초기화. 인덱스는 원본 frames 배열 기준.
+  const [excludedFrames, setExcludedFrames] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExcludedFrames(new Set());
+  }, [frames.length]);
+
   // 프레임은 이미 dragPad 포함 패딩 캔버스(실제 픽셀)이므로 사용자 오프셋만 적용해
   // 재배치. 오프셋 0이면 원본 프레임 그대로 반환.
   const adjustedFrames = useMemo(() => {
@@ -241,6 +249,13 @@ export function SpriteCanvas({
   const exportW = cellW + 2 * dragPad;
   const exportH = cellH + 2 * dragPad;
 
+  // ZIP 내보내기용 — 제외 프레임을 뺀 압축 배열(인덱스 재정렬). gifFrames/previewFrames 는
+  // playIndices(원본 인덱스) 기반이라 자동 필터되므로 그쪽은 exportFrames 를 그대로 둔다.
+  const activeExportFrames = useMemo(
+    () => exportFrames.filter((_, i) => !excludedFrames.has(i)),
+    [exportFrames, excludedFrames],
+  );
+
   const thumbs = useMemo(
     () => adjustedFrames.map(f => f.toDataURL("image/png")),
     [adjustedFrames],
@@ -250,10 +265,13 @@ export function SpriteCanvas({
   // dirRow=-1(전체) 또는 방향 시트 아님 → 전체 인덱스.
   const playIndices = useMemo(() => {
     const base = adjustedFrames.length > 0 ? adjustedFrames : frames;
-    if (!isDirSheet || dirRow < 0) return base.map((_, i) => i);
-    const start = dirRow * cols;
-    return base.map((_, i) => i).filter(i => i >= start && i < start + cols);
-  }, [adjustedFrames, frames, isDirSheet, dirRow, cols]);
+    const all = base.map((_, i) => i);
+    const dirFiltered =
+      !isDirSheet || dirRow < 0
+        ? all
+        : all.filter(i => i >= dirRow * cols && i < dirRow * cols + cols);
+    return dirFiltered.filter(i => !excludedFrames.has(i));
+  }, [adjustedFrames, frames, isDirSheet, dirRow, cols, excludedFrames]);
 
   // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames. 방향 필터 적용.
   const previewFrames = useMemo(() => {
@@ -577,13 +595,13 @@ export function SpriteCanvas({
   useEffect(() => () => { if (gifUrl) URL.revokeObjectURL(gifUrl); }, [gifUrl]);
 
   async function downloadZip() {
-    if (exportFrames.length === 0 || downloading) return;
+    if (activeExportFrames.length === 0 || downloading) return;
     setDownloading("zip");
     try {
       const JSZip = (await import("jszip")).default;
       const zip = new JSZip();
-      const pad = String(exportFrames.length - 1).length;
-      exportFrames.forEach((c, i) => {
+      const pad = String(activeExportFrames.length - 1).length;
+      activeExportFrames.forEach((c, i) => {
         const dataUrl = c.toDataURL("image/png");
         const base64 = dataUrl.slice("data:image/png;base64,".length);
         zip.file(
@@ -774,8 +792,23 @@ export function SpriteCanvas({
 
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
           <div className="flex items-center justify-between">
-            <span className="text-text-muted">분할 결과 ({thumbs.length}프레임)</span>
+            <span className="text-text-muted">
+              분할 결과 ({excludedFrames.size > 0
+                ? `${thumbs.length - excludedFrames.size}/${thumbs.length}`
+                : thumbs.length}프레임)
+            </span>
             <div className="flex gap-1">
+              {/* 제외 프레임 있을 때만 — 전체 다시 포함. */}
+              {excludedFrames.size > 0 && (
+                <button
+                  onClick={() => setExcludedFrames(new Set())}
+                  disabled={frames.length === 0}
+                  className="h-6 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
+                  title="모두 포함"
+                >
+                  전체 선택
+                </button>
+              )}
               {/* 행 전체 보정 — 선택/드래그 시 같은 행 모든 프레임에 동일 오프셋 일괄(방향 시트). */}
               <button
                 onClick={() => setRowMode(m => !m)}
@@ -866,7 +899,7 @@ export function SpriteCanvas({
               return (
                 <div
                   key={i}
-                  className={`relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                  className={`group relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
                     dragging?.idx === i
                       ? "cursor-grabbing ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
                       : selectedIdx === i
@@ -884,9 +917,32 @@ export function SpriteCanvas({
                   <img
                     src={src}
                     alt={`frame ${i}`}
-                    className="absolute inset-0 h-full w-full object-fill"
+                    className={`absolute inset-0 h-full w-full object-fill ${excludedFrames.has(i) ? "opacity-30" : ""}`}
                     draggable={false}
                   />
+                  {/* 제외된 프레임 — 어둡게 덮고 ✕ 표시. */}
+                  {excludedFrames.has(i) && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded bg-black/60">
+                      <span className="text-lg font-bold text-white/80">✕</span>
+                    </div>
+                  )}
+                  {/* 호버 시 토글 버튼(우상단) — 제외/포함. 드래그 시작 방지. */}
+                  <button
+                    className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-white/30 bg-black/50 text-[9px] text-white opacity-0 transition-opacity hover:bg-red-500/80 group-hover:opacity-100"
+                    title={excludedFrames.has(i) ? "포함" : "제외"}
+                    onMouseDown={e => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setExcludedFrames(prev => {
+                        const next = new Set(prev);
+                        if (next.has(i)) next.delete(i);
+                        else next.add(i);
+                        return next;
+                      });
+                    }}
+                  >
+                    {excludedFrames.has(i) ? "+" : "×"}
+                  </button>
                   <svg
                     className="pointer-events-none absolute inset-0 h-full w-full"
                     viewBox="0 0 100 100"
