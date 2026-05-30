@@ -566,7 +566,7 @@ function ExamplePopover({
   return (
     <div
       ref={ref}
-      className="absolute left-0 top-full z-30 mt-1 w-[340px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+      className="absolute right-0 top-full z-30 mt-1 w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
     >
       {EXAMPLES[subjectType].map((ex, i) => (
         <div
