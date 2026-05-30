@@ -13,8 +13,8 @@ import { listPresets } from "@/lib/api/client";
  * suffix 까지 해석해 완성된 메시지를 onSubmit 으로 부모(ChatLayout)에 넘긴다.
  *
  * 경계면: onSubmit 은 완성된 { message, attachmentGenerationIds } 배열을 받는다.
- * 마커 directive(rows=1; cols=frames; directions=1)는 그대로 make_spritesheet 로 흐르며,
- * server.ts 가 directions=1 단일 스트립은 auto-reshape 하지 않는다(explicitSingleStrip).
+ * 마커 directive(rows=R; cols=C — 프레임 수별 게임표준 그리드)는 그대로 make_spritesheet 로 흐르며,
+ * rows≥2 이므로 server.ts 의 1×N auto-reshape 대상이 아니다.
  */
 
 export type SubjectType = "character" | "effect" | "object";
@@ -27,7 +27,7 @@ export type Direction =
   | "DOWN-RIGHT"
   | "UP-LEFT"
   | "UP-RIGHT";
-export type FrameCount = 4 | 9 | 16 | 25;
+export type FrameCount = 4 | 6 | 8 | 12 | 16;
 
 export type SpriteGenState = {
   subjectType: SubjectType;
@@ -80,12 +80,14 @@ const COMPASS: Array<Direction | null> = [
   "DOWN-LEFT", "DOWN", "DOWN-RIGHT",
 ];
 
-// 프레임 옵션 — 정사각 그리드(미리보기) + 추천 뱃지.
-const FRAME_OPTS: Array<{ value: FrameCount; side: number }> = [
-  { value: 4, side: 2 },
-  { value: 9, side: 3 },
-  { value: 16, side: 4 },
-  { value: 25, side: 5 },
+// 프레임 옵션 — 게임표준 그리드(짝수·장축 최소). 좌우대칭 동작(걷기/달리기)은 8(2×4)이 정석.
+// 장축 셀 수가 적을수록 모델(gpt-image, 장축 ~1536px)이 셀당 더 디테일하게 그린다.
+const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
+  { value: 4, rows: 2, cols: 2 },
+  { value: 6, rows: 2, cols: 3 },
+  { value: 8, rows: 2, cols: 4 },
+  { value: 12, rows: 3, cols: 4 },
+  { value: 16, rows: 4, cols: 4 },
 ];
 
 // subjectType 별 예시 — 라벨 + 동작 묘사(actionPrompt 에 삽입).
@@ -141,7 +143,7 @@ function saveRecent(action: string) {
 export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClose }: Props) {
   const [subjectType, setSubjectType] = useState<SubjectType>("character");
   const [direction, setDirection] = useState<Direction>("DOWN");
-  const [frames, setFrames] = useState<FrameCount>(9);
+  const [frames, setFrames] = useState<FrameCount>(8);
   const [stylePresetId, setStylePresetId] = useState<string | null>(null);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
@@ -160,7 +162,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
   const [recents, setRecents] = useState<string[]>(loadRecents);
   const [submitting, setSubmitting] = useState(false);
 
-  const side = FRAME_OPTS.find(f => f.value === frames)?.side ?? 2;
+  const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
   const canSubmit = actionPrompt.trim().length > 0 && !submitting;
 
   async function handleAiSuggest() {
@@ -302,7 +304,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
               }}
               className="flex h-8 items-center gap-1 rounded-lg border border-border bg-bg-card px-3 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
             >
-              {frames}프레임 {side}×{side}
+              {frames}프레임 {grid.rows}×{grid.cols}
             </button>
             {frameOpen && (
               <FramePopover
@@ -517,7 +519,7 @@ function FramePopover({
             >
               <div className="font-medium text-text-primary">{f.value}프레임</div>
               <div className="text-[11px] text-text-muted/70">
-                {f.side}×{f.side}
+                {f.rows}×{f.cols}
               </div>
             </button>
           );
@@ -598,12 +600,12 @@ function facingPhrase(label: Direction): string {
 /**
  * SpriteGenState → { message, attachmentGenerationIds } 순수 빌더.
  *
- * 마커(계약 — 키 이름은 make_spritesheet 입력명과 일치): 단일 방향 1행 스트립.
- *   [spritesheet: subjectType=character; anchorStrategy=feet; directions=1; framesPerDir=9; rows=1; cols=9; seamlessLoop=true]
+ * 마커(계약 — 키 이름은 make_spritesheet 입력명과 일치): 단일 방향 시트(게임표준 그리드).
+ *   [spritesheet: subjectType=character; anchorStrategy=feet; framesPerDir=8; rows=2; cols=4; seamlessLoop=true]
  * - 캐릭터: anchorStrategy=feet, 자연어에 facingPhrase 포함.
  * - 이펙트/오브젝트: anchorStrategy=center, facingPhrase 생략.
  *
- * 프레임 수 → 정사각 그리드로 직접 계산해서 rows/cols 를 넘긴다(4→2×2, 9→3×3, 16→4×4, 25→5×5).
+ * 프레임 수 → 게임표준 그리드로 rows/cols 를 넘긴다(4→2×2, 6→2×3, 8→2×4, 12→3×4, 16→4×4).
  * directions 는 마커에 포함하지 않아 서버의 rows 강제 오버라이드를 피한다.
  * 방향 정보는 자연어 facingPhrase 로만 전달.
  * 참조는 마커가 아니라 attachmentGenerationIds 로 전달 → /api/chat 이 [reference: id] prefix.
@@ -615,16 +617,17 @@ export function buildSpriteMessage(
 ): { message: string; attachmentGenerationIds: string[] } {
   const isCharacter = state.subjectType === "character";
   const anchor = isCharacter ? "feet" : "center";
-  const side = FRAME_OPTS.find(f => f.value === state.frames)?.side ?? 2;
+  const grid = FRAME_OPTS.find(f => f.value === state.frames) ?? { rows: 2, cols: 4 };
 
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
-    `framesPerDir=${state.frames}; rows=${side}; cols=${side}; ` +
+    `framesPerDir=${state.frames}; rows=${grid.rows}; cols=${grid.cols}; ` +
     `seamlessLoop=${state.seamlessLoop}]`;
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
-  nlParts.push(facingPhrase(state.direction));
+  // facing 은 캐릭터만 — 이펙트/오브젝트는 방향 개념이 없어 "facing DOWN" 부착 시 모델 혼선.
+  if (isCharacter) nlParts.push(facingPhrase(state.direction));
   nlParts.push("transparent background");
   const nl = nlParts.join(", ");
 

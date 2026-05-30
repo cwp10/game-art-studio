@@ -3,7 +3,8 @@
  * buildSpriteMessage 가 SpriteGenPanel 의 SpriteGenState → [spritesheet: ...] 마커 +
  * 자연어 + attachmentGenerationIds 로 정확히 합성하는지 단언한다.
  *
- * 단일 방향 스트립(directions=1; rows=1; cols=frames) 시트로 전면 개편됨.
+ * 단일 방향 시트(rows×cols = 프레임 수별 게임표준 그리드)로 합성됨.
+ * 그리드: 4→2×2, 6→2×3, 8→2×4, 12→3×4, 16→4×4. directions 키는 마커에 미포함(자연어 facing 으로 전달).
  *
  * 실행: npx tsx --tsconfig tsconfig.json scripts/test-sprite-marker.ts
  */
@@ -26,14 +27,14 @@ function base(): SpriteGenState {
   return {
     subjectType: "character",
     direction: "DOWN",
-    frames: 9,
+    frames: 8,
     stylePresetId: null,
     seamlessLoop: false,
     actionPrompt: "걷기 모션",
   };
 }
 
-// ── Case 1: character (directions=1, anchorStrategy=feet, rows=1, cols=frames) ──
+// ── Case 1: character (anchorStrategy=feet, 16프레임 → 4×4 그리드) ──
 console.log("[Case 1] character full");
 {
   const p: SpriteGenState = {
@@ -50,10 +51,10 @@ console.log("[Case 1] character full");
   console.log(`  nl:        ${nl}`);
   assert(directive.includes("subjectType=character"), "subjectType=character");
   assert(directive.includes("anchorStrategy=feet"), "anchorStrategy=feet");
-  assert(directive.includes("directions=1"), "directions=1");
+  assert(!directive.includes("directions="), "directions 키 미포함");
   assert(directive.includes("framesPerDir=16"), "framesPerDir=16");
-  assert(directive.includes("rows=1"), "rows=1");
-  assert(directive.includes("cols=16"), "cols=16");
+  assert(directive.includes("rows=4"), "rows=4 (16프레임 → 4×4)");
+  assert(directive.includes("cols=4"), "cols=4 (16프레임 → 4×4)");
   assert(directive.includes("seamlessLoop=false"), "seamlessLoop=false");
   assert(directive.startsWith("[spritesheet: ") && directive.endsWith("]"), "directive 형식 [spritesheet: ...]");
   assert(nl.includes("공격 모션"), "자연어에 actionPrompt 포함");
@@ -69,7 +70,7 @@ console.log("[Case 2] effect");
   const p: SpriteGenState = {
     ...base(),
     subjectType: "effect",
-    frames: 9,
+    frames: 8,
     seamlessLoop: true,
     actionPrompt: "슬래시 이펙트",
   };
@@ -79,9 +80,9 @@ console.log("[Case 2] effect");
   console.log(`  nl:        ${nl}`);
   assert(directive.includes("subjectType=effect"), "subjectType=effect");
   assert(directive.includes("anchorStrategy=center"), "anchorStrategy=center");
-  assert(directive.includes("directions=1"), "directions=1");
-  assert(directive.includes("rows=1"), "rows=1");
-  assert(directive.includes("cols=9"), "cols=9");
+  assert(!directive.includes("directions="), "directions 키 미포함");
+  assert(directive.includes("rows=2"), "rows=2 (8프레임 → 2×4)");
+  assert(directive.includes("cols=4"), "cols=4 (8프레임 → 2×4)");
   assert(directive.includes("seamlessLoop=true"), "seamlessLoop=true");
   assert(nl.includes("슬래시 이펙트"), "자연어에 actionPrompt 포함");
   assert(!nl.includes("facing"), "이펙트는 facingPhrase 생략");
@@ -101,7 +102,7 @@ console.log("[Case 3] object");
   const [directive, nl] = message.split("\n");
   assert(directive.includes("subjectType=object"), "subjectType=object");
   assert(directive.includes("anchorStrategy=center"), "anchorStrategy=center");
-  assert(directive.includes("cols=4") && directive.includes("rows=1"), "rows=1; cols=4");
+  assert(directive.includes("rows=2") && directive.includes("cols=2"), "rows=2; cols=2 (4프레임 → 2×2)");
   assert(!nl.includes("facing"), "오브젝트는 facingPhrase 생략");
 }
 
