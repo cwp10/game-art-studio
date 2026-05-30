@@ -41,8 +41,14 @@ yarn-error.log*
 /data/*
 !/data/mcp.json
 
-# claude code per-user state
-.claude/
+# claude code per-user state (agents/skills는 프로젝트 설정으로 추적)
+.claude/*
+!.claude/agents/
+!.claude/agents/**
+!.claude/skills/
+!.claude/skills/**
+.claude/skills/**/_workspace/
+.claude/skills/**/_workspace_prev/
 
 # local plans
 /.local-plans/
