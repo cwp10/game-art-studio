@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  const question = body.question?.trim();
+  const question = body.question?.trim().slice(0, 500);
   if (!question) return Response.json({ error: "question required" }, { status: 400 });
 
   const subjectType = body.subjectType ?? "character";

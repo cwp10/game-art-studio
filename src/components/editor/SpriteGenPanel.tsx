@@ -88,10 +88,6 @@ const FRAME_OPTS: Array<{ value: FrameCount; side: number }> = [
   { value: 25, side: 5 },
 ];
 
-function frameSide(frames: FrameCount): number {
-  return FRAME_OPTS.find(f => f.value === frames)?.side ?? 2;
-}
-
 // subjectType 별 예시 — 라벨 + 동작 묘사(actionPrompt 에 삽입).
 const EXAMPLES: Record<SubjectType, Array<{ label: string; text: string }>> = {
   character: [
@@ -166,8 +162,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
   const [recents, setRecents] = useState<string[]>(loadRecents);
   const [submitting, setSubmitting] = useState(false);
 
-  const isCharacter = subjectType === "character";
-  const side = frameSide(frames);
+  const side = FRAME_OPTS.find(f => f.value === frames)?.side ?? 2;
   const canSubmit = actionPrompt.trim().length > 0 && !submitting;
 
   async function handleAiSuggest() {
@@ -183,7 +178,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
         body: JSON.stringify({
           question: q,
           subjectType,
-          direction: isCharacter ? direction : undefined,
+          direction: subjectType === "character" ? direction : undefined,
         }),
       });
       const data = (await res.json()) as { suggestion?: string; error?: string };
@@ -417,6 +412,8 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
                   <button
                     onClick={() => {
                       setActionPrompt(aiResult);
+                      setAiResult(null);
+                      setAiOpen(false);
                     }}
                     className="rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
                   >
@@ -431,9 +428,9 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
           {recents.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 pt-1">
               <span className="text-[11px] text-text-muted/70">최근:</span>
-              {recents.map((r, i) => (
+              {recents.map((r) => (
                 <button
-                  key={i}
+                  key={r}
                   onClick={() => setActionPrompt(r)}
                   title={r}
                   className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
@@ -569,7 +566,7 @@ function ExamplePopover({
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full z-30 mt-1 w-[340px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+      className="absolute left-0 top-full z-30 mt-1 w-[340px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
     >
       {EXAMPLES[subjectType].map((ex, i) => (
         <div
