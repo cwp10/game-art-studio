@@ -343,7 +343,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         // rows=1 이고 cols > 4 인 경우: 다행 그리드로 자동 변환.
         // (시스템 프롬프트가 잘못 지시하거나 사용자가 명시해도 방어)
-        if (rows === 1 && cols > 4) {
+        // 단, directions=1 이 명시적으로 넘어온 경우는 단일 방향 스트립 의도 → reshape 하지 않음.
+        const explicitSingleStrip = directions === 1;
+        if (rows === 1 && cols > 4 && !explicitSingleStrip) {
           const n = cols;
           rows = Math.round(Math.sqrt(n));
           cols = Math.ceil(n / rows);

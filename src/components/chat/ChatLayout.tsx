@@ -10,13 +10,7 @@ import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
-import {
-  SpriteGenPanel,
-  buildSpriteMessage,
-  buildSpriteMessagesPerDirection,
-  resolveStyleSuffix,
-  type SpriteGenSubmit,
-} from "@/components/editor/SpriteGenPanel";
+import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
 import { CompareSheet } from "@/components/library/CompareSheet";
 import { GallerySheet } from "@/components/library/GallerySheet";
 import { LogsPanel } from "@/components/library/LogsPanel";
@@ -573,28 +567,17 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
-  // SpriteGenPanel 이 submit 한 구조화 payload → 마커+자연어 합성해 handleSend.
-  // reskin 패턴과 동일: 패널은 구조화 선택만 넘기고, 마커 directive + 자연어 조립은 여기서.
+  // SpriteGenPanel 이 submit 한 완성 메시지 배열 → 순차 handleSend.
+  // 패널이 마커 directive + 자연어 + 스타일 suffix 해석까지 끝낸 메시지를 넘긴다.
   // 마커는 오케스트레이터가 그대로 make_spritesheet 에 전달(rows/cols/subjectType/
   // anchorStrategy/directions/seamlessLoop). 참조는 attachmentGenerationIds 로 → inputGenerationId.
+  // 순차 await 는 layer-split 와 동일한 검증된 패턴(각 완료 후 다음, generating 충돌 없음).
   const handleSpriteGen = useCallback(
-    async (payload: SpriteGenSubmit) => {
+    async (messages: Array<{ message: string; attachmentGenerationIds: string[] }>) => {
       setSpriteGen(null);
-      // 스타일 프리셋 suffix 를 클라이언트에서 해석해 자연어에 결합(Composer 흐름과 동일 — 서버는 preset 모름).
-      const suffix = await resolveStyleSuffix(payload.stylePresetId);
-      // 방향별 개별 생성 — 캐릭터 다방향 시트를 방향마다 단일방향 시트로 순차 N장 생성.
-      // 한 장에 모든 방향을 그리면 프레임 차별화가 희석돼 측면 보행 발 교차가 약하므로
-      // 방향마다 집중 생성한다. 한 장 스티칭은 범위 밖 — 각 방향이 별도 결과 카드로 누적.
-      // 순차 await 는 layer-split 와 동일한 검증된 패턴(각 완료 후 다음, generating 충돌 없음).
-      if (payload.perDirection && payload.subjectType === "character" && payload.directions > 1) {
-        const msgs = buildSpriteMessagesPerDirection(payload, suffix);
-        for (const m of msgs) {
-          await handleSend(m.message, { attachmentGenerationIds: m.attachmentGenerationIds });
-        }
-        return;
+      for (const m of messages) {
+        await handleSend(m.message, { attachmentGenerationIds: m.attachmentGenerationIds });
       }
-      const { message, attachmentGenerationIds } = buildSpriteMessage(payload, suffix);
-      handleSend(message, { attachmentGenerationIds });
     },
     [handleSend],
   );
@@ -924,8 +907,8 @@ export function ChatLayout() {
       {spriteGen && (
         <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <SpriteGenPanel
-            reference={spriteGen.reference}
-            sessionId={state.activeSessionId}
+            referenceId={spriteGen.reference?.generationId}
+            referenceImageUrl={spriteGen.reference?.imageUrl}
             onSubmit={handleSpriteGen}
             onClose={() => setSpriteGen(null)}
           />

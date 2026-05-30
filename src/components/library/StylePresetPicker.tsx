@@ -15,9 +15,10 @@ import type { StylePreset } from "@/types/db";
 type Props = {
   value: string | null;
   onChange: (presetId: string | null) => void;
+  popoverDirection?: "up" | "down";
 };
 
-export function StylePresetPicker({ value, onChange }: Props) {
+export function StylePresetPicker({ value, onChange, popoverDirection = "up" }: Props) {
   const [open, setOpen] = useState(false);
   const [presets, setPresets] = useState<StylePreset[]>([]);
   const [creating, setCreating] = useState(false);
@@ -87,7 +88,7 @@ export function StylePresetPicker({ value, onChange }: Props) {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 z-20 mb-2 w-[320px] rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+          className={`absolute left-0 z-20 w-[320px] rounded-xl border border-border bg-bg-panel p-2 shadow-xl ${popoverDirection === "down" ? "top-full mt-1" : "bottom-full mb-2"}`}
         >
           <div className="mb-1 flex items-center justify-between px-1 text-xs text-text-muted">
             <span>스타일 프리셋</span>
