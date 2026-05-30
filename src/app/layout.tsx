@@ -13,7 +13,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SpriteForge",
+  title: "Sprite Forge",
   description: "개인용 게임 에셋 이미지 생성기 (Codex imagegen + Claude CLI)",
 };
 

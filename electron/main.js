@@ -16,7 +16,7 @@ const STATE_FILE = path.join(PROJECT_DIR, "data", "window-state.json");
 // 도구 위치를 직접 넣는다. 이 PATH 는 spawn 한 Next 서버 → codex/claude 로 그대로 상속된다.
 process.env.PATH = `/opt/homebrew/bin:${process.env.HOME}/.local/bin:/usr/bin:/usr/sbin:/bin:${process.env.PATH || ""}`;
 
-app.setName("SpriteForge");
+app.setName("Sprite Forge");
 
 let win = null;
 let serverProc = null; // 우리가 띄운 서버(이미 떠 있으면 null → 건드리지 않음)
@@ -115,7 +115,7 @@ function createWindow() {
     ...state,
     minWidth: 960,
     minHeight: 640,
-    title: "SpriteForge",
+    title: "Sprite Forge",
     // 표준 macOS 타이틀바 — 트래픽 라이트가 네이티브 바에 위치해 어떤 페이지/풀스크린 모달과도
     // 겹치지 않는다(hiddenInset 은 콘텐츠 위에 오버레이돼 fixed inset-0 패널과 충돌). 드래그도 기본 지원.
     titleBarStyle: "default",
@@ -166,10 +166,6 @@ function buildMenu() {
 }
 
 app.whenReady().then(async () => {
-  if (process.platform === "darwin") {
-    const icon = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
-    if (!icon.isEmpty()) app.dock.setIcon(icon);
-  }
   buildMenu();
   createWindow();
   try {
