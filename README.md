@@ -1,4 +1,4 @@
-# SpriteForge
+# Sprite Forge
 
 개인용 게임 에셋 이미지 생성기. Codex CLI 의 imagegen 스킬을 백엔드로, Claude Code CLI 를 오케스트레이션으로 사용하는 ChatGPT 스타일 단일 채팅 UI.
 
@@ -18,7 +18,8 @@
 - **저장** — 이미지는 `./data/images/`, 썸네일은 `./data/thumbnails/`(on-demand), 메타는
   SQLite (`./data/app.db`, WAL 모드). 세션 삭제 시 그 세션 이미지 정리, `pnpm cleanup` 으로 누적 정리.
 - **UI** — 다크 테마 3-column, 한국어, ChatGPT 스타일 단일 채팅창
-- **로컬 전용** — `127.0.0.1` 바인딩 + `middleware.ts` host 가드, 인증 없음, 외부 트래커 없음
+- **Electron 셸** — `Sprite Forge.app` 더블클릭으로 실행. Next.js 프로덕션 서버를 자식 프로세스로 spawn, 포트가 열리면 BrowserWindow 로드. `pnpm app` 으로도 실행 가능.
+- **로컬 전용** — `127.0.0.1` 바인딩 + `proxy.ts` host 가드, 인증 없음, 외부 트래커 없음
 
 ## 사전 조건
 
@@ -31,7 +32,14 @@
 ```bash
 pnpm install
 pnpm db:init        # SQLite 스키마 생성 + 마이그레이션 + smoke
-pnpm dev            # http://127.0.0.1:3000
+pnpm build          # Next.js 프로덕션 빌드 (최초 1회 또는 코드 변경 시)
+pnpm app            # Electron 앱 실행 (또는 Sprite Forge.app 더블클릭)
+```
+
+개발 서버:
+
+```bash
+pnpm dev            # http://127.0.0.1:3000 (브라우저 직접 접근)
 ```
 
 단독 검증·유지보수용 CLI:
@@ -59,7 +67,7 @@ src/
 │   │                     #   suggest, upload, logs
 │   ├── page.tsx          # ChatLayout
 │   └── globals.css       # 다크 팔레트
-├── middleware.ts         # 로컬 전용 host 가드 (/api/*)
+├── proxy.ts              # 로컬 전용 host 가드 (/api/*)
 ├── components/
 │   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList
 │   ├── editor/           # MaskCanvas / LayerCanvas / SpriteCanvas / SpriteGenPanel / ReskinPanel / useZoomPan
@@ -80,7 +88,15 @@ scripts/
 ├── init-db.ts                 # DB 초기화 + 마이그레이션
 ├── cleanup.ts                 # data/ 누적 정리
 └── test-*.ts                  # 스프라이트시트/분류/방향 단독 테스트
-data/                          # gitignored 런타임
+electron/
+├── main.js               # Electron 메인 프로세스 (Next 서버 spawn + BrowserWindow)
+├── splash.html           # 로딩 스플래시
+└── icon.png              # 독 아이콘
+icon-assets/              # 앱 아이콘 소스 (gitignore 권장)
+├── Sprite Forge.icon/    # 아이콘 툴 프로젝트
+└── icon-source-foreground.png
+Sprite Forge.app/         # macOS 앱 번들 (더블클릭 실행)
+data/                     # gitignored 런타임
 ├── app.db (+ -wal/-shm)
 ├── mcp.json                   # MCP 서버 설정 (Claude CLI 가 읽음)
 ├── images/{generation_id}.png
