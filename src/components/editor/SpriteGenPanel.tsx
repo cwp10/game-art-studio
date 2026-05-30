@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid3x3, Lightbulb, Sparkles, Send, X } from "lucide-react";
+import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
 import { listPresets } from "@/lib/api/client";
@@ -152,8 +152,6 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
   const [exampleOpen, setExampleOpen] = useState(false);
 
   // AI 제안
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiQuestion, setAiQuestion] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -166,17 +164,17 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
   const canSubmit = actionPrompt.trim().length > 0 && !submitting;
 
   async function handleAiSuggest() {
-    const q = aiQuestion.trim();
-    if (!q || aiLoading) return;
+    if (aiLoading) return;
     setAiLoading(true);
     setAiError(null);
     setAiResult(null);
+    const question = actionPrompt.trim() || "동작을 추천해주세요";
     try {
       const res = await fetch("/api/sprite-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: q,
+          question,
           subjectType,
           direction: subjectType === "character" ? direction : undefined,
         }),
@@ -357,14 +355,15 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
                 )}
               </div>
               <button
-                onClick={() => setAiOpen(o => !o)}
+                onClick={handleAiSuggest}
+                disabled={aiLoading}
                 className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
-                  aiOpen
+                  aiLoading
                     ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
                     : "border-border text-text-muted hover:text-text-primary"
-                }`}
+                } disabled:opacity-60`}
               >
-                <Sparkles size={12} /> AI 제안
+                <Sparkles size={12} /> {aiLoading ? "생각 중…" : "AI 제안"}
               </button>
             </div>
           </div>
@@ -377,49 +376,25 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
             className="block min-h-[78px] w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
 
-          {/* AI 제안 미니 입력창 */}
-          {aiOpen && (
-            <div className="space-y-2 rounded-lg border border-border bg-bg-card p-2">
-              <div className="flex items-center gap-2">
-                <input
-                  value={aiQuestion}
-                  onChange={e => setAiQuestion(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAiSuggest();
-                    }
-                  }}
-                  placeholder="어떤 동작이 필요한지 물어보세요..."
-                  className="h-8 flex-1 rounded-md border border-border bg-bg-app px-2 text-xs text-text-primary outline-none placeholder:text-text-muted/40"
-                />
-                <button
-                  onClick={handleAiSuggest}
-                  disabled={aiLoading || !aiQuestion.trim()}
-                  className="flex h-8 w-8 items-center justify-center rounded-md bg-[color:var(--accent)] text-white disabled:opacity-40"
-                  title="제안 받기"
-                >
-                  <Send size={13} />
-                </button>
-              </div>
-              {aiLoading && <p className="text-[11px] text-text-muted">생각 중…</p>}
+          {/* AI 제안 결과 */}
+          {(aiError || aiResult) && (
+            <div className="space-y-1 rounded-lg border border-border bg-bg-card p-2">
               {aiError && (
                 <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
               )}
               {aiResult && (
-                <div className="space-y-1 rounded-md border border-border bg-bg-app/60 p-2">
+                <>
                   <p className="text-xs text-text-primary">{aiResult}</p>
                   <button
                     onClick={() => {
                       setActionPrompt(aiResult);
                       setAiResult(null);
-                      setAiOpen(false);
                     }}
                     className="rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
                   >
                     적용
                   </button>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -628,7 +603,9 @@ function facingPhrase(label: Direction): string {
  * - 캐릭터: anchorStrategy=feet, 자연어에 facingPhrase 포함.
  * - 이펙트/오브젝트: anchorStrategy=center, facingPhrase 생략.
  *
- * directions=1 이라 server.ts 가 1×N 스트립을 auto-reshape 하지 않는다(explicitSingleStrip).
+ * 프레임 수 → 정사각 그리드로 직접 계산해서 rows/cols 를 넘긴다(4→2×2, 9→3×3, 16→4×4, 25→5×5).
+ * directions 는 마커에 포함하지 않아 서버의 rows 강제 오버라이드를 피한다.
+ * 방향 정보는 자연어 facingPhrase 로만 전달.
  * 참조는 마커가 아니라 attachmentGenerationIds 로 전달 → /api/chat 이 [reference: id] prefix.
  */
 export function buildSpriteMessage(
@@ -638,10 +615,11 @@ export function buildSpriteMessage(
 ): { message: string; attachmentGenerationIds: string[] } {
   const isCharacter = state.subjectType === "character";
   const anchor = isCharacter ? "feet" : "center";
+  const side = FRAME_OPTS.find(f => f.value === state.frames)?.side ?? 2;
 
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
-    `directions=1; framesPerDir=${state.frames}; rows=1; cols=${state.frames}; ` +
+    `framesPerDir=${state.frames}; rows=${side}; cols=${side}; ` +
     `seamlessLoop=${state.seamlessLoop}]`;
 
   const nlParts: string[] = [state.actionPrompt];

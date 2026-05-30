@@ -343,9 +343,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         // rows=1 이고 cols > 4 인 경우: 다행 그리드로 자동 변환.
         // (시스템 프롬프트가 잘못 지시하거나 사용자가 명시해도 방어)
-        // 단, directions=1 이 명시적으로 넘어온 경우는 단일 방향 스트립 의도 → reshape 하지 않음.
-        const explicitSingleStrip = directions === 1;
-        if (rows === 1 && cols > 4 && !explicitSingleStrip) {
+        if (rows === 1 && cols > 4) {
           const n = cols;
           rows = Math.round(Math.sqrt(n));
           cols = Math.ceil(n / rows);
@@ -575,10 +573,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         // ── 빈 셀 자동 재생성 루프 ──────────────────────────────────────────
         // 모델이 그리드를 100% 못 채우는 가챠(신뢰성 ~50%)를 재시도로 흡수한다.
-        // 방향 캐릭터 시트(isCharacter && directions)에서만 재시도 — 단일/이펙트 등 비방향
-        // 시트는 1회로(불필요한 재생성·과금 방지). decorated/overrideInputPaths/anchorPivot 은
-        // 시도 간 불변(같은 프롬프트로 재생성).
-        const retryEnabled = isCharacter && !!directions;
+        // 캐릭터 시트는 방향 수 관계없이 재시도 — 발 교차 등 품질이 1회로는 불안정.
+        // 이펙트/오브젝트는 1회(그리드 충만도 실패 가능성이 낮고 과금 절약).
+        const retryEnabled = isCharacter;
         const MAX_RETRIES = retryEnabled ? 2 : 0; // 총 최대 3시도(방향 시트), 1시도(그 외)
         const spritesheetParams = {
           seamlessLoop,
