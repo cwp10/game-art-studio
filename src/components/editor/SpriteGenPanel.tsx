@@ -179,6 +179,8 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
           question,
           subjectType,
           direction: subjectType === "character" ? direction : undefined,
+          frames,
+          seamlessLoop,
         }),
       });
       const data = (await res.json()) as { suggestion?: string; error?: string };

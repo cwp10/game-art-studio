@@ -331,6 +331,18 @@ export async function uploadSpritesheet(args: {
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
+export async function removeGeneration(id: string): Promise<void> {
+  await fetch(`/api/generations/${id}`, { method: "DELETE" });
+}
+
+export async function galleryInsert(sessionId: string, generationId: string): Promise<void> {
+  await fetch(`/api/sessions/${sessionId}/gallery-insert`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ generationId }),
+  });
+}
+
 export async function listGenerations(opts?: { sessionId?: string; kind?: string; search?: string; limit?: number }): Promise<Generation[]> {
   const sp = new URLSearchParams();
   if (opts?.sessionId) sp.set("sessionId", opts.sessionId);

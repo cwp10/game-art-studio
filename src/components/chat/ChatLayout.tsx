@@ -18,6 +18,7 @@ import { PromptLibrarySheet } from "@/components/library/PromptLibrarySheet";
 import {
   createSession,
   deleteSession,
+  galleryInsert,
   listMessages,
   listPresets,
   listSessions,
@@ -726,19 +727,23 @@ export function ChatLayout() {
 
   // 갤러리에서 [첨부] — 이 이미지를 현재 대화에 결과 카드로 삽입해 카드의 모든 기능
   // (편집/레이어/스프라이트/리스킨/캐릭터/비교/참조/복제/저장)을 바로 쓸 수 있게 한다.
-  // 합성 카드라 DB 에 message 로 저장되진 않음 — recolor/upload 와 동일 패턴(원본은 갤러리에 그대로).
+  // DB 에 message 쌍을 저장해 앱 재실행 후에도 세션에서 복원 가능.
   const handleGalleryInsert = useCallback(
     async (payload: { generationId: string; prompt?: string; width: number; height: number; kind?: string }) => {
       // 활성 세션이 없으면(새 세션 상태) 새 세션을 만들어 활성화 — 이후 이 카드에서 한 작업이 이 세션에 쌓인다.
       // 업로드 흐름과 동일: set_active 가 유발하는 listMessages reload 가 합성 카드를 덮지 않도록 1회 skip.
-      if (!state.activeSessionId) {
+      let sid = state.activeSessionId;
+      if (!sid) {
         const title = (payload.prompt?.slice(0, 40) || "갤러리에서 추가").trim();
         const newSession = await createSession(title);
+        sid = newSession.id;
         const next = await listSessions();
         dispatch({ type: "set_sessions", sessions: next });
         skipNextLoadRef.current = true;
-        dispatch({ type: "set_active", sessionId: newSession.id });
+        dispatch({ type: "set_active", sessionId: sid });
       }
+      // 재실행 후 복원을 위해 메시지 쌍을 DB 에 저장 (fire-and-forget).
+      galleryInsert(sid, payload.generationId).catch(e => console.error("[gallery-insert]", e));
       dispatch({
         type: "add_result_card",
         tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
@@ -942,12 +947,12 @@ export function ChatLayout() {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-// 카테고리별 예시 1개씩: 캐릭터 / 배경 / 이펙트 / UI.
+// 카테고리별 예시 1개씩: 캐릭터 / 배경 / 이펙트 / 아이템.
 const SEED_PROMPTS = [
-  "도트 스타일 마법사 캐릭터, 정면, 투명 배경",
-  "초원 테마 게임 배경, 픽셀 아트, 횡스크롤",
-  "평타 이펙트 4프레임, 슬래시, 투명 배경",
-  "RPG 인벤토리 슬롯 UI 세트, 픽셀 아트, 투명 배경",
+  "픽셀 아트 여전사 캐릭터, 정면 대기 포즈, 64×64, 투명 배경",
+  "던전 지하 석조 배경, 도트 아트, 횡스크롤 플랫포머, 타일셋",
+  "파이어볼 발사 이펙트 6프레임, 오렌지·빨강, 투명 배경",
+  "판타지 RPG 아이템 아이콘 6종 세트, 검·방패·물약·열쇠·반지·왕관, 픽셀 아트",
 ];
 
 function EmptyState({

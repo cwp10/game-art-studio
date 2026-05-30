@@ -1,8 +1,8 @@
 "use client";
 
-import { Loader2, Palette, Upload, X } from "lucide-react";
+import { Loader2, Palette, Sparkles, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listGenerations, uploadImage } from "@/lib/api/client";
+import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 
 /**
@@ -81,6 +81,14 @@ export function ReskinPanel({
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [includeGrays, setIncludeGrays] = useState(false);
   const [extracting, setExtracting] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
+
+  // AI 제안
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiTarget, setAiTarget] = useState<"prompt" | "extra" | null>(null);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // 참조 전이 탭: 사용자가 외부 이미지를 업로드해 참조로 사용.
   async function handleUploadRef(file: File) {
@@ -117,6 +125,33 @@ export function ReskinPanel({
       )
       .catch(() => setRefs([]));
   }, [mode, refs, sessionId, generationId]);
+
+  async function handleAiSuggest(target: "prompt" | "extra") {
+    if (aiLoading) return;
+    setAiLoading(true);
+    setAiTarget(target);
+    setAiError(null);
+    setAiResult(null);
+    const currentVal = target === "prompt" ? prompt : extra;
+    const question = currentVal.trim() || (mode === "a" ? "새 스킨을 제안해주세요" : mode === "b" ? "색 변경을 제안해주세요" : "추가 지시를 제안해주세요");
+    try {
+      const res = await fetch("/api/reskin-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode, question, isSheet, isOverlay: overlay }),
+      });
+      const data = (await res.json()) as { suggestion?: string; error?: string };
+      if (!res.ok || !data.suggestion) {
+        setAiError(data.error ?? "제안 생성에 실패했습니다.");
+        return;
+      }
+      setAiResult(data.suggestion);
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   // 정밀 토글 진입 — 최초 1회 원본에서 주요 색 추출(클라이언트 canvas, 동일 출처라 taint 없음).
   function enterPrecise() {
@@ -214,13 +249,25 @@ export function ReskinPanel({
         {/* 모드별 입력 */}
         {mode === "a" && (
           <div className="shrink-0 space-y-1">
-            <label className="text-xs text-text-muted">새 스킨 설명</label>
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-muted">새 스킨 설명</label>
+              <AiSuggestButton
+                loading={aiLoading && aiTarget === "prompt"}
+                onClick={() => handleAiSuggest("prompt")}
+              />
+            </div>
             <textarea
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               placeholder="예: 파란 갑옷의 기사, 은빛 검"
               rows={3}
               className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
+            />
+            <AiSuggestResult
+              show={aiTarget === "prompt"}
+              result={aiResult}
+              error={aiError}
+              onApply={v => { setPrompt(v); setAiResult(null); }}
             />
             <p className="text-[11px] text-text-muted/70">
               포즈·실루엣·구도는 유지하고 색·재질·테마만 교체됩니다.
@@ -249,13 +296,25 @@ export function ReskinPanel({
 
             {bMode === "ai" ? (
               <div className="space-y-1">
-                <label className="text-xs text-text-muted">원하는 색 팔레트</label>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-text-muted">원하는 색 팔레트</label>
+                  <AiSuggestButton
+                    loading={aiLoading && aiTarget === "prompt"}
+                    onClick={() => handleAiSuggest("prompt")}
+                  />
+                </div>
                 <textarea
                   value={prompt}
                   onChange={e => setPrompt(e.target.value)}
                   placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
                   rows={3}
                   className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
+                />
+                <AiSuggestResult
+                  show={aiTarget === "prompt"}
+                  result={aiResult}
+                  error={aiError}
+                  onApply={v => { setPrompt(v); setAiResult(null); }}
                 />
                 <p className="text-[11px] text-text-muted/70">형태·선은 그대로 두고 색 팔레트만 바꿉니다.</p>
                 <p className="text-[11px] text-[color:var(--danger)]/90">
@@ -351,42 +410,87 @@ export function ReskinPanel({
             {refs === null ? (
               <p className="text-[11px] text-text-muted/60">세션 이미지를 불러오는 중…</p>
             ) : (
-              <div className="grid grid-cols-4 gap-1">
-                {/* 업로드 타일 — 세션 이미지가 없어도 항상 노출. */}
+              <div
+                className={`grid grid-cols-4 gap-1 rounded-lg transition-colors ${
+                  dragOver ? "bg-[color:var(--accent)]/10 ring-2 ring-[color:var(--accent)]/40" : ""
+                }`}
+                onDragEnter={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  dragCounter.current += 1;
+                  if (dragCounter.current === 1) setDragOver(true);
+                }}
+                onDragOver={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDragLeave={() => {
+                  dragCounter.current = Math.max(0, dragCounter.current - 1);
+                  if (dragCounter.current === 0) setDragOver(false);
+                }}
+                onDrop={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  dragCounter.current = 0;
+                  setDragOver(false);
+                  const f = [...e.dataTransfer.files].find(x => /^image\//.test(x.type));
+                  if (f) handleUploadRef(f);
+                }}
+              >
+                {/* 업로드 타일 — 클릭 + 드롭 안내. */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex aspect-square flex-col items-center justify-center gap-1 rounded border border-dashed border-border text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:opacity-50"
-                  title="이미지 업로드해서 참조로 사용"
+                  className={`flex aspect-square flex-col items-center justify-center gap-1 rounded border border-dashed text-text-muted disabled:opacity-50 ${
+                    dragOver
+                      ? "border-[color:var(--accent)] text-[color:var(--accent)]"
+                      : "border-border hover:border-[color:var(--accent)]/60 hover:text-text-primary"
+                  }`}
+                  title="클릭하거나 이미지를 드롭해서 업로드"
                 >
                   {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                  <span className="text-[9px]">{uploading ? "업로드 중" : "업로드"}</span>
+                  <span className="text-[9px]">{uploading ? "업로드 중" : dragOver ? "드롭!" : "업로드"}</span>
                 </button>
                 {refs.map(g => {
                   const sel = styleRefId === g.id;
                   return (
-                    <button
-                      key={g.id}
-                      onClick={() => setStyleRefId(sel ? null : g.id)}
-                      className={`relative aspect-square overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px] ${
-                        sel
-                          ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
-                          : "border-border hover:border-[color:var(--accent)]/50"
-                      }`}
-                      title={g.prompt ?? g.id}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`/api/images/${g.id}`}
-                        alt={g.prompt ?? "참조"}
-                        className="h-full w-full object-contain"
-                      />
-                      {sel && (
-                        <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[9px] font-bold text-white">
-                          ✓
-                        </span>
-                      )}
-                    </button>
+                    <div key={g.id} className="group relative aspect-square">
+                      <button
+                        onClick={() => setStyleRefId(sel ? null : g.id)}
+                        className={`h-full w-full overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px] ${
+                          sel
+                            ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
+                            : "border-border hover:border-[color:var(--accent)]/50"
+                        }`}
+                        title={g.prompt ?? g.id}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/images/${g.id}`}
+                          alt={g.prompt ?? "참조"}
+                          className="h-full w-full object-contain"
+                        />
+                        {sel && (
+                          <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[9px] font-bold text-white">
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                      {/* 삭제 버튼 — 호버 시 노출 */}
+                      <button
+                        onClick={async e => {
+                          e.stopPropagation();
+                          if (sel) setStyleRefId(null);
+                          setRefs(prev => prev?.filter(r => r.id !== g.id) ?? prev);
+                          await removeGeneration(g.id);
+                        }}
+                        className="absolute left-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[9px] text-white hover:bg-[color:var(--danger)] group-hover:flex"
+                        title="삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -417,13 +521,25 @@ export function ReskinPanel({
             )}
 
             <div className="space-y-1">
-              <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+                <AiSuggestButton
+                  loading={aiLoading && aiTarget === "extra"}
+                  onClick={() => handleAiSuggest("extra")}
+                />
+              </div>
               <textarea
                 value={extra}
                 onChange={e => setExtra(e.target.value)}
                 placeholder="예: 더 어둡고 차분하게"
                 rows={2}
                 className="block w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
+              />
+              <AiSuggestResult
+                show={aiTarget === "extra"}
+                result={aiResult}
+                error={aiError}
+                onApply={v => { setExtra(v); setAiResult(null); }}
               />
             </div>
           </div>
@@ -454,6 +570,56 @@ export function ReskinPanel({
         </button>
       </footer>
     </aside>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AI 제안 공유 서브컴포넌트
+
+function AiSuggestButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`ml-auto flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
+        loading
+          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+          : "border-border text-text-muted hover:text-text-primary"
+      } disabled:opacity-60`}
+    >
+      {loading ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+      {loading ? "생각 중…" : "AI 제안"}
+    </button>
+  );
+}
+
+function AiSuggestResult({
+  show,
+  result,
+  error,
+  onApply,
+}: {
+  show: boolean;
+  result: string | null;
+  error: string | null;
+  onApply: (v: string) => void;
+}) {
+  if (!show || (!result && !error)) return null;
+  return (
+    <div className="space-y-1 rounded-lg border border-border bg-bg-card p-2">
+      {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
+      {result && (
+        <>
+          <p className="text-xs text-text-primary">{result}</p>
+          <button
+            onClick={() => onApply(result)}
+            className="rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+          >
+            적용
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 
