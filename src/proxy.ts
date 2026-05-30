@@ -14,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   if (!req.nextUrl.pathname.startsWith("/api/")) return NextResponse.next();
 
   const host = req.headers.get("host")?.split(":")[0]?.toLowerCase();
