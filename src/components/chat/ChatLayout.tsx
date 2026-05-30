@@ -400,6 +400,7 @@ export function ChatLayout() {
       } else if (action === "overlay" && payload.generationId && payload.width && payload.height) {
         // 캐릭터 오버레이 = 리스킨 모드 c(참조 전이)를 시트 베이스로 바로 오픈.
         // 백엔드 동일 — 패널이 시트+모드c 일 때 "캐릭터 오버레이"로 리프레이밍.
+        setSpriteGen(null);
         setEditing({
           mode: "reskin",
           initialMode: "c",
@@ -411,6 +412,7 @@ export function ChatLayout() {
         });
       } else if (action === "make_sheet" && payload.generationId && payload.width && payload.height) {
         // 단일 이미지(비-시트) → 이 캐릭터를 참조로 스프라이트시트 생성 패널 오픈(fresh+ref).
+        setEditing(null);
         setSpriteGen({
           reference: {
             generationId: payload.generationId,
@@ -437,6 +439,7 @@ export function ChatLayout() {
               : action === "sprite_split"
                 ? "sprite"
                 : "reskin";
+        setSpriteGen(null);
         setEditing({
           mode,
           generationId: payload.generationId,
