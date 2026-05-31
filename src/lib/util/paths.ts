@@ -18,10 +18,14 @@ export const IMAGES_DIR = path.join(DATA_DIR, "images");
 export const THUMBS_DIR = path.join(DATA_DIR, "thumbnails");
 export const TMP_DIR = path.join(DATA_DIR, "tmp");
 export const LOGS_DIR = path.join(DATA_DIR, "logs");
+/** 수동 관리 참조 자산 (base.png 등). git 추적 대상 — 코드가 자동 생성하지 않는다. */
+export const REFERENCE_DIR = path.join(DATA_DIR, "reference");
+/** 자동 생성 그리드 템플릿 캐시. git 무시 — 런타임에 generateGridTemplate 이 채운다. */
+export const TEMPLATES_DIR = path.join(DATA_DIR, "templates");
 
 /** 호출 시점에 필요한 하위 폴더가 모두 있도록 보장. 멱등. */
 export function ensureDataDirs(): void {
-  for (const dir of [DATA_DIR, IMAGES_DIR, THUMBS_DIR, TMP_DIR, LOGS_DIR]) {
+  for (const dir of [DATA_DIR, IMAGES_DIR, THUMBS_DIR, TMP_DIR, LOGS_DIR, REFERENCE_DIR, TEMPLATES_DIR]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 }

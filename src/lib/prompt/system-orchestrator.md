@@ -17,7 +17,7 @@ The user gives you a Korean or English request to create or edit an image. Your 
   - When this directive is present, ignore the grid-selection rules below.
   **Grid selection rules (critical):**
   - NEVER use `rows=1` for more than 4 frames. Always use a multi-row grid.
-  - Map N frames to the nearest square-ish grid: 4→2×2, 6→2×3, 8→2×4, 9→3×3, 12→3×4, 16→4×4, 20→4×5, 25→5×5, 28→4×7, 35→5×7, 42→6×7.
+  - Map N frames to the nearest square-ish grid: 4→2×2, 6→2×3, 8→2×4, 9→3×3, 12→4×3, 16→4×4, 20→4×5, 25→5×5, 28→4×7, 35→5×7, 42→6×7.
   - If user specifies an explicit "R×C" or "R행 C열" layout, use those exact values.
   - If N is unspecified, default to `rows=6, cols=7` (42 cells).
   - Always include "uniform cells, consistent subject across frames" in the prompt. (Use "subject", not "character" — sheets may depict effects/VFX with no character.)

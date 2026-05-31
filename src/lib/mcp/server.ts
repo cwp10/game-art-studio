@@ -61,6 +61,8 @@ import {
   imagePath as imagePathFor,
   jobDir as jobDirFor,
   toRelative,
+  REFERENCE_DIR,
+  TEMPLATES_DIR,
 } from "../util/paths.js";
 import type { GenerationKind } from "../../types/db.js";
 
@@ -350,21 +352,13 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           log(`make_spritesheet auto-reshape: 1×${n} → ${rows}×${cols}`);
         }
 
-        // cellHeight: 정사각형. rows=1(4프레임 이하 가로 배치)은 가로를 1.5배 넓혀 동작이 잘리지 않게.
-        // 다행 그리드: 후처리(line 575)가 결과를 canvasW×canvasH 로 강제 리사이즈하므로 캔버스 총크기는
-        // 다운스트림 작업 픽셀량만 좌우한다. 셀당 최소 256px 를 보장(MIN_CELL)해 후처리·익스포트가
-        // 충분한 해상도를 받게 하되, max(rows,cols) 가 적은 그리드는 셀을 512 까지 키운다.
-        // NOTE: codex 백엔드(gpt-image image_gen)의 네이티브 출력은 1536×1024 계열로 고정 — 장축 1536px 가
-        // 모델이 실제로 그릴 수 있는 상한이다(data/logs codex 로그 pixelWidth:1536 / 기존 비시트 출력
-        // 1024·1536 으로 확인). 따라서 셀 수가 많으면(예: 8×12 → 장축 12셀 → 모델 실효 셀 1536/12≈128px)
-        // 캔버스를 키워도 모델이 그 안에 더 디테일하게 못 그린다. 이 경우 방향(행)단위 분할 생성(2)이 필요.
-        const MIN_CELL = 256;
-        const cellH = rows === 1
-          ? 768
-          : Math.max(MIN_CELL, Math.min(512, Math.floor(2048 / Math.max(rows, cols))));
-        const cellW = rows === 1
-          ? Math.min(Math.round(cellH * 2), Math.floor(6144 / cols))
-          : cellH;
+        // 생성 셀 384px 고정 → codex 네이티브 장축(1536px) 안으로 캔버스가 들어온다.
+        //   3×2:1152×768, 4×2:1536×768, 3×4:1152×1536, 4×4:1536×1536 — 모두 장축 ≤1536.
+        // 최종 출력은 FINAL_CELL_PX(512)로 업스케일(후처리 normalize 후 1회). 384→512 = ×4/3.
+        const CELL_PX = 384;       // codex 생성 셀 크기
+        const FINAL_CELL_PX = 512; // 업스케일 후 최종 셀 크기 (DB params·export 기준)
+        const cellH = CELL_PX;
+        const cellW = CELL_PX;
         const canvasW = cols * cellW;
         const canvasH = rows * cellH;
 
@@ -553,9 +547,18 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 참조 캐릭터가 있을 때 image[1] 로 넣어 스타일 힌트를 준다.
         const refGen = refId ? getGeneration(refId) : null;
         const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
-        const overrideInputPaths = refPath
-          ? [gridTemplatePath, refPath]   // [grid, ref]
-          : [gridTemplatePath];            // [grid only]
+
+        // base.png: walk/run 캐릭터 시트 생성 시 하체 포즈 형태 가이드로 자동 포함.
+        const basePosePath = path.join(REFERENCE_DIR, "base.png");
+        const hasBasePose = isCharacter && isWalk && fs.existsSync(basePosePath);
+
+        const overrideInputPaths = refPath && hasBasePose
+          ? [gridTemplatePath, refPath, basePosePath]  // [grid, char, base]
+          : refPath
+            ? [gridTemplatePath, refPath]              // [grid, char]
+            : hasBasePose
+              ? [gridTemplatePath, basePosePath]       // [grid, base only]
+              : [gridTemplatePath];                    // [grid only]
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
         // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
@@ -569,7 +572,13 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               : resolvedAnchor === "hip"
                 ? Math.round(cellH - paddingBottom - 1 - cellH * 0.9 * 0.45)
                 : cellH - paddingBottom - 1; // feet
-        const anchorPivot = { x: cx, y: anchorY };
+        // anchorPivot: 저장·export 는 FINAL_CELL_PX(512) 공간 기준이므로 ×(512/384) 스케일.
+        // codex 프롬프트(anchorRule)는 위 cx/cellH(384 공간) 값을 그대로 쓴다.
+        const pivotScale = FINAL_CELL_PX / CELL_PX;
+        const anchorPivot = {
+          x: Math.round(cx * pivotScale),
+          y: Math.round(anchorY * pivotScale),
+        };
 
         // ── 빈 셀 자동 재생성 루프 ──────────────────────────────────────────
         // 모델이 그리드를 100% 못 채우는 가챠(신뢰성 ~50%)를 재시도로 흡수한다.
@@ -585,8 +594,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           anchor: anchorPivot,
           rows,
           cols,
-          cellW,
-          cellH,
+          cellW: FINAL_CELL_PX,
+          cellH: FINAL_CELL_PX,
           fps: 12,
         };
 
@@ -683,6 +692,18 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               log,
             });
             log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
+
+            // 업스케일: 384px/셀 → 512px/셀 (×4/3). codex 네이티브 안에서 생성한 뒤
+            // sharp lanczos3 로 최종 출력 해상도를 확보.
+            const upW = cols * FINAL_CELL_PX;
+            const upH = rows * FINAL_CELL_PX;
+            const upTmp = `${filePath}.up.tmp`;
+            await sharp(filePath)
+              .resize(upW, upH, { kernel: "lanczos3", fit: "fill" })
+              .png()
+              .toFile(upTmp);
+            fs.renameSync(upTmp, filePath);
+            log(`make_spritesheet upscaled gen=${finalGenId} to ${upW}x${upH}`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
           }
@@ -695,9 +716,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           }
         }
 
-        // structuredContent shape 불변. elapsedMs 만 누적값으로 덮어쓴다(재시도 총 소요).
+        // structuredContent: elapsedMs 누적값 + 업스케일 후 실제 치수로 갱신.
         if (best?.structuredContent) {
           best.structuredContent.elapsedMs = cumulativeMs;
+          best.structuredContent.width = cols * FINAL_CELL_PX;
+          best.structuredContent.height = rows * FINAL_CELL_PX;
         }
         return best!;
       }
@@ -945,7 +968,7 @@ async function detectTransparentBg(imagePath: string): Promise<boolean> {
  *   - 외곽 셀 경계: 회색 1px (#cccccc) — 모델에게 셀 레이아웃만 시각적으로 전달.
  * 내부 safe-zone 박스는 v2 까지 그려넣었지만 모델이 그대로 출력에 복사하는
  * 부작용 → v3 부터는 그리지 않고 후처리(normalizeSpritesheetCells)로 패딩 강제.
- * data/templates/sprite-grid-v3-{cols}x{rows}x{cellW}x{cellH}.png 에 캐싱.
+ * data/templates/sprite-grid-v3-{cols}x{rows}x{cellW}x{cellH}.png 에 자동 캐싱(런타임 생성).
  */
 async function generateGridTemplate(
   cols: number,
@@ -955,9 +978,8 @@ async function generateGridTemplate(
 ): Promise<string> {
   const w = cols * cellW;
   const h = rows * cellH;
-  const templatesDir = path.join(DATA_DIR, "templates");
   const cachePath = path.join(
-    templatesDir,
+    TEMPLATES_DIR,
     `sprite-grid-v3-${cols}x${rows}x${cellW}x${cellH}.png`,
   );
   if (fs.existsSync(cachePath)) return cachePath;
@@ -982,7 +1004,7 @@ async function generateGridTemplate(
     }
   }
 
-  fs.mkdirSync(templatesDir, { recursive: true });
+  fs.mkdirSync(TEMPLATES_DIR, { recursive: true });
   await sharp(pixels, { raw: { width: w, height: h, channels: 3 } })
     .png()
     .toFile(cachePath);

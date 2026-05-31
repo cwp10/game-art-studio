@@ -4,7 +4,7 @@
  * 자연어 + attachmentGenerationIds 로 정확히 합성하는지 단언한다.
  *
  * 단일 방향 시트(rows×cols = 프레임 수별 게임표준 그리드)로 합성됨.
- * 그리드: 4→2×2, 6→2×3, 8→2×4, 12→3×4, 16→4×4. directions 키는 마커에 미포함(자연어 facing 으로 전달).
+ * 그리드: 6→2×3, 8→2×4, 12→4×3, 16→4×4. directions 키는 마커에 미포함(자연어 facing 으로 전달).
  *
  * 실행: npx tsx --tsconfig tsconfig.json scripts/test-sprite-marker.ts
  */
@@ -95,14 +95,14 @@ console.log("[Case 3] object");
   const p: SpriteGenState = {
     ...base(),
     subjectType: "object",
-    frames: 4,
+    frames: 6,
     actionPrompt: "코인 회전",
   };
   const { message } = buildSpriteMessage(p);
   const [directive, nl] = message.split("\n");
   assert(directive.includes("subjectType=object"), "subjectType=object");
   assert(directive.includes("anchorStrategy=center"), "anchorStrategy=center");
-  assert(directive.includes("rows=2") && directive.includes("cols=2"), "rows=2; cols=2 (4프레임 → 2×2)");
+  assert(directive.includes("rows=2") && directive.includes("cols=3"), "rows=2; cols=3 (6프레임 → 2×3)");
   assert(!nl.includes("facing"), "오브젝트는 facingPhrase 생략");
 }
 

@@ -27,7 +27,7 @@ export type Direction =
   | "DOWN-RIGHT"
   | "UP-LEFT"
   | "UP-RIGHT";
-export type FrameCount = 4 | 6 | 8 | 12 | 16;
+export type FrameCount = 6 | 8 | 12 | 16;
 
 export type SpriteGenState = {
   subjectType: SubjectType;
@@ -83,10 +83,9 @@ const COMPASS: Array<Direction | null> = [
 // 프레임 옵션 — 게임표준 그리드(짝수·장축 최소). 좌우대칭 동작(걷기/달리기)은 8(2×4)이 정석.
 // 장축 셀 수가 적을수록 모델(gpt-image, 장축 ~1536px)이 셀당 더 디테일하게 그린다.
 const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
-  { value: 4, rows: 2, cols: 2 },
   { value: 6, rows: 2, cols: 3 },
   { value: 8, rows: 2, cols: 4 },
-  { value: 12, rows: 3, cols: 4 },
+  { value: 12, rows: 4, cols: 3 },
   { value: 16, rows: 4, cols: 4 },
 ];
 

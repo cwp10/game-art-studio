@@ -141,6 +141,30 @@ function buildNaturalPrompt(job: ImageJob): string {
           `NEVER a linear arc. ALWAYS a cycle. `
         : "";
 
+      if (inputCount >= 3) {
+        // [0] 그리드 템플릿, [1] 참조 캐릭터, [2] base 포즈 레퍼런스
+        const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
+        return (
+          PROMPT_HEADER +
+          `I am attaching THREE images:\n` +
+          `(1) GRID TEMPLATE — the OUTPUT CANVAS. ` +
+          `Your output PNG must match its exact pixel dimensions, one animation frame per cell in the ${gridDim} grid.\n` +
+          `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
+          `and proportions in every frame.\n` +
+          `(3) BASE POSE REFERENCE — a neutral mannequin showing the correct walking animation poses. ` +
+          `Use image 3 ONLY as a form guide for:\n` +
+          `  • Body proportions and scale per frame\n` +
+          `  • Leg positions, stride width, and foot alternation (which foot is forward in each frame)\n` +
+          `  • Body height arc (lower at weight-bearing frames, higher at toe-off frames)\n` +
+          `Do NOT copy image 3's skin color, face, or style — apply image 2's character design to image 3's poses.\n\n` +
+          `Task: ${job.prompt}\n\n` +
+          `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
+          `Each frame shows image 2's character in the corresponding pose from image 3. ` +
+          `Each character must be fully contained within its own cell. ` +
+          loopRule
+        );
+      }
+
       if (inputCount >= 2) {
         // [0] 그리드 템플릿, [1] 참조 캐릭터
         return (
