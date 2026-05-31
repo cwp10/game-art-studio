@@ -25,10 +25,10 @@ export const BUILTIN_PRESETS: BuiltinPresetSeed[] = [
     negative_suffix: "smooth, antialiased, photorealistic",
   },
   {
-    name: "도트",
-    description: "더 작은 픽셀 (8x8 ~ 32x32 셀)",
-    prompt_suffix: "dot art, 8-bit, tiny sprite, pixelated, low resolution, retro 80s arcade style",
-    negative_suffix: "smooth, high resolution, photorealistic",
+    name: "카툰",
+    description: "굵은 아웃라인, 밝고 과장된 색감의 서양 만화 스타일",
+    prompt_suffix: "cartoon style, bold outlines, vibrant flat colors, exaggerated features, western comic style, 2D illustration, clean linework",
+    negative_suffix: "realistic, photorealistic, detailed shading, pixel art",
   },
   {
     name: "수채화",
@@ -47,6 +47,12 @@ export const BUILTIN_PRESETS: BuiltinPresetSeed[] = [
     description: "단순한 도형 + 제한된 색상, 모바일 게임 아이콘 풍",
     prompt_suffix: "minimalist, flat design, simple shapes, limited palette, clean vector illustration, mobile game icon style",
     negative_suffix: "detailed, photorealistic, busy composition",
+  },
+  {
+    name: "치비",
+    description: "큰 머리·작은 몸, 귀여운 SD(슈퍼 디포르메) 게임 캐릭터",
+    prompt_suffix: "chibi style, super deformed, SD character, big head small body, cute proportions, 2-3 head height ratio, rounded features, expressive eyes, game sprite style",
+    negative_suffix: "realistic proportions, photorealistic, tall figure",
   },
 ];
 
