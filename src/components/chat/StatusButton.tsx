@@ -33,16 +33,22 @@ export function StatusButton() {
   const [clearMsg, setClearMsg] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  async function clearCache() {
+  async function runCleanup() {
     setClearing(true);
     setClearMsg(null);
     try {
-      const res = await fetch("/api/cache", { method: "DELETE" });
-      const { cleared } = await res.json();
-      const total = Object.values(cleared as Record<string, number>).reduce((a, b) => a + b, 0);
-      setClearMsg(`${total}개 파일 삭제 완료`);
+      const res = await fetch("/api/cleanup", { method: "DELETE" });
+      const { deleted } = await res.json();
+      const { orphanGenerations, orphanFiles, unmatchedThumbs, tmp } = deleted as Record<string, number>;
+      const segments = [
+        orphanGenerations && `세션없는 생성 ${orphanGenerations}개`,
+        orphanFiles && `고아 파일 ${orphanFiles}개`,
+        unmatchedThumbs && `미매칭 썸네일 ${unmatchedThumbs}개`,
+        tmp && `tmp ${tmp}개`,
+      ].filter(Boolean);
+      setClearMsg(segments.length ? `${segments.join(" · ")} 삭제` : "정리할 항목이 없습니다");
     } catch {
-      setClearMsg("삭제 실패");
+      setClearMsg("정리 실패");
     } finally {
       setClearing(false);
     }
@@ -139,13 +145,13 @@ export function StatusButton() {
 
           <div className="border-t border-border px-3 py-2.5">
             <button
-              onClick={clearCache}
+              onClick={runCleanup}
               disabled={clearing}
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-text-muted hover:bg-bg-card hover:text-text-primary disabled:opacity-40"
             >
               {clearing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-              캐시 지우기
-              <span className="ml-auto text-[10px] text-text-muted/50">tmp · 썸네일</span>
+              파일 정리
+              <span className="ml-auto text-[10px] text-text-muted/50">고아 · tmp</span>
             </button>
             {clearMsg && (
               <p className="mt-1 text-center text-[11px] text-text-muted/60">{clearMsg}</p>
