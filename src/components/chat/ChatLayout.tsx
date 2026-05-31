@@ -6,6 +6,7 @@ import { chatReducer, initialState } from "./chat-state";
 import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
+import { StatusButton } from "./StatusButton";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
@@ -817,7 +818,8 @@ export function ChatLayout() {
         )}
         <header className="flex h-14 items-center border-b border-border px-4">
           <h1 className="font-mono text-sm text-text-muted">⌘ Sprite Forge</h1>
-          <span className="ml-auto text-xs text-text-muted">개인용 · Codex imagegen</span>
+          <span className="ml-auto mr-2 text-xs text-text-muted">개인용 · Codex imagegen</span>
+          <StatusButton />
         </header>
         <main className="flex-1 overflow-y-auto">
           {hasItems ? (

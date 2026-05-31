@@ -1,0 +1,107 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+
+export const dynamic = "force-dynamic";
+
+type ToolStatus = { ok: boolean; version?: string; error?: string };
+
+function checkCLI(cmd: string, args: string[], timeoutMs = 5000): Promise<ToolStatus> {
+  return new Promise(resolve => {
+    let out = "";
+    let timedOut = false;
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+      resolve({ ok: false, error: "timeout" });
+    }, timeoutMs);
+
+    child.stdout.on("data", (d: Buffer) => { out += d.toString(); });
+
+    child.on("error", err => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: err.message.includes("ENOENT") ? "not found" : err.message });
+    });
+
+    child.on("close", code => {
+      clearTimeout(timer);
+      if (timedOut) return;
+      if (code === 0) {
+        const version = out.split("\n")[0].trim();
+        resolve({ ok: true, version: version || undefined });
+      } else {
+        resolve({ ok: false, error: `exit ${code}` });
+      }
+    });
+  });
+}
+
+function checkMCP(timeoutMs = 8000): Promise<ToolStatus> {
+  return new Promise(resolve => {
+    const initMsg = JSON.stringify({
+      jsonrpc: "2.0", id: 1, method: "initialize",
+      params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "status-check", version: "1.0" } },
+    }) + "\n";
+
+    let out = "";
+    let timedOut = false;
+
+    const serverScript = path.join(process.cwd(), "src", "lib", "mcp", "server.ts");
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", serverScript],
+      {
+        cwd: process.cwd(),
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, IMAGEGEN_DATA_DIR: path.join(process.cwd(), "data") },
+      },
+    );
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+      resolve({ ok: false, error: "timeout" });
+    }, timeoutMs);
+
+    child.stdout.on("data", (d: Buffer) => {
+      out += d.toString();
+      try {
+        const parsed = JSON.parse(out.trim().split("\n").at(-1) ?? "");
+        if (parsed?.result?.serverInfo) {
+          clearTimeout(timer);
+          child.kill("SIGKILL");
+          if (!timedOut) resolve({ ok: true, version: parsed.result.serverInfo.version });
+        }
+      } catch {
+        // wait for more data
+      }
+    });
+
+    child.on("error", err => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: err.message });
+    });
+
+    child.on("close", () => {
+      clearTimeout(timer);
+      if (!timedOut && !out.includes("serverInfo")) {
+        resolve({ ok: false, error: "server exited" });
+      }
+    });
+
+    child.stdin.write(initMsg);
+    child.stdin.end();
+  });
+}
+
+export async function GET() {
+  const [claude, codex, mcp] = await Promise.all([
+    checkCLI("claude", ["--version"]),
+    checkCLI("codex", ["--version"]),
+    checkMCP(),
+  ]);
+
+  const allOk = claude.ok && codex.ok && mcp.ok;
+  return Response.json({ claude, codex, mcp }, { status: allOk ? 200 : 207 });
+}
