@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Image as ImageIcon, Paperclip, Search, X } from "lucide-react";
+import { Download, FolderOpen, Image as ImageIcon, Paperclip, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { listGenerations } from "@/lib/api/client";
@@ -81,13 +81,24 @@ export function GallerySheet({ open, onClose, onInsert }: Props) {
             <ImageIcon size={14} /> 갤러리
           </span>
           <span className="ml-2 text-xs text-text-muted/60">{items.length}개 · Esc 닫기</span>
-          <button
-            onClick={onClose}
-            className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
-            title="닫기"
-          >
-            <X size={14} />
-          </button>
+          <div className="ml-auto flex items-center gap-1">
+            {typeof window !== "undefined" && (window as any).electronAPI && (
+              <button
+                onClick={() => (window as any).electronAPI.openImagesFolder()}
+                className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+                title="images 폴더 열기"
+              >
+                <FolderOpen size={14} />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+              title="닫기"
+            >
+              <X size={14} />
+            </button>
+          </div>
         </header>
 
         <div className="space-y-2 border-b border-border p-3">

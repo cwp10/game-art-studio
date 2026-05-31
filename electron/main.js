@@ -168,8 +168,8 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-ipcMain.handle("open-data-folder", () => {
-  shell.openPath(path.join(PROJECT_DIR, "data"));
+ipcMain.handle("open-images-folder", () => {
+  shell.openPath(path.join(PROJECT_DIR, "data", "images"));
 });
 
 app.whenReady().then(async () => {
