@@ -1,7 +1,7 @@
 // SpriteForge Electron 셸 — launch.sh 의 오케스트레이션을 네이티브 창으로 옮긴 것.
 // Next 프로덕션 서버를 시스템 node 자식 프로세스로 띄우고(=네이티브 모듈 재빌드 불필요),
 // 포트가 열리면 BrowserWindow 로 전환한다. 우리가 띄운 서버는 종료 시 함께 정리한다.
-const { app, BrowserWindow, Menu, shell, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, shell, nativeImage } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -121,6 +121,9 @@ function createWindow() {
     titleBarStyle: "default",
     backgroundColor: "#0b0b0c",
     show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+    },
   });
 
   win.loadFile(path.join(__dirname, "splash.html"));
@@ -164,6 +167,10 @@ function buildMenu() {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+ipcMain.handle("open-data-folder", () => {
+  shell.openPath(path.join(PROJECT_DIR, "data"));
+});
 
 app.whenReady().then(async () => {
   buildMenu();

@@ -126,7 +126,12 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
         </ul>
       </div>
       <div className="border-t border-border p-3 text-[10px] text-text-muted/60">
-        <p>로컬 전용 · 데이터는 ./data/ 에 저장</p>
+        <p
+          className={(window as any).electronAPI ? "cursor-pointer hover:text-text-muted transition-colors" : ""}
+          onClick={() => (window as any).electronAPI?.openDataFolder()}
+        >
+          로컬 전용 · 데이터는 ./data/ 에 저장
+        </p>
       </div>
     </aside>
   );
