@@ -43,6 +43,8 @@ export function StatusButton() {
     }
   }
 
+  useEffect(() => { fetchStatus(); }, []);
+
   useEffect(() => {
     if (open && !status) fetchStatus();
   }, [open, status]);
