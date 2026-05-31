@@ -73,6 +73,8 @@ export function ReskinPanel({
   const [extra, setExtra] = useState("");
   const [styleRefId, setStyleRefId] = useState<string | null>(null);
   const [refs, setRefs] = useState<Generation[] | null>(null);
+  const [refScope, setRefScope] = useState<"session" | "gallery">("session");
+  const [galleryRefs, setGalleryRefs] = useState<Generation[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // 모드 b 하위: "ai"=codex img2img(자연어), "precise"=sharp 픽셀 색교체(팔레트→타깃).
@@ -125,6 +127,16 @@ export function ReskinPanel({
       )
       .catch(() => setRefs([]));
   }, [mode, refs, sessionId, generationId]);
+
+  // 갤러리 전체 이미지 목록 로드 — refScope가 "gallery"로 전환 시.
+  useEffect(() => {
+    if (mode !== "c" || refScope !== "gallery" || galleryRefs !== null) return;
+    listGenerations({ limit: 120 })
+      .then(gens =>
+        setGalleryRefs(gens.filter(g => g.id !== generationId && !NON_IMAGE_KINDS.has(g.kind))),
+      )
+      .catch(() => setGalleryRefs([]));
+  }, [mode, refScope, galleryRefs, generationId]);
 
   async function handleAiSuggest(target: "prompt" | "extra") {
     if (aiLoading) return;
@@ -391,11 +403,26 @@ export function ReskinPanel({
                 ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
               </div>
             )}
-            <label className="text-xs text-text-muted">
-              {overlay
-                ? "입힐 캐릭터 — 세션 이미지 선택 또는 업로드"
-                : "스타일 참조 이미지 — 세션 이미지 선택 또는 업로드"}
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-text-muted">
+                {overlay ? "입힐 캐릭터" : "스타일 참조 이미지"}
+              </label>
+              <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[11px]">
+                {(["session", "gallery"] as const).map(scope => (
+                  <button
+                    key={scope}
+                    onClick={() => setRefScope(scope)}
+                    className={`rounded px-2 py-0.5 ${
+                      refScope === scope
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    {scope === "session" ? "세션" : "갤러리"}
+                  </button>
+                ))}
+              </div>
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -407,8 +434,10 @@ export function ReskinPanel({
                 e.target.value = "";
               }}
             />
-            {refs === null ? (
-              <p className="text-[11px] text-text-muted/60">세션 이미지를 불러오는 중…</p>
+            {(refScope === "session" ? refs : galleryRefs) === null ? (
+              <p className="text-[11px] text-text-muted/60">
+                {refScope === "session" ? "세션 이미지를 불러오는 중…" : "갤러리를 불러오는 중…"}
+              </p>
             ) : (
               <div
                 className={`grid grid-cols-4 gap-1 rounded-lg transition-colors ${
@@ -452,7 +481,7 @@ export function ReskinPanel({
                   {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
                   <span className="text-[9px]">{uploading ? "업로드 중" : dragOver ? "드롭!" : "업로드"}</span>
                 </button>
-                {refs.map(g => {
+                {(refScope === "session" ? refs! : galleryRefs!).map(g => {
                   const sel = styleRefId === g.id;
                   return (
                     <div key={g.id} className="group relative aspect-square">
@@ -477,7 +506,8 @@ export function ReskinPanel({
                           </span>
                         )}
                       </button>
-                      {/* 삭제 버튼 — 호버 시 노출 */}
+                      {/* 삭제 버튼 — 세션 스코프에서만 노출 */}
+                      {refScope === "session" && (
                       <button
                         onClick={async e => {
                           e.stopPropagation();
@@ -490,6 +520,7 @@ export function ReskinPanel({
                       >
                         ✕
                       </button>
+                      )}
                     </div>
                   );
                 })}
