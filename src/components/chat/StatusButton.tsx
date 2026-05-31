@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Settings2, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Settings2, Trash2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 type ToolStatus = { ok: boolean; version?: string; error?: string };
@@ -29,7 +29,24 @@ export function StatusButton() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearMsg, setClearMsg] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  async function clearCache() {
+    setClearing(true);
+    setClearMsg(null);
+    try {
+      const res = await fetch("/api/cache", { method: "DELETE" });
+      const { cleared } = await res.json();
+      const total = Object.values(cleared as Record<string, number>).reduce((a, b) => a + b, 0);
+      setClearMsg(`${total}개 파일 삭제 완료`);
+    } catch {
+      setClearMsg("삭제 실패");
+    } finally {
+      setClearing(false);
+    }
+  }
 
   async function fetchStatus() {
     setLoading(true);
@@ -119,6 +136,21 @@ export function StatusButton() {
               새로고침을 눌러 확인하세요.
             </p>
           )}
+
+          <div className="border-t border-border px-3 py-2.5">
+            <button
+              onClick={clearCache}
+              disabled={clearing}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-text-muted hover:bg-bg-card hover:text-text-primary disabled:opacity-40"
+            >
+              {clearing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+              캐시 지우기
+              <span className="ml-auto text-[10px] text-text-muted/50">tmp · 썸네일</span>
+            </button>
+            {clearMsg && (
+              <p className="mt-1 text-center text-[11px] text-text-muted/60">{clearMsg}</p>
+            )}
+          </div>
         </div>
       )}
 
