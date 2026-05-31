@@ -145,6 +145,16 @@ export function deleteGeneration(id: string): void {
 }
 
 /**
+ * 후처리(업스케일/리사이즈/normalize)로 파일 치수가 바뀌면 DB width/height 를 동기화.
+ * runImageTool 이 생성 시점 크기를 기록하므로, make_spritesheet 의 업스케일 후 호출 필요.
+ */
+export function setGenerationDimensions(id: string, width: number, height: number): void {
+  getDb()
+    .prepare("UPDATE generations SET width = ?, height = ? WHERE id = ?")
+    .run(width, height, id);
+}
+
+/**
  * MCP 서버가 만든 generation 행을 사후에 세션·메시지에 연결.
  * Claude orchestrator 경로에서 사용: MCP 도구는 sessionId 를 모르기 때문에
  * 결과 도착 후 Next 라우트가 ownership 을 채워준다.

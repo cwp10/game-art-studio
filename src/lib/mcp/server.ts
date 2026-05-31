@@ -50,7 +50,7 @@ import {
   buildGaitPrompt,
   type Directions,
 } from "./spritesheet-classify.js";
-import { createGeneration, getGeneration, deleteGeneration } from "../db/repo/generations.js";
+import { createGeneration, getGeneration, deleteGeneration, setGenerationDimensions } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
 import {
@@ -703,6 +703,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               .png()
               .toFile(upTmp);
             fs.renameSync(upTmp, filePath);
+            // DB width/height 동기화 — runImageTool 이 기록한 생성 시점 크기를 업스케일 후 값으로 갱신.
+            setGenerationDimensions(finalGenId, upW, upH);
             log(`make_spritesheet upscaled gen=${finalGenId} to ${upW}x${upH}`);
           } catch (e) {
             log(`make_spritesheet post-process fail: ${(e as Error).message}`);
