@@ -2,6 +2,8 @@
 
 import { Brush, ChevronDown, Edit3, Eraser, Loader2, Maximize2, RotateCcw, Scissors, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { listGenerations } from "@/lib/api/client";
+import type { Generation } from "@/types/db";
 import { fitBox, rectRatioPoint, useZoomPan, ZoomPanControls } from "./useZoomPan";
 
 /**
@@ -35,6 +37,8 @@ type Props = {
   imageHeight: number;
   /** 캔버스 한 변의 최대 px. 패널이 더 좁으면 부모 폭에 자동 맞춤. 기본 1200. */
   maxDisplayPx?: number;
+  /** 참조 이미지 목록을 불러올 세션. undefined 면 전체 갤러리에서 로드. */
+  sessionId?: string | null;
   /**
    * 실행 — 한 번에 통합 적용. 셋 다 선택적이며 args 에 담긴 것만 순차 적용된다:
    *  - maskDataUrl+prompt: 인페인트 / resizeTarget: 정사각 리사이즈 / removeBg: 배경 제거
@@ -44,6 +48,7 @@ type Props = {
     prompt: string;
     resizeTarget: number | null;
     removeBg: boolean;
+    referenceGenerationId: string | null;
   }) => void;
   onCancel: () => void;
   /** 실행 중인 생성을 취소(abort). busy 일 때 취소 버튼이 이것을 호출. */
@@ -69,6 +74,7 @@ export function MaskCanvas({
   imageWidth,
   imageHeight,
   maxDisplayPx = 1200,
+  sessionId,
   onSubmit,
   onCancel,
   onCancelGeneration,
@@ -91,11 +97,31 @@ export function MaskCanvas({
   const [removeBg, setRemoveBg] = useState(false);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [prompt, setPrompt] = useState("");
+  // 참조 이미지 — 선택 시 인페인트 attachment 에 함께 전달.
+  const [refScope, setRefScope] = useState<"session" | "gallery">("session");
+  const [sessionRefs, setSessionRefs] = useState<Generation[] | null>(null);
+  const [galleryRefs, setGalleryRefs] = useState<Generation[] | null>(null);
+  const [refId, setRefId] = useState<string | null>(null);
   const drawingRef = useRef<Stroke | null>(null);
   // 리사이즈 시 stroke 좌표 정합성을 위해 스트로크가 시작된 후엔 avail 을 고정.
   // useLayoutEffect 의 클로저에서 최신 strokes.length 에 접근하기 위해 ref 사용.
   const strokesLenRef = useRef(0);
   useEffect(() => { strokesLenRef.current = strokes.length; }, [strokes]);
+
+  // 세션 참조 이미지 목록 — 최초 1회 로드 (sessionId 없으면 전체 갤러리에서)
+  useEffect(() => {
+    listGenerations({ sessionId: sessionId ?? undefined, limit: 60 })
+      .then(gens => setSessionRefs(gens.filter(g => g.id !== parentGenerationId && g.kind !== "mask")))
+      .catch(() => setSessionRefs([]));
+  }, [sessionId, parentGenerationId]);
+
+  // 갤러리 참조 이미지 목록 — "gallery" 탭 전환 시 1회 로드
+  useEffect(() => {
+    if (refScope !== "gallery" || galleryRefs !== null) return;
+    listGenerations({ limit: 120 })
+      .then(gens => setGalleryRefs(gens.filter(g => g.id !== parentGenerationId && g.kind !== "mask")))
+      .catch(() => setGalleryRefs([]));
+  }, [refScope, galleryRefs, parentGenerationId]);
 
   useLayoutEffect(() => {
     const sizer = sizerRef.current;
@@ -267,6 +293,7 @@ export function MaskCanvas({
       prompt: canInpaint ? prompt.trim() : "",
       resizeTarget,
       removeBg,
+      referenceGenerationId: refId,
     });
   }
 
@@ -426,6 +453,7 @@ export function MaskCanvas({
                   prompt: "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there",
                   resizeTarget: null,
                   removeBg: false,
+                  referenceGenerationId: null,
                 });
               }}
               disabled={!hasStrokes || busy}
@@ -448,6 +476,60 @@ export function MaskCanvas({
             // textarea 가 flex-col 안에서 squeeze 되어 height 가 1줄로 줄어드는 것 방지.
             className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
+        </div>
+
+        {/* 참조 이미지 — 선택사항 */}
+        <div className="shrink-0 space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-text-muted">참조 이미지 (선택)</label>
+            <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[11px]">
+              {(["session", "gallery"] as const).map(scope => (
+                <button
+                  key={scope}
+                  onClick={() => setRefScope(scope)}
+                  className={`rounded px-2 py-0.5 ${
+                    refScope === scope
+                      ? "bg-[color:var(--accent)]/20 text-text-primary"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {scope === "session" ? "세션" : "갤러리"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {(refScope === "session" ? sessionRefs : galleryRefs) === null ? (
+            <p className="text-[11px] text-text-muted/60">불러오는 중…</p>
+          ) : (refScope === "session" ? sessionRefs! : galleryRefs!).length === 0 ? (
+            <p className="text-[11px] text-text-muted/60">이미지 없음</p>
+          ) : (
+            <div className="grid grid-cols-5 gap-1">
+              {(refScope === "session" ? sessionRefs! : galleryRefs!).map(g => {
+                const sel = refId === g.id;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => setRefId(sel ? null : g.id)}
+                    className={`relative aspect-square overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px] ${
+                      sel
+                        ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
+                        : "border-border hover:border-[color:var(--accent)]/50"
+                    }`}
+                    title={g.prompt ?? g.id}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/images/${g.id}`} alt="" className="h-full w-full object-contain" />
+                    {sel && (
+                      <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[9px] font-bold text-white">✓</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {refId && (
+            <p className="text-[11px] text-[color:var(--accent)]/80">참조 이미지 선택됨 — 프롬프트와 함께 인페인트에 사용됩니다.</p>
+          )}
         </div>
 
         {/* 실행 시 함께 적용 — 리사이즈(긴 변 기준) 선택 + 배경 제거 토글. 프롬프트 아래·실행 버튼 근처. */}

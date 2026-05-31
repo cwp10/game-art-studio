@@ -464,11 +464,13 @@ export function ChatLayout() {
       prompt,
       resizeTarget,
       removeBg,
+      referenceGenerationId,
     }: {
       maskDataUrl: string | null;
       prompt: string;
       resizeTarget: number | null;
       removeBg: boolean;
+      referenceGenerationId: string | null;
     }) => {
       if (!editing || editing.mode !== "inpaint") return;
       let curId = editing.generationId;
@@ -478,8 +480,12 @@ export function ChatLayout() {
         // 1. 인페인트 (마스크 + 프롬프트가 있을 때만)
         if (maskDataUrl && prompt) {
           const maskId = await uploadMask(curId, maskDataUrl);
+          // 참조 이미지가 있으면 첫=입력 둘째=참조 순서로 attachment 에 포함.
+          const attachments = referenceGenerationId
+            ? [curId, referenceGenerationId]
+            : [curId];
           const r = await handleSend(prompt, {
-            attachmentGenerationIds: [curId],
+            attachmentGenerationIds: attachments,
             maskGenerationId: maskId,
           });
           if (r) ({ generationId: curId, width: curW, height: curH } = r);
@@ -854,6 +860,7 @@ export function ChatLayout() {
             imageUrl={editing.imageUrl}
             imageWidth={editing.width}
             imageHeight={editing.height}
+            sessionId={state.activeSessionId}
             busy={state.generating}
             onSubmit={handleInpaint}
             onCancel={() => setEditing(null)}
