@@ -70,22 +70,31 @@ async function ensureServer() {
     detached: true,
     stdio: ["ignore", log, log],
   });
-  serverProc.unref();
   if (!(await waitForServer())) throw new Error("Next 서버가 시간 내에 응답하지 않음");
 }
 
 function stopServer() {
-  if (!serverProc) return;
-  try {
-    process.kill(-serverProc.pid, "SIGTERM"); // 프로세스 그룹 종료
-  } catch {
+  if (serverProc) {
     try {
-      serverProc.kill("SIGTERM");
+      process.kill(-serverProc.pid, "SIGTERM"); // 프로세스 그룹 종료
     } catch {
-      /* 이미 종료됨 */
+      try {
+        serverProc.kill("SIGTERM");
+      } catch {
+        /* 이미 종료됨 */
+      }
     }
+    serverProc = null;
   }
-  serverProc = null;
+  // pnpm이 next-server를 별도 프로세스 그룹으로 띄운 경우를 대비해 포트로 직접 정리
+  try {
+    require("node:child_process").execSync(
+      `lsof -t -i:${PORT} | xargs kill -9`,
+      { stdio: "ignore" }
+    );
+  } catch {
+    /* 이미 종료됐거나 포트 미점유 */
+  }
 }
 
 function loadWindowState() {
