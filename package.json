@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H 127.0.0.1",
-    "build": "next build",
+    "dev": "NODE_OPTIONS=--max-old-space-size=4096 next dev -H 127.0.0.1",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 next build",
     "start": "next start -H 127.0.0.1",
     "lint": "eslint",
     "app": "electron electron/main.js",

@@ -47,7 +47,7 @@ import {
   inferSubjectType,
   buildDirectionPrompt,
   isLocomotion,
-  buildGaitPrompt,
+  isRunning,
   type Directions,
 } from "./spritesheet-classify.js";
 import { createGeneration, getGeneration, deleteGeneration, setGenerationDimensions } from "../db/repo/generations.js";
@@ -423,17 +423,15 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
-        // 걷기 등 보행 동작은 frame-count 인지형 gait 프롬프트(아래)가 발 교대를 전담.
-        // loopInstruction 은 idle/attack 등 비보행 사이클 폐쇄만 담당해 중복/충돌 방지.
         const isWalk = isLocomotion(userPrompt);
+        const isRun = isRunning(userPrompt);
         const loopInstruction = seamlessLoop
           ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
             `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
             `Design a CLOSED CYCLE with no beginning and no end: ` +
-            (isWalk
-              ? `the walk gait below must close seamlessly — Frame N's leg phase is the natural predecessor of Frame 1's. `
-              : `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
-                `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. `) +
+            `• Walk/run: Frame N's pose flows naturally back into Frame 1's pose. ` +
+            `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
+            `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
             `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
           : "";
 
@@ -514,17 +512,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
             : "";
 
-        // 걷기/달리기 등 보행: 한 사이클의 프레임 수 인지형 gait — 좌우 발 교차 강제.
-        // 방향 시트면 한 행(=cols 프레임)이 한 사이클; 비방향 시트는 전체 셀(rows*cols)이
-        // 행 우선 순서로 한 사이클. (rows=1 auto-reshape 후에도 총 프레임 기준으로 일관.)
-        // 캐릭터 시트에서만, seamlessLoop 무관하게 주입(걷기면 발은 항상 교대). 이펙트엔 X.
-        const gaitFrames = directions ? cols : rows * cols;
-        const gaitPrompt =
-          isCharacter && isWalk ? buildGaitPrompt(gaitFrames, !!directions) : "";
+        // run.png: 걷기·달리기 모두 stride/arm-swing 포즈 가이드로 사용.
+        const runPosePath = path.join(REFERENCE_DIR, "run.png");
+        const hasRunPose = isCharacter && isWalk && fs.existsSync(runPosePath);
+        const posePath = hasRunPose ? runPosePath : null;
+        const basePoseInstruction = hasRunPose
+          ? `The last attached image is a locomotion posture reference — use it as a guide for natural leg alternation and arm-swing across walk/run frames. `
+          : "";
 
         const decorated =
           `${userPrompt}. ` +
-          gaitPrompt +
+          basePoseInstruction +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
@@ -548,16 +546,12 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const refGen = refId ? getGeneration(refId) : null;
         const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-        // base.png: walk/run 캐릭터 시트 생성 시 하체 포즈 형태 가이드로 자동 포함.
-        const basePosePath = path.join(REFERENCE_DIR, "base.png");
-        const hasBasePose = isCharacter && isWalk && fs.existsSync(basePosePath);
-
-        const overrideInputPaths = refPath && hasBasePose
-          ? [gridTemplatePath, refPath, basePosePath]  // [grid, char, base]
+        const overrideInputPaths = refPath && posePath
+          ? [gridTemplatePath, refPath, posePath]      // [grid, char, pose(walk/run)]
           : refPath
             ? [gridTemplatePath, refPath]              // [grid, char]
-            : hasBasePose
-              ? [gridTemplatePath, basePosePath]       // [grid, base only]
+            : posePath
+              ? [gridTemplatePath, posePath]           // [grid, pose(walk/run) only]
               : [gridTemplatePath];                    // [grid only]
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.

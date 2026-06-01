@@ -355,7 +355,10 @@ export class CodexExecBackend implements ImageBackend {
     onProgress("starting", `codex exec (job ${job.id})`);
 
     const startedAt = performance.now();
-    const child = spawn("codex", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("codex", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
+    });
 
     // AbortSignal 연결
     if (signal) {

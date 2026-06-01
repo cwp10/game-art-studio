@@ -57,105 +57,27 @@ export function inferSubjectType(prompt: string, hasRef: boolean): SubjectType {
   return classifyAnchor(prompt, hasRef) === "effect" ? "effect" : "character";
 }
 
-// 보행(locomotion) 키워드 — 발이 교대로 움직여야 하는 동작. 있으면 gait 가이드 주입.
-// seamlessLoop 여부와 무관(걷기인데 loop 아니어도 발은 교대해야 함).
+// 보행(locomotion) 키워드 — 발이 교대로 움직여야 하는 동작.
 const LOCOMOTION_WORDS = [
   "걷기", "걸음", "walk", "walking", "run", "running", "달리기", "뛰기", "뛰는",
   "march", "marching", "행진", "조깅", "jog", "스프린트", "sprint", "질주", "이동", "보행",
 ];
 
-/**
- * userPrompt 에 보행(걷기·달리기·행진 등) 키워드가 있는지. 순수·결정적.
- * (대소문자 무시. 캐릭터 시트에서만 gait 가이드 주입에 사용 — 호출부가 게이팅.)
- */
+// 달리기 전용 키워드 — 걷기와 구분해 run.png 참조를 결정할 때 사용.
+const RUN_WORDS = [
+  "run", "running", "달리기", "뛰기", "뛰는", "스프린트", "sprint", "질주", "조깅", "jog",
+];
+
+/** userPrompt 에 보행(걷기·달리기·행진 등) 키워드가 있는지. 순수·결정적. */
 export function isLocomotion(prompt: string): boolean {
   const p = prompt.toLowerCase();
   return LOCOMOTION_WORDS.some(w => p.includes(w));
 }
 
-/**
- * 프레임 수 인지형 걷기 보행주기(gait) 지시. 캐릭터+보행 시 주입(이펙트엔 X).
- * N(=방향당 프레임 수) 프레임에 한 완전한 보행 주기를 담도록 지시하고, 좌우 발이
- * 확실히 교차(scissor)하도록 강제. 측면(LEFT/RIGHT)·정면/뒷면(DOWN/UP) 모두 다룸.
- * hasDirections=true 면 "모든 행이 같은 N프레임 사이클" 일관성 문구를 추가(방향 시트).
- *
- * loopInstruction 과 통합: seamlessLoop 일 때 server 는 이 gait 만 쓰고 별도 loop 예시는 생략.
- */
-export function buildGaitPrompt(framesPerDir: number, hasDirections: boolean): string {
-  const n = Math.max(2, framesPerDir);
-
-  // 앵커 배치 공식: extra=N-3 을 [seg1,seg2,seg3] 균등 배분.
-  // N=4→R=2,L=4 / N=6→R=3,L=5 / N=8→R=4,L=7 / N=10→R=4,L=8
-  const extra = Math.max(0, n - 3);
-  const base  = Math.floor(extra / 3);
-  const rem   = extra % 3;
-  const seg1  = base + (rem > 1 ? 1 : 0);
-  const seg2  = base + (rem > 0 ? 1 : 0);
-  const rightF = 1 + seg1 + 1;
-  const leftF  = rightF + seg2 + 1;
-
-  // 프레임 라벨 — 핵심 두 앵커만 상세히, 나머지는 간결하게.
-  const labels: string[] = [];
-  for (let f = 1; f <= n; f++) {
-    if (f === 1) {
-      labels.push(`F1=NEUTRAL(both feet together, upright)`);
-    } else if (f === rightF) {
-      labels.push(
-        `F${f}=★RIGHT-PLANT: RIGHT leg extended FORWARD(heel down), ` +
-        `LEFT leg pushed BEHIND(toe off) — widest stride, legs in a clear V shape`,
-      );
-    } else if (f === leftF) {
-      labels.push(
-        `F${f}=★LEFT-PLANT: LEFT leg extended FORWARD(heel down), ` +
-        `RIGHT leg pushed BEHIND(toe off) — exact mirror of F${rightF}`,
-      );
-    } else if (f < rightF) {
-      // idle → right: 오른발이 앞으로 열리는 중
-      const t = (f - 1) / (rightF - 1);
-      labels.push(
-        t < 0.5
-          ? `F${f}=right-opening(legs still close, right foot just lifting forward)`
-          : `F${f}=right-opening(right foot swinging forward, left foot pushing off)`,
-      );
-    } else if (f < leftF) {
-      // right → left: 다리가 몸 아래로 모이는 통과 단계 → 왼발이 앞으로 나감
-      const t = (f - rightF) / (leftF - rightF);
-      if (t <= 0.5) {
-        labels.push(
-          `F${f}=PASSING(legs converging under body — both feet nearly together below hips, ` +
-          `body at peak height; SIDE VIEW: legs form an X crossing under torso)`,
-        );
-      } else {
-        labels.push(
-          `F${f}=left-opening(left foot now swinging ahead of center, right foot planted; ` +
-          `legs beginning to separate again toward F${leftF})`,
-        );
-      }
-    } else {
-      // left → idle
-      const t = (f - leftF) / (n - leftF + 1);
-      labels.push(
-        t < 0.5
-          ? `F${f}=closing(left planted, right swinging forward, legs converging)`
-          : `F${f}=closing(both feet nearly together again, returning to neutral)`,
-      );
-    }
-  }
-
-  return (
-    `WALK CYCLE ALTERNATION — THE ONLY RULE THAT MATTERS: ` +
-    `frame F${rightF} has RIGHT foot forward / LEFT foot behind; ` +
-    `frame F${leftF} has LEFT foot forward / RIGHT foot behind. ` +
-    `F${rightF} and F${leftF} are MIRROR IMAGES at the legs — the leading foot is SWAPPED. ` +
-    `If F${rightF} and F${leftF} show the same foot leading, the animation is BROKEN — do not draw it that way. ` +
-    `Frame sequence: ${labels.join('; ')}. ` +
-    `SIDE VIEW: the silhouette of legs in F${rightF} is the reverse of F${leftF}. ` +
-    `FRONT/3-QUARTER VIEW: in F${rightF} the right boot protrudes forward; in F${leftF} the left boot protrudes forward. ` +
-    `Feet must be visible every frame (shorten cape/raise hem if needed). ` +
-    (hasDirections
-      ? `All direction rows use this same F1–F${n} sequence; only camera angle differs. `
-      : "")
-  );
+/** userPrompt 에 달리기 전용 키워드가 있는지. base.png(걷기) vs run.png(달리기) 분기에 사용. */
+export function isRunning(prompt: string): boolean {
+  const p = prompt.toLowerCase();
+  return RUN_WORDS.some(w => p.includes(w));
 }
 
 /** make_spritesheet 가 지원하는 방향 수. rows = directions 로 강제 매핑. */

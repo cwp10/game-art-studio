@@ -54,7 +54,7 @@ function checkMCP(timeoutMs = 8000): Promise<ToolStatus> {
       {
         cwd: process.cwd(),
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, IMAGEGEN_DATA_DIR: path.join(process.cwd(), "data") },
+        env: { ...process.env, IMAGEGEN_DATA_DIR: path.join(process.cwd(), "data"), NODE_OPTIONS: "--max-old-space-size=4096" },
       },
     );
 
