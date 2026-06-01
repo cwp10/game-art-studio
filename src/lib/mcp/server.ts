@@ -514,8 +514,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
             : "";
 
-        const basePoseInstruction = "";
-
         // 오브젝트 일관성 규칙 — 캐릭터 시트에서만 주입.
         const equipmentRule = isCharacter
           ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
@@ -532,7 +530,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 결과는 templates/ 에 캐시 — 동일 요청은 파일 재사용.
         let poseRefPath: string | null = null;
         let poseFrameAnglesText = "";
-        if (isWalk && isCharacter) {
+        if (isWalk && isCharacter && (!directions || directions === 1)) {
           const isRun = isRunning(userPrompt);
           try {
             const dirIndex = 6; // RIGHT(사이드뷰) 기본, 향후 파라미터로 확장
@@ -579,11 +577,12 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         const decorated =
           `${userPrompt}. ` +
-          basePoseInstruction +
           equipmentRule +
           walkCycleRule +
           poseRefInstruction +
-          `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
+          (poseRefPath || refPath
+            ? `The last attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `
+            : `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `) +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
           colCountRule +
@@ -599,10 +598,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
-        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid
-        const primaryTemplate = poseRefPath ?? gridTemplatePath;
-        const inputImages = [primaryTemplate];
+        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid(항상 마지막)
+        const inputImages: string[] = [];
+        if (poseRefPath) inputImages.push(poseRefPath);
         if (refPath) inputImages.push(refPath);
+        inputImages.push(gridTemplatePath);
         const overrideInputPaths = inputImages;
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.

@@ -203,70 +203,6 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${elements.join("")}</svg>`;
 }
 
-/** 단일 프레임 포즈 PNG 버퍼 반환 */
-export async function generatePoseFrame(frame: number, totalFrames = 8): Promise<Buffer> {
-  const svg = buildPoseSvg(frame, totalFrames);
-  return sharp(Buffer.from(svg)).png().toBuffer();
-}
-
-/** 8방향 시트의 총 방향 수 — 행별 dirIndex 매핑 기준. */
-const TOTAL_DIRECTIONS = 8;
-
-/**
- * 그리드 템플릿 각 셀에 해당 프레임의 스틱 피겨 포즈를 합성한 가이드 템플릿 반환.
- * 같은 컬럼(= 같은 보행 위상)에 같은 프레임 포즈를 넣어 프레임별 다리 각도를
- * Codex가 명확히 인식하게 한다.
- *
- * startDirIndex 가 0(또는 undefined 이외)이고 rows === 8 이면 각 행을 해당
- * 방향(directionLabels(8) 순서: DOWN→…→DN-RIGHT)의 스켈레톤으로 채운다.
- * startDirIndex 가 undefined 이거나 rows !== 8 이면 모든 행을 RIGHT(dirIndex=6,
- * 기존 사이드뷰)로 채운다 — 단일 방향 시트의 기존 동작.
- */
-export async function generatePoseGuidedTemplate(
-  gridTemplatePath: string,
-  rows: number,
-  cols: number,
-  cellW: number,
-  cellH: number,
-  startDirIndex?: number,
-  isRun = false,
-): Promise<Buffer> {
-  const skelH = Math.round(cellH * 0.65);
-  const skelW = Math.round(skelH * (W / H));
-  const offsetX = Math.round((cellW - skelW) / 2);
-  const offsetY = Math.round((cellH - skelH) * 0.35);
-
-  const perRowDirections = startDirIndex !== undefined && rows === TOTAL_DIRECTIONS;
-  const dirForRow = (r: number) => (perRowDirections ? r : 6);
-
-  const poseRows = await Promise.all(
-    Array.from({ length: rows }, async (_, r) => {
-      const dir = dirForRow(r);
-      return Promise.all(
-        Array.from({ length: cols }, async (_, c) => {
-          const svg = buildPoseSvg(c, cols, true, dir, isRun);
-          return sharp(Buffer.from(svg)).resize(skelW, skelH).png().toBuffer();
-        }),
-      );
-    }),
-  );
-
-  // 그리드 템플릿 위에 각 셀에 해당 (행,열) 포즈 합성
-  const composites: sharp.OverlayOptions[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      composites.push({
-        input: poseRows[r][c],
-        left: c * cellW + offsetX,
-        top: r * cellH + offsetY,
-        blend: "over",
-      });
-    }
-  }
-
-  return sharp(gridTemplatePath).composite(composites).png().toBuffer();
-}
-
 /** 프레임 하나의 다리 각도 데이터. */
 export type FrameAngle = {
   col: number;          // 0-based 컬럼 인덱스
@@ -341,22 +277,4 @@ export async function getCachedPoseRow(
 
   writeFileSync(cacheFile, buf);
   return { path: cacheFile, angles };
-}
-
-/** N프레임 보행 사이클 포즈를 가로로 이어붙인 레퍼런스 시트 PNG 버퍼 반환 */
-export async function generateWalkPoseSheet(totalFrames = 8): Promise<Buffer> {
-  const frames = await Promise.all(
-    Array.from({ length: totalFrames }, (_, i) => generatePoseFrame(i, totalFrames))
-  );
-  const composites = frames.map((buf, i) => ({
-    input: buf,
-    left: i * W,
-    top: 0,
-  }));
-  return sharp({
-    create: { width: W * totalFrames, height: H, channels: 4, background: { r: 26, g: 26, b: 46, alpha: 1 } },
-  })
-    .composite(composites)
-    .png()
-    .toBuffer();
 }

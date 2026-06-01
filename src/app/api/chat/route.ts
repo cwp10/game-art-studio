@@ -456,7 +456,11 @@ async function runChatCodexDirect(opts: {
   const toolCallId = `codex_${jobId}`;
 
   send({ type: "assistant_thinking" });
-  send({ type: "assistant_text", text: "(Claude CLI 연결 안 됨 — Codex로 직접 생성합니다)\n" });
+  const hasAttachments = (body.attachmentGenerationIds?.length ?? 0) > 0 || !!body.maskGenerationId;
+  const fallbackNotice = hasAttachments
+    ? "(Claude CLI 연결 안 됨 — 첨부 이미지는 지원되지 않아 텍스트만으로 생성합니다)\n"
+    : "(Claude CLI 연결 안 됨 — Codex로 직접 생성합니다)\n";
+  send({ type: "assistant_text", text: fallbackNotice });
   send({ type: "tool_call_started", toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } });
 
   const innerJobId = newJobId();
@@ -502,19 +506,6 @@ async function runChatCodexDirect(opts: {
     ended_at: Date.now(),
   });
 
-  send({
-    type: "tool_call_finished",
-    toolCallId,
-    result: {
-      generationId: gen.id,
-      imageUrl: `/api/images/${gen.id}`,
-      width: result.width,
-      height: result.height,
-      kind: "text2img",
-      createdAt: gen.created_at,
-    },
-  });
-
   const assistantMsg = createMessage({
     session_id: sessionId,
     role: "assistant",
@@ -532,6 +523,19 @@ async function runChatCodexDirect(opts: {
     status: "succeeded",
     result: { generationId: gen.id, assistantMessageId: assistantMsg.id, generationIds: [gen.id], codexFallback: true },
     ended_at: Date.now(),
+  });
+
+  send({
+    type: "tool_call_finished",
+    toolCallId,
+    result: {
+      generationId: gen.id,
+      imageUrl: `/api/images/${gen.id}`,
+      width: result.width,
+      height: result.height,
+      kind: "text2img",
+      createdAt: gen.created_at,
+    },
   });
 
   send({ type: "message_completed", messageId: assistantMsg.id });

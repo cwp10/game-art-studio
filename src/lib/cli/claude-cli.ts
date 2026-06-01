@@ -291,7 +291,7 @@ let _claudeAvailCache: { v: boolean; ts: number } | null = null;
  *       이 함수는 "바이너리 존재 여부"만 보장한다.
  */
 export async function checkClaudeAvailable(): Promise<boolean> {
-  if (_claudeAvailCache && Date.now() - _claudeAvailCache.ts < 60_000) {
+  if (_claudeAvailCache && Date.now() - _claudeAvailCache.ts < (_claudeAvailCache.v ? 60_000 : 10_000)) {
     return _claudeAvailCache.v;
   }
   const v = await new Promise<boolean>(resolve => {
