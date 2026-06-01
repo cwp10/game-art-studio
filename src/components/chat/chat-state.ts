@@ -100,6 +100,7 @@ export type ChatAction =
   | { type: "suggestions_received"; suggestId: string; items: Array<{ label: string; body: string }> }
   | { type: "suggestions_failed"; suggestId: string; error: string }
   | { type: "suggestion_picked"; suggestId: string; body: string }
+  | { type: "restore_in_progress" }
   | { type: "reset_items" };
 
 export const initialState: ChatState = {
@@ -410,6 +411,19 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             ],
           },
         ],
+      };
+    }
+    case "restore_in_progress": {
+      // 진행 중인 세션으로 돌아왔을 때 마지막 user 아이템 뒤에 pending assistant 삽입.
+      const lastItem = state.items[state.items.length - 1];
+      if (!lastItem || lastItem.kind !== "user") return state;
+      return {
+        ...state,
+        items: [
+          ...state.items,
+          { kind: "assistant", id: "__pending__", toolCalls: [], finished: false },
+        ],
+        generating: true,
       };
     }
     case "reset_items":

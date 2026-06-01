@@ -86,6 +86,8 @@ export function ChatLayout() {
   // 현재 세션 items 에 dispatch 하는 것을 차단(다른 세션 메시지 누수 방지). 서버 생성은
   // 계속 진행되어 결과는 DB 에 저장됨 — 해당 세션 복귀 시 load_messages 로 표시.
   const streamSeqRef = useRef(0);
+  // 진행 중인 세션 ID 집합 — 세션 전환 후 복귀 시 "생성 중..." 복원에 사용
+  const generatingSessionsRef = useRef<Set<string>>(new Set());
   // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
@@ -118,7 +120,13 @@ export function ChatLayout() {
     // 현재 세션 items 를 덮어쓰지 못하게 한다.
     const loadAbort = new AbortController();
     listMessages(state.activeSessionId, loadAbort.signal)
-      .then(messages => dispatch({ type: "load_messages", messages }))
+      .then(messages => {
+        dispatch({ type: "load_messages", messages });
+        // 이 세션의 생성이 아직 진행 중이면 pending assistant 아이템 복원
+        if (generatingSessionsRef.current.has(state.activeSessionId!)) {
+          dispatch({ type: "restore_in_progress" });
+        }
+      })
       .catch(e => {
         if ((e as Error).name !== "AbortError") console.error("[load-messages]", e);
       });
@@ -301,6 +309,10 @@ export function ChatLayout() {
       const myToken = ++streamSeqRef.current;
       const isCurrent = () => streamSeqRef.current === myToken;
 
+      // 진행 중 세션 추적 — 알려진 세션이면 즉시, 새 세션이면 session_started 후 추가
+      let trackedSessionId: string | null = currentSessionId;
+      if (currentSessionId) generatingSessionsRef.current.add(currentSessionId);
+
       // 생성 결과(generationId/치수)를 캡처해 호출자에 반환 — 편집 패널의 연속 편집에 사용.
       let sendResult: { generationId: string; width: number; height: number } | null = null;
       const abort = new AbortController();
@@ -319,6 +331,11 @@ export function ChatLayout() {
             dispatch({ type: "sse", event });
             // 새 세션이 만들어지는 즉시(생성 시작 시점) 사이드바 갱신 — 응답 완료까지 기다리지 않음.
             if (event.type === "session_started") {
+              // 새 세션 케이스: 이제 실제 sessionId 를 알았으므로 추적 업데이트
+              if (!currentSessionId) {
+                trackedSessionId = event.sessionId;
+                generatingSessionsRef.current.add(event.sessionId);
+              }
               listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
             }
             if (event.type === "tool_call_finished" && "generationId" in event.result) {
@@ -347,6 +364,21 @@ export function ChatLayout() {
         // 내 스트림이 여전히 현재일 때만 generating 해제 — 전환 후엔 새 컨텍스트 상태를 건드리지 않음.
         if (isCurrent()) dispatch({ type: "set_generating", generating: false });
         if (abortRef.current === abort) abortRef.current = null;
+
+        // 진행 중 추적 정리
+        if (trackedSessionId) generatingSessionsRef.current.delete(trackedSessionId);
+
+        // 스트림이 완료됐을 때 사용자가 이미 이 세션으로 돌아와 있으면 messages 를
+        // reload 해 완료된 결과를 표시하고, restore 로 켜둔 generating 을 내린다
+        // (isCurrent()=false 라 위 set_generating 이 스킵되므로 여기서 명시 해제).
+        if (!isCurrent() && trackedSessionId && activeSessionIdRef.current === trackedSessionId) {
+          listMessages(trackedSessionId)
+            .then(messages => {
+              dispatch({ type: "load_messages", messages });
+              dispatch({ type: "set_generating", generating: false });
+            })
+            .catch(() => {});
+        }
       }
       return sendResult;
     },
