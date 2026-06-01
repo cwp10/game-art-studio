@@ -26,6 +26,7 @@ function assert(cond: boolean, msg: string) {
 function base(): SpriteGenState {
   return {
     subjectType: "character",
+    contextType: "character",
     direction: "DOWN",
     frames: 8,
     stylePresetId: null,

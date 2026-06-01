@@ -8,16 +8,14 @@ import { listPresets } from "@/lib/api/client";
 /**
  * SpriteGenPanel — 스프라이트시트 전용 생성 패널 (editor 오버레이, ChatLayout 우측).
  *
- * 피사체(캐릭터/이펙트/오브젝트) · 방향(캐릭터 전용) · 프레임 수 · 스타일 · 루프 ·
- * 동작 프롬프트를 구성해 한 장의 단일 방향 스트립 시트를 생성한다. 패널이 스타일
- * suffix 까지 해석해 완성된 메시지를 onSubmit 으로 부모(ChatLayout)에 넘긴다.
- *
- * 경계면: onSubmit 은 완성된 { message, attachmentGenerationIds } 배열을 받는다.
- * 마커 directive(rows=R; cols=C — 프레임 수별 게임표준 그리드)는 그대로 make_spritesheet 로 흐르며,
- * rows≥2 이므로 server.ts 의 1×N auto-reshape 대상이 아니다.
+ * contextMode(캐릭터|오브젝트) + tab(subject|effect) 2축으로 피사체를 선택한다.
+ * - 캐릭터 모드: 캐릭터 탭 | 이펙트 탭 (캐릭터에 어울리는 이펙트)
+ * - 오브젝트 모드: 오브젝트 탭 | 이펙트 탭 (오브젝트에 어울리는 이펙트)
+ * 모드 전환은 탭 아래 소형 링크로.
  */
 
 export type SubjectType = "character" | "effect" | "object";
+export type ContextMode = "character" | "object";
 export type Direction =
   | "DOWN"
   | "LEFT"
@@ -31,7 +29,8 @@ export type FrameCount = 4 | 6 | 8 | 12 | 16;
 
 export type SpriteGenState = {
   subjectType: SubjectType;
-  direction: Direction; // 캐릭터만 사용
+  contextType: ContextMode; // effect 탭일 때 어떤 컨텍스트의 이펙트인지
+  direction: Direction;
   frames: FrameCount;
   stylePresetId: string | null;
   seamlessLoop: boolean;
@@ -39,17 +38,18 @@ export type SpriteGenState = {
 };
 
 type Props = {
-  /** 참조 이미지 generation ID (있으면 그 캐릭터를 모든 프레임에 참조). */
+  /** 참조 이미지 generation ID (있으면 그 캐릭터/오브젝트를 모든 프레임에 참조). */
   referenceId?: string;
   /** 참조 썸네일 URL. */
   referenceImageUrl?: string;
+  /** 패널 초기 컨텍스트. "character" → 캐릭터|이펙트, "object" → 오브젝트|이펙트. */
+  initialSubjectMode?: ContextMode;
   onSubmit: (
     messages: Array<{ message: string; attachmentGenerationIds: string[] }>,
   ) => void;
   onClose: () => void;
 };
 
-// 방향 버튼 라벨 (주요 4방향은 한글 포함, 대각은 화살표만).
 const DIRECTION_LABELS: Record<Direction, string> = {
   DOWN: "↓ 정면",
   LEFT: "← 왼쪽",
@@ -61,7 +61,6 @@ const DIRECTION_LABELS: Record<Direction, string> = {
   "UP-RIGHT": "↗",
 };
 
-// 팝오버 나침반 셀 전용 심볼 — charAt(0) 대신 명시적 맵 사용.
 const DIRECTION_SYMBOLS: Record<Direction, string> = {
   DOWN: "↓",
   LEFT: "←",
@@ -73,15 +72,12 @@ const DIRECTION_SYMBOLS: Record<Direction, string> = {
   "UP-RIGHT": "↗",
 };
 
-// 나침반 레이아웃(3×3, 중앙 비움) — 팝오버 그리드 순서.
 const COMPASS: Array<Direction | null> = [
   "UP-LEFT", "UP", "UP-RIGHT",
   "LEFT", null, "RIGHT",
   "DOWN-LEFT", "DOWN", "DOWN-RIGHT",
 ];
 
-// 프레임 옵션 — 게임표준 그리드(짝수·장축 최소). 좌우대칭 동작(걷기/달리기)은 8(2×4)이 정석.
-// 장축 셀 수가 적을수록 모델(gpt-image, 장축 ~1536px)이 셀당 더 디테일하게 그린다.
 const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 4,  rows: 2, cols: 2 },
   { value: 6,  rows: 2, cols: 3 },
@@ -90,9 +86,9 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 16, rows: 4, cols: 4 },
 ];
 
+type ExampleKey = "character" | "object" | "character-effect" | "object-effect";
 
-// subjectType 별 예시 — 라벨 + 동작 묘사(actionPrompt 에 삽입).
-const EXAMPLES: Record<SubjectType, Array<{ label: string; text: string }>> = {
+const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
   character: [
     { label: "공격 모션", text: "짧은 예비동작 후 몸을 빠르게 앞으로 실으며 한 번 강하게 공격하고 자연스럽게 돌아오는 동작" },
     { label: "걷기 모션", text: "자연스러운 보행 사이클, 팔과 다리가 번갈아 움직이며 부드럽게 전진하는 동작" },
@@ -100,16 +96,23 @@ const EXAMPLES: Record<SubjectType, Array<{ label: string; text: string }>> = {
     { label: "달리기 모션", text: "몸을 약간 앞으로 기울이며 팔을 힘차게 흔들고 빠르게 달리는 동작" },
     { label: "대기 모션", text: "가만히 서서 아주 미세하게 호흡하고 몸이 살짝 흔들리는 자연스러운 대기 동작" },
   ],
-  effect: [
-    { label: "폭발 이펙트", text: "중앙에서 바깥으로 퍼지는 강렬한 폭발, 불꽃과 연기가 함께 퍼지는 동작" },
-    { label: "번개 이펙트", text: "위에서 아래로 지그재그로 내리치는 날카로운 번개 줄기 동작" },
-    { label: "슬래시 이펙트", text: "대각선으로 빠르게 지나가는 검 궤적, 빛나는 잔상이 남는 동작" },
-    { label: "힐 이펙트", text: "아래에서 위로 올라오는 부드러운 녹색 빛 파티클 동작" },
-  ],
   object: [
     { label: "코인 회전", text: "동전이 Y축으로 빙글빙글 회전하며 반짝이는 동작" },
     { label: "보물 상자 열림", text: "뚜껑이 천천히 열리며 빛이 흘러나오는 동작" },
     { label: "불꽃 흔들림", text: "촛불이나 모닥불이 부드럽게 좌우로 흔들리는 동작" },
+    { label: "아이템 부유", text: "아이템이 천천히 위아래로 떠다니며 은은하게 빛나는 루프 동작" },
+  ],
+  "character-effect": [
+    { label: "공격 이펙트", text: "빠른 검 궤적과 빛 잔상이 대각선으로 지나가는 슬래시 이펙트" },
+    { label: "마법 폭발", text: "중앙에서 바깥으로 퍼지는 강렬한 마법 폭발, 파티클이 사방으로 흩어지는 동작" },
+    { label: "힐 이펙트", text: "아래에서 위로 올라오는 부드러운 녹색 빛 파티클, 치유의 기운이 감도는 동작" },
+    { label: "방어막 이펙트", text: "캐릭터 주변을 둘러싸는 에너지 방어막이 생겼다가 사라지는 동작" },
+  ],
+  "object-effect": [
+    { label: "획득 이펙트", text: "아이템 위에서 반짝이는 빛 파티클이 방사형으로 흩어지는 동작" },
+    { label: "파괴 이펙트", text: "오브젝트가 산산조각 나며 파편이 사방으로 흩어지고 먼지가 피어오르는 동작" },
+    { label: "상호작용 이펙트", text: "오브젝트 주변에 빛나는 테두리와 스파크가 생겼다 사라지는 동작" },
+    { label: "등장 이펙트", text: "오브젝트 아래에서 빛이 수직으로 솟구치며 나타나는 연출" },
   ],
 };
 
@@ -131,7 +134,7 @@ function loadRecents(): string[] {
 function saveRecent(action: string) {
   if (typeof window === "undefined") return;
   const trimmed = action.trim();
-  if (trimmed.length < 20) return; // 20자 이상만 저장
+  if (trimmed.length < 20) return;
   const prev = loadRecents().filter(x => x !== trimmed);
   const next = [trimmed, ...prev].slice(0, RECENT_MAX);
   try {
@@ -141,30 +144,61 @@ function saveRecent(action: string) {
   }
 }
 
-export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClose }: Props) {
-  const [subjectType, setSubjectType] = useState<SubjectType>("character");
+export function SpriteGenPanel({
+  referenceId,
+  referenceImageUrl,
+  initialSubjectMode,
+  onSubmit,
+  onClose,
+}: Props) {
+  // contextMode: 캐릭터 모드 or 오브젝트 모드
+  const [contextMode, setContextMode] = useState<ContextMode>(initialSubjectMode ?? "character");
+  // tab: "subject"(캐릭터 또는 오브젝트) or "effect"
+  const [tab, setTab] = useState<"subject" | "effect">("subject");
+
+  // tab + contextMode → subjectType
+  const subjectType: SubjectType = tab === "effect" ? "effect" : contextMode;
+
   const [direction, setDirection] = useState<Direction>("DOWN");
   const [frames, setFrames] = useState<FrameCount>(8);
   const [stylePresetId, setStylePresetId] = useState<string | null>(null);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
 
-  // 팝오버 토글
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
 
-  // AI 제안
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // 마운트 시점 1회 로드 — 패널은 클라이언트 오버레이로만 마운트되므로 lazy initializer 안전.
   const [recents, setRecents] = useState<string[]>(loadRecents);
   const [submitting, setSubmitting] = useState(false);
 
   const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
   const canSubmit = actionPrompt.trim().length > 0 && !submitting;
+
+  // 탭·모드 전환 시 AI 결과/에러 초기화
+  function switchTab(t: "subject" | "effect") {
+    setTab(t);
+    setExampleOpen(false);
+    setAiResult(null);
+    setAiError(null);
+  }
+
+  function switchContextMode(mode: ContextMode) {
+    setContextMode(mode);
+    setTab("subject");
+    setExampleOpen(false);
+    setAiResult(null);
+    setAiError(null);
+  }
+
+  // 이펙트 탭용 exampleKey — 컨텍스트(character-effect | object-effect)
+  const exampleKey: ExampleKey = tab === "subject"
+    ? contextMode
+    : `${contextMode}-effect` as ExampleKey;
 
   async function handleAiSuggest() {
     if (aiLoading) return;
@@ -179,6 +213,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
         body: JSON.stringify({
           question,
           subjectType,
+          contextType: tab === "effect" ? contextMode : undefined,
           direction: subjectType === "character" ? direction : undefined,
           frames,
           seamlessLoop,
@@ -204,6 +239,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
       const suffix = await resolveStyleSuffix(stylePresetId);
       const state: SpriteGenState = {
         subjectType,
+        contextType: contextMode,
         direction,
         frames,
         stylePresetId,
@@ -255,49 +291,66 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
           </div>
         )}
 
-        {/* 세그먼트 탭 — 피사체 종류 */}
-        <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
-          {(["character", "effect", "object"] as const).map(s => (
+        {/* 2-탭 — contextMode 에 따라 [캐릭터|이펙트] 또는 [오브젝트|이펙트] */}
+        <div className="shrink-0 space-y-1.5">
+          <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
             <button
-              key={s}
-              onClick={() => {
-                setSubjectType(s);
-                setExampleOpen(false);
-              }}
+              onClick={() => switchTab("subject")}
               className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
-                subjectType === s
+                tab === "subject"
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
                   : "border-transparent text-text-muted hover:text-text-primary"
               }`}
             >
-              {s === "character" ? "캐릭터" : s === "effect" ? "이펙트" : "오브젝트"}
+              {contextMode === "character" ? "캐릭터" : "오브젝트"}
             </button>
-          ))}
+            <button
+              onClick={() => switchTab("effect")}
+              className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
+                tab === "effect"
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                  : "border-transparent text-text-muted hover:text-text-primary"
+              }`}
+            >
+              이펙트
+            </button>
+          </div>
+          {/* 모드 전환 링크 */}
+          <div className="flex justify-end">
+            <button
+              onClick={() => switchContextMode(contextMode === "character" ? "object" : "character")}
+              className="text-[11px] text-text-muted/50 hover:text-text-muted"
+            >
+              {contextMode === "character" ? "오브젝트 모드로 전환 →" : "캐릭터 모드로 전환 →"}
+            </button>
+          </div>
         </div>
 
-        {/* 옵션 줄 — 방향 + 프레임 + 스타일 + 루프 */}
+        {/* 옵션 줄 — 방향(캐릭터 탭만) + 프레임 + 스타일 + 루프 */}
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <div className="relative">
-            <button
-              onClick={() => {
-                setDirOpen(o => !o);
-                setFrameOpen(false);
-              }}
-              className="flex h-8 items-center gap-1 rounded-lg border border-border bg-bg-card px-3 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
-            >
-              {DIRECTION_LABELS[direction]}
-            </button>
-            {dirOpen && (
-              <DirectionPopover
-                selected={direction}
-                onSelect={d => {
-                  setDirection(d);
-                  setDirOpen(false);
+          {subjectType === "character" && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setDirOpen(o => !o);
+                  setFrameOpen(false);
                 }}
-                onClose={() => setDirOpen(false)}
-              />
-            )}
-          </div>
+                className="flex h-8 items-center gap-1 rounded-lg border border-border bg-bg-card px-3 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
+              >
+                {DIRECTION_LABELS[direction]}
+              </button>
+              {dirOpen && (
+                <DirectionPopover
+                  selected={direction}
+                  onSelect={d => {
+                    setDirection(d);
+                    setDirOpen(false);
+                  }}
+                  onClose={() => setDirOpen(false)}
+                />
+              )}
+            </div>
+          )}
 
           <div className="relative">
             <button
@@ -333,7 +386,6 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
           </label>
         </div>
 
-
         {/* 동작 프롬프트 */}
         <div className="shrink-0 space-y-1">
           <div className="flex items-center gap-2">
@@ -341,16 +393,14 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
             <div className="ml-auto flex items-center gap-1">
               <div className="relative">
                 <button
-                  onClick={() => {
-                    setExampleOpen(o => !o);
-                  }}
+                  onClick={() => setExampleOpen(o => !o)}
                   className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary"
                 >
                   <Lightbulb size={12} /> 예시
                 </button>
                 {exampleOpen && (
                   <ExamplePopover
-                    subjectType={subjectType}
+                    exampleKey={exampleKey}
                     onPick={text => {
                       setActionPrompt(text);
                       setExampleOpen(false);
@@ -381,7 +431,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
             className="block min-h-[78px] w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
 
-          {/* 걷기·달리기 추천 옵션 */}
+          {/* 걷기·달리기 추천 힌트 — 캐릭터 탭만 */}
           {subjectType === "character" && (
             <p className="text-[11px] text-text-muted/60 leading-relaxed">
               걷기·달리기는 <span className="text-text-muted">8프레임(2×4)</span> + <span className="text-text-muted">루프 켜기</span> 추천
@@ -415,7 +465,7 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
           {recents.length > 0 && (
             <div className="flex flex-wrap items-center gap-1 pt-1">
               <span className="text-[11px] text-text-muted/70">최근:</span>
-              {recents.map((r) => (
+              {recents.map(r => (
                 <button
                   key={r}
                   onClick={() => setActionPrompt(r)}
@@ -540,11 +590,11 @@ function FramePopover({
 }
 
 function ExamplePopover({
-  subjectType,
+  exampleKey,
   onPick,
   onClose,
 }: {
-  subjectType: SubjectType;
+  exampleKey: ExampleKey;
   onPick: (text: string) => void;
   onClose: () => void;
 }) {
@@ -555,7 +605,7 @@ function ExamplePopover({
       ref={ref}
       className="absolute right-0 top-full z-30 mt-1 w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
     >
-      {EXAMPLES[subjectType].map((ex, i) => (
+      {EXAMPLES[exampleKey].map((ex, i) => (
         <div
           key={i}
           className="flex items-start gap-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
@@ -576,7 +626,6 @@ function ExamplePopover({
   );
 }
 
-// 바깥 클릭 시 닫기 — StylePresetPicker 와 동일 패턴(mousedown outside).
 function useOutsideClose(
   ref: React.RefObject<HTMLDivElement | null>,
   onClose: () => void,
@@ -593,10 +642,6 @@ function useOutsideClose(
 // ────────────────────────────────────────────────────────────────────────────
 // 메시지 빌더 + 스타일 suffix 해석
 
-/**
- * directionLabel → make_spritesheet 자연어 facing 구. 측면은 side view, 정/후면은
- * front/back view, 대각은 3/4 view. (기존 facingPhrase 분기 유지.)
- */
 function facingPhrase(label: Direction): string {
   if (label.startsWith("DOWN-")) return `facing ${label} (3/4 front view)`;
   if (label.startsWith("UP-")) return `facing ${label} (3/4 back view)`;
@@ -607,19 +652,6 @@ function facingPhrase(label: Direction): string {
   return `facing ${label}`;
 }
 
-/**
- * SpriteGenState → { message, attachmentGenerationIds } 순수 빌더.
- *
- * 마커(계약 — 키 이름은 make_spritesheet 입력명과 일치): 단일 방향 시트(게임표준 그리드).
- *   [spritesheet: subjectType=character; anchorStrategy=feet; framesPerDir=8; rows=2; cols=4; seamlessLoop=true]
- * - 캐릭터: anchorStrategy=feet, 자연어에 facingPhrase 포함.
- * - 이펙트/오브젝트: anchorStrategy=center, facingPhrase 생략.
- *
- * 프레임 수 → 게임표준 그리드로 rows/cols 를 넘긴다(4→2×2, 6→2×3, 8→2×4, 12→3×4, 16→4×4).
- * directions 는 마커에 포함하지 않아 서버의 rows 강제 오버라이드를 피한다.
- * 방향 정보는 자연어 facingPhrase 로만 전달.
- * 참조는 마커가 아니라 attachmentGenerationIds 로 전달 → /api/chat 이 [reference: id] prefix.
- */
 export function buildSpriteMessage(
   state: SpriteGenState,
   stylePresetSuffix?: string | null,
@@ -636,7 +668,6 @@ export function buildSpriteMessage(
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
-  // facing 은 캐릭터만 — 이펙트/오브젝트는 방향 개념이 없어 "facing DOWN" 부착 시 모델 혼선.
   if (isCharacter) nlParts.push(facingPhrase(state.direction));
   nlParts.push("transparent background");
   const nl = nlParts.join(", ");
@@ -647,7 +678,6 @@ export function buildSpriteMessage(
   };
 }
 
-// presetId → prompt_suffix 해석. listPresets 1회 조회 — 가벼움(기존 로직 유지).
 export async function resolveStyleSuffix(presetId: string | null): Promise<string | null> {
   if (!presetId) return null;
   try {
