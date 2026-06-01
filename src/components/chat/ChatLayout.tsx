@@ -824,6 +824,7 @@ export function ChatLayout() {
           onDelete={handleDelete}
           onRename={handleRename}
           onOpenGallery={() => setGalleryOpen(true)}
+          generating={state.generating}
         />
       )}
       {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.
