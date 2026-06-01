@@ -63,7 +63,7 @@ export function ChatLayout() {
   const [editing, setEditing] = useState<Editing>(null);
   // 스프라이트시트 생성 패널 — fresh 생성은 EditTarget(기존 generation) 불필요해 별도 상태.
   // 비null 이면 열림. reference 있으면 결과카드 단축어로 들어온 캐릭터 참조.
-  const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget } | null>(null);
+  const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget; initialSubjectMode?: "character" | "object" } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
@@ -416,6 +416,7 @@ export function ChatLayout() {
         height?: number;
         kind?: string;
         targetSize?: number;
+        subjectMode?: "character" | "object";
       },
     ) => {
       if (action === "compare" && payload.generationId) {
@@ -452,7 +453,6 @@ export function ChatLayout() {
           kind: payload.kind,
         });
       } else if (action === "make_sheet" && payload.generationId && payload.width && payload.height) {
-        // 단일 이미지(비-시트) → 이 캐릭터를 참조로 스프라이트시트 생성 패널 오픈(fresh+ref).
         setEditing(null);
         setSpriteGen({
           reference: {
@@ -462,6 +462,7 @@ export function ChatLayout() {
             height: payload.height,
             kind: payload.kind,
           },
+          initialSubjectMode: payload.subjectMode,
         });
       } else if (
         (action === "edit" ||
@@ -965,6 +966,7 @@ export function ChatLayout() {
           <SpriteGenPanel
             referenceId={spriteGen.reference?.generationId}
             referenceImageUrl={spriteGen.reference?.imageUrl}
+            initialSubjectMode={spriteGen.initialSubjectMode}
             onSubmit={handleSpriteGen}
             onClose={() => setSpriteGen(null)}
           />

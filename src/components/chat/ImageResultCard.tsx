@@ -43,7 +43,9 @@ type Props = {
   /** generation kind — 'spritesheet' 일 때만 [캐릭터 입히기] 단축어 노출. */
   kind?: string;
   prompt?: string;
-  onAction?: (action: Action, opts?: { targetSize?: number }) => void;
+  /** make_sheet 클릭 시 SpriteGenPanel 에 전달할 초기 모드 (character|object). */
+  spriteSubjectMode?: "character" | "object";
+  onAction?: (action: Action, opts?: { targetSize?: number; subjectMode?: "character" | "object" }) => void;
 };
 
 /** epoch ms → "YYYY.MM.DD HH:mm" (로컬). */
@@ -53,7 +55,7 @@ function formatCreatedAt(ms: number): string {
   return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, kind, prompt, onAction }: Props) {
+export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, kind, prompt, spriteSubjectMode, onAction }: Props) {
   const { copy: copyPrompt, copied, analyzing, failed } = useCopyPrompt(generationId, prompt);
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
@@ -187,9 +189,9 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               </button>
             ) : (
               <button
-                onClick={() => onAction?.("make_sheet")}
+                onClick={() => onAction?.("make_sheet", { subjectMode: spriteSubjectMode })}
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="이 캐릭터로 시트 만들기 — 이 이미지를 참조로 방향·프레임 스프라이트시트 생성"
+                title="이 이미지로 시트 만들기 — 이 이미지를 참조로 방향·프레임 스프라이트시트 생성"
               >
                 <Grid3x3 size={12} /> 시트 만들기
               </button>

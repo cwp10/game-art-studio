@@ -30,11 +30,21 @@ type Props = {
       height?: number;
       kind?: string;
       targetSize?: number;
+      subjectMode?: "character" | "object";
     },
   ) => void;
   /** suggestions 카드 클릭 → 부모가 Composer prefill + dispatch suggestion_picked. */
   onPickSuggestion?: (suggestId: string, body: string) => void;
 };
+
+/** tc.args 에서 subjectType 을 안전하게 추출 — make_sheet 시 SpriteGenPanel 초기 모드 결정. */
+function extractSpriteSubjectMode(args: unknown): "character" | "object" | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const st = (args as Record<string, unknown>).subjectType;
+  if (st === "object") return "object";
+  if (st === "character") return "character";
+  return undefined;
+}
 
 export function MessageList({ items, onAction, onPickSuggestion }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -173,6 +183,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                 createdAt={lastTool.result.createdAt}
                 kind={lastTool.result.kind}
                 prompt={userPromptForCard}
+                spriteSubjectMode={extractSpriteSubjectMode(lastTool.args)}
                 onAction={(a, opts) =>
                   onAction?.(a, {
                     prompt: userPromptForCard,
@@ -181,6 +192,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
                     height: lastTool.result!.height,
                     kind: lastTool.result!.kind,
                     targetSize: opts?.targetSize,
+                    subjectMode: opts?.subjectMode,
                   })
                 }
               />

@@ -187,14 +187,6 @@ export function SpriteGenPanel({
     setAiError(null);
   }
 
-  function switchContextMode(mode: ContextMode) {
-    setContextMode(mode);
-    setTab("subject");
-    setExampleOpen(false);
-    setAiResult(null);
-    setAiError(null);
-  }
-
   // 이펙트 탭용 exampleKey — 컨텍스트(character-effect | object-effect)
   const exampleKey: ExampleKey = tab === "subject"
     ? contextMode
@@ -313,15 +305,6 @@ export function SpriteGenPanel({
               }`}
             >
               이펙트
-            </button>
-          </div>
-          {/* 모드 전환 링크 */}
-          <div className="flex justify-end">
-            <button
-              onClick={() => switchContextMode(contextMode === "character" ? "object" : "character")}
-              className="text-[11px] text-text-muted/50 hover:text-text-muted"
-            >
-              {contextMode === "character" ? "오브젝트 모드로 전환 →" : "캐릭터 모드로 전환 →"}
             </button>
           </div>
         </div>
