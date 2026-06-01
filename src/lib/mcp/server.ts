@@ -43,7 +43,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { getCachedPoseRow } from "../image-backend/pose-reference.js";
+import { extractPoseGuideGrid, getCachedPoseRow } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -531,17 +531,36 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         let poseRefPath: string | null = null;
         let poseFrameAnglesText = "";
         if (isWalk && isCharacter && isSingleDirection) {
-          try {
-            const dirIndex = 6; // RIGHT(사이드뷰) 기본, 향후 파라미터로 확장
-            const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
-            poseRefPath = guidePath;
-            // 프레임별 각도 텍스트 생성 — "col1: L+32°/R-32°(L-CONTACT), col2: ..."
-            poseFrameAnglesText = angles
-              .map(a => `col${a.col + 1}: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`)
+          // 프롬프트에서 facing 방향 감지 — LEFT 키워드 있으면 dirIndex=2, 기본은 RIGHT(6).
+          const dirIndex = /facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? 2 : 6;
+
+          // angles 배열 → 각도 텍스트 변환 (rows=1: col1…, rows>1: row1col1…)
+          const toAngleText = (angles: { col: number; leftDeg: number; rightDeg: number; label: string }[], r: number) =>
+            angles
+              .map((a, i) =>
+                (r > 1 ? `row${Math.floor(i / cols) + 1}col${(i % cols) + 1}` : `col${a.col + 1}`) +
+                `: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`,
+              )
               .join(", ");
+
+          try {
+            const { path: guidePath, angles } = await extractPoseGuideGrid(
+              dirIndex, cols, rows, CELL_PX, REFERENCE_DIR, TEMPLATES_DIR, isRun,
+            );
+            poseRefPath = guidePath;
+            poseFrameAnglesText = toAngleText(angles, rows);
             log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
           } catch (e) {
-            log(`make_spritesheet: pose guide failed (non-fatal): ${(e as Error).message}`);
+            // 레퍼런스 파일 없거나 오류 → SVG 기반 가이드로 fallback (cols 프레임, rows=1).
+            log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
+            try {
+              const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
+              poseRefPath = guidePath;
+              poseFrameAnglesText = toAngleText(angles, 1);
+              log(`make_spritesheet: pose guide (SVG fallback) → ${path.basename(guidePath)}`);
+            } catch (e2) {
+              log(`make_spritesheet: pose guide failed (non-fatal): ${(e2 as Error).message}`);
+            }
           }
         }
 
@@ -569,7 +588,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `You MUST render your character OVER these skeletons, matching the leg positions shown. ` +
             `The skeleton is your guide — replace it with the actual character while keeping the same leg angles. ` +
             (poseFrameAnglesText
-              ? `EXACT LEG ANGLES PER COLUMN: ${poseFrameAnglesText}. ` +
+              ? `EXACT LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
                 `These are the precise angles you MUST reproduce — positive=forward, negative=back. `
               : "")
           : "";

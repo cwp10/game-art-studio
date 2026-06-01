@@ -228,6 +228,91 @@ export function computeFrameAngles(cols: number, isRun = false): FrameAngle[] {
 }
 
 /**
+ * pose-guided-walk-8dir.png(또는 run 변형)에서 dirIndex 행의 프레임을 추출해
+ * cols×rows 그리드로 재배열한 포즈 가이드 PNG를 반환.
+ *
+ * 소스는 8방향×8프레임 고정(3072×3072, 셀=384×384).
+ * totalFrames = cols×rows 개를 8 소스 프레임에서 균등 샘플링.
+ *
+ * @returns { path, angles } — 캐시 파일 경로 + 프레임별 각도 데이터
+ */
+export async function extractPoseGuideGrid(
+  dirIndex: number,
+  cols: number,
+  rows: number,
+  cellSize: number,
+  referenceDir: string,
+  templatesDir: string,
+  isRun = false,
+): Promise<{ path: string; angles: FrameAngle[] }> {
+  const type = isRun ? "run" : "walk";
+  const cacheFile = `${templatesDir}/pose-${type}-dir${dirIndex}-${cols}x${rows}.png`;
+  const totalFrames = cols * rows;
+  const SOURCE_COLS = 8; // 소스 시트 열 수 (방향당 프레임 수 = 샘플링 범위)
+  const SOURCE_ROWS = 8; // 소스 시트 행 수 (방향 수 = dirIndex 유효 범위)
+
+  // Math.floor로 균등 분할 — Math.round는 경계값(i=totalFrames-1)에서 wrap 발생.
+  const srcCols = Array.from({ length: totalFrames }, (_, i) =>
+    Math.floor((i * SOURCE_COLS) / totalFrames),
+  );
+
+  // angles를 실제 추출 srcCol의 위상에서 직접 계산 — computeFrameAngles(totalFrames)는
+  // totalFrames 균등 위상을 쓰므로 totalFrames≠SOURCE_COLS일 때 이미지 포즈와 어긋남.
+  const A = isRun ? 48 : 32;
+  const angles: FrameAngle[] = srcCols.map((srcCol, i) => {
+    const phase = (2 * Math.PI * srcCol) / SOURCE_COLS;
+    const cosP = Math.cos(phase);
+    const leftDeg = Math.round(A * cosP);
+    const rightDeg = Math.round(-A * cosP);
+    const absC = Math.abs(cosP);
+    const label =
+      absC > 0.85
+        ? leftDeg > 0 ? "L-CONTACT" : "R-CONTACT"
+        : absC < 0.15 ? "CROSSOVER" : `f${i}`;
+    return { col: i, leftDeg, rightDeg, label };
+  });
+
+  const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+  if (existsSync(cacheFile)) return { path: cacheFile, angles };
+
+  mkdirSync(templatesDir, { recursive: true });
+
+  const refFile = `${referenceDir}/pose-guided-${type}-8dir.png`;
+  const meta = await sharp(refFile).metadata();
+  const srcCellW = Math.round((meta.width ?? 3072) / SOURCE_COLS);
+  const srcCellH = Math.round((meta.height ?? 3072) / SOURCE_ROWS);
+
+  // 소스 시트에서 dirIndex 행의 각 프레임을 추출 후 cellSize로 리사이즈
+  const frames = await Promise.all(
+    srcCols.map(srcCol =>
+      sharp(refFile)
+        .extract({ left: srcCol * srcCellW, top: dirIndex * srcCellH, width: srcCellW, height: srcCellH })
+        .resize(cellSize, cellSize)
+        .png()
+        .toBuffer(),
+    ),
+  );
+
+  // cols×rows 그리드로 배치 (reading order: 왼→오, 위→아래)
+  const composites = frames.map((buf, i) => ({
+    input: buf,
+    left: (i % cols) * cellSize,
+    top: Math.floor(i / cols) * cellSize,
+    blend: "over" as const,
+  }));
+
+  const buf = await sharp({
+    create: { width: cols * cellSize, height: rows * cellSize, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
+
+  writeFileSync(cacheFile, buf);
+  return { path: cacheFile, angles };
+}
+
+/**
  * 특정 방향(dirIndex) × cols프레임 포즈 가이드 행을 생성해 캐시 파일로 반환.
  * buildPoseSvg로 직접 생성 — cols에 맞는 완전한 사이클 보장.
  *
