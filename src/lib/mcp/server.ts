@@ -570,10 +570,12 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           : null;
         const walkCycleRule = isWalk && isCharacter
           ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
+            `"Left leg" and "right leg" below always mean the CHARACTER'S ANATOMICAL left/right (from the character's own perspective), ` +
+            `NOT the viewer's screen-left or screen-right. ` +
             `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
-            `(1) CONTACT — left leg fully forward, right leg fully back; ` +
+            `(1) CONTACT — character's anatomical left leg fully forward, anatomical right leg fully back; ` +
             `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
-            `(3) CONTACT — right leg fully forward, left leg fully back; ` +
+            `(3) CONTACT — character's anatomical right leg fully forward, anatomical left leg fully back; ` +
             `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
             `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
             `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
@@ -593,7 +595,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         const poseRefInstruction = poseRefPath
           ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
-            `Blue = left leg, Red = right leg. Each skeleton shows the EXACT leg angle required for that cell. ` +
+            `Blue = character's anatomical LEFT leg, Red = character's anatomical RIGHT leg (both from the character's own perspective, not the viewer's). ` +
+            `Track Blue and Red consistently across ALL frames — the same leg stays the same color in every cell. ` +
+            `Each skeleton shows the EXACT leg angle required for that cell. ` +
             `You MUST render your character OVER these skeletons, matching the leg positions shown. ` +
             `The skeleton is your guide — replace it with the actual character while keeping the same leg angles. ` +
             (poseFrameAnglesText
