@@ -517,12 +517,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const hasRunPose = isCharacter && isWalk && fs.existsSync(runPosePath);
         const posePath = hasRunPose ? runPosePath : null;
         const basePoseInstruction = hasRunPose
-          ? `The last attached image is a locomotion posture reference — use it as a guide for natural leg alternation and arm-swing across walk/run frames. `
+          ? `The last attached image is a locomotion posture reference showing BODY AND LEG MOVEMENT ONLY — the reference character carries NO weapons or accessories. ` +
+            `Use it strictly to guide leg stride alternation and torso lean across frames. ` +
+            `CRITICAL: The reference character's bare arms must NOT influence your character's equipment visibility. ` +
+            `Even when an arm swings backward, the weapon/item it holds must remain clearly visible in that frame. `
+          : "";
+
+        // 오브젝트 일관성 규칙 — 캐릭터 시트에서만 주입.
+        const equipmentRule = isCharacter
+          ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
+            `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
+            `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. `
           : "";
 
         const decorated =
           `${userPrompt}. ` +
           basePoseInstruction +
+          equipmentRule +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
