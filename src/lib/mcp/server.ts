@@ -565,6 +565,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         }
 
         // 보행 사이클 다리 교차 규칙 — 걷기/달리기 캐릭터 시트에서만 주입.
+        const singleDirWalkDir = isSingleDirection
+          ? (/facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? "LEFT" : "RIGHT")
+          : null;
         const walkCycleRule = isWalk && isCharacter
           ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
             `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
@@ -579,7 +582,13 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `The gap between the two legs must be OBVIOUS — never draw them overlapping or merged into a single shape. ` +
             `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
             `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
-            `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. `
+            `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. ` +
+            (singleDirWalkDir
+              ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
+                `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
+                `In stride/contact frames BOTH legs must extend — one leg forward, one backward — symmetrically. ` +
+                `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. `
+              : "")
           : "";
 
         const poseRefInstruction = poseRefPath
@@ -589,7 +598,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `The skeleton is your guide — replace it with the actual character while keeping the same leg angles. ` +
             (poseFrameAnglesText
               ? `EXACT LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
-                `These are the precise angles you MUST reproduce — positive=forward, negative=back. `
+                `These are the precise angles you MUST reproduce — positive=forward, negative=back` +
+                (singleDirWalkDir ? ` (forward = screen-${singleDirWalkDir}, the walking direction)` : "") +
+                `. `
               : "")
           : "";
 
