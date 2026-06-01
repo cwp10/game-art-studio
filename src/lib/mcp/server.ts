@@ -43,7 +43,6 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { reorderSpritesheetFrames } from "../image-backend/spritesheet-reorder.js";
 import { getCachedPoseRow } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
@@ -738,17 +737,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               log,
             });
             log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
-
-            // 보행 사이클 프레임 재배열 — Claude Vision 으로 자연스러운 순서 추론.
-            // 단일 방향 보행 캐릭터 시트(directions 없음 또는 1)에서만. 방향 시트(directions≥2)는
-            // 각 행이 독립 방향이라 전체 재배열이 무의미하므로 스킵. 에러는 non-fatal(원본 유지).
-            if (isWalk && isCharacter && isSingleDirection) {
-              try {
-                await reorderSpritesheetFrames(filePath, rows, cols, log);
-              } catch (e) {
-                log(`make_spritesheet reorder failed (non-fatal): ${(e as Error).message}`);
-              }
-            }
 
             // 업스케일: 384px/셀 → 512px/셀 (×4/3). codex 네이티브 안에서 생성한 뒤
             // sharp lanczos3 로 최종 출력 해상도를 확보.

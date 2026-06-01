@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, X } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 
@@ -97,6 +97,15 @@ export function SpriteCanvas({
     origX: number;
     origY: number;
   } | null>(null);
+
+  // 프레임 순서 — displayPos → originalIdx 매핑. 수동 재배열 시 이 배열만 바뀐다.
+  // frames 가 새로 분할되면(개수·rows·cols·order 변화) 항등 순서로 초기화(아래 frame-build effect).
+  const [frameOrder, setFrameOrder] = useState<number[]>([]);
+  // 순서 변경 모드 토글 — ON 이면 셀이 HTML5 draggable, 기존 mouse 미세조정은 비활성.
+  const [reorderMode, setReorderMode] = useState(false);
+  // 드래그 중인 display 인덱스(HTML5 drag API용) + 드롭 타깃 하이라이트.
+  const dragFromIdxRef = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // 드래그/선택(화살표 nudge) 중 리사이즈로 표시 크기가 재측정되면 진행 중인
   // 포인터 좌표 변환이 흔들린다. MaskCanvas 와 동일하게 조작 중엔 avail 을 고정.
@@ -216,6 +225,11 @@ export function SpriteCanvas({
     }
     setFrames(out);
     setOffsets(Array.from({ length: out.length }, () => ({ x: 0, y: 0 })));
+    // 프레임이 새로 분할되면 순서도 항등으로 리셋 + 재배열 모드 해제.
+    // (order row↔col 토글이나 rows/cols 변경처럼 length 가 같아도 매핑이 무효가 되므로
+    //  여기서 처리 — frames.length effect 로는 그 경우를 못 잡는다.)
+    setFrameOrder(Array.from({ length: out.length }, (_, i) => i));
+    setReorderMode(false);
   }, [imgLoaded, rows, cols, order, cellW, cellH, dragPad]);
 
   // 프레임 선택 해제 — 클릭으로 개별 프레임을 애니메이션/내보내기에서 제외. frames 가 새로
@@ -249,29 +263,41 @@ export function SpriteCanvas({
   const exportW = cellW + 2 * dragPad;
   const exportH = cellH + 2 * dragPad;
 
-  // ZIP 내보내기용 — 제외 프레임을 뺀 압축 배열(인덱스 재정렬). gifFrames/previewFrames 는
-  // playIndices(원본 인덱스) 기반이라 자동 필터되므로 그쪽은 exportFrames 를 그대로 둔다.
-  const activeExportFrames = useMemo(
-    () => exportFrames.filter((_, i) => !excludedFrames.has(i)),
-    [exportFrames, excludedFrames],
-  );
+  // ZIP 내보내기용 — 표시 순서(frameOrder)대로 정렬 후 제외 프레임을 뺀 압축 배열.
+  // gifFrames/previewFrames 는 playIndices(표시 순서·필터됨) 기반이라 자동 반영되므로 ZIP 만 여기서 정렬.
+  const activeExportFrames = useMemo(() => {
+    const ord =
+      frameOrder.length === exportFrames.length
+        ? frameOrder
+        : exportFrames.map((_, i) => i);
+    return ord.filter(origIdx => !excludedFrames.has(origIdx)).map(origIdx => exportFrames[origIdx]);
+  }, [exportFrames, frameOrder, excludedFrames]);
 
+  // 썸네일 = 표시 순서대로. frameOrder[displayPos] = origIdx. 초기화 전(길이 불일치)엔 원본 순서.
   const thumbs = useMemo(
-    () => adjustedFrames.map(f => f.toDataURL("image/png")),
-    [adjustedFrames],
+    () => {
+      if (frameOrder.length !== adjustedFrames.length) {
+        return adjustedFrames.map(f => f.toDataURL("image/png"));
+      }
+      return frameOrder.map(origIdx => adjustedFrames[origIdx]?.toDataURL("image/png") ?? "");
+    },
+    [adjustedFrames, frameOrder],
   );
 
-  // 방향(행) 선택 시 그 행의 프레임 인덱스만 재생/GIF 대상. row-order 에서 행 r = [r*cols, r*cols+cols).
-  // dirRow=-1(전체) 또는 방향 시트 아님 → 전체 인덱스.
+  // 재생/GIF 대상 origIdx — frameOrder(표시 순서)로 정렬 후 방향·제외 필터. 이게 순서의 단일 소스.
+  // previewFrames/gifFrames 는 base[origIdx]/exportFrames[origIdx] 로 인덱싱하므로(둘 다 원본 순서)
+  // 여기에만 frameOrder 를 적용하면 미리보기·GIF·ZIP 모두 자동으로 표시 순서를 따른다.
+  // 방향(행) 선택 시 그 행의 프레임만. row-order 에서 행 r = [r*cols, r*cols+cols).
   const playIndices = useMemo(() => {
-    const base = adjustedFrames.length > 0 ? adjustedFrames : frames;
-    const all = base.map((_, i) => i);
-    const dirFiltered =
-      !isDirSheet || dirRow < 0
-        ? all
-        : all.filter(i => i >= dirRow * cols && i < dirRow * cols + cols);
-    return dirFiltered.filter(i => !excludedFrames.has(i));
-  }, [adjustedFrames, frames, isDirSheet, dirRow, cols, excludedFrames]);
+    const n = (adjustedFrames.length > 0 ? adjustedFrames : frames).length;
+    const ord = frameOrder.length === n ? frameOrder : Array.from({ length: n }, (_, i) => i);
+    return ord.filter(origIdx => {
+      if (isDirSheet && dirRow >= 0 && !(origIdx >= dirRow * cols && origIdx < dirRow * cols + cols)) {
+        return false;
+      }
+      return !excludedFrames.has(origIdx);
+    });
+  }, [adjustedFrames, frames, frameOrder, isDirSheet, dirRow, cols, excludedFrames]);
 
   // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames. 방향 필터 적용.
   const previewFrames = useMemo(() => {
@@ -547,6 +573,31 @@ export function SpriteCanvas({
 
   function resetOffsets() {
     setOffsets(Array.from({ length: frames.length }, () => ({ x: 0, y: 0 })));
+    setFrameOrder(Array.from({ length: frames.length }, (_, i) => i));
+  }
+
+  // 수동 재배열(HTML5 drag) — display 인덱스 기준. frameOrder 만 splice 로 재배치.
+  function handleReorderDragStart(displayIdx: number, e: DragEvent) {
+    dragFromIdxRef.current = displayIdx;
+    // 일부 엔진은 setData 없으면 드래그가 시작되지 않음 — 호환성 보강(값 자체는 ref 로 추적).
+    e.dataTransfer.setData("text/plain", String(displayIdx));
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  function handleReorderDrop(dropIdx: number) {
+    const fromIdx = dragFromIdxRef.current;
+    if (fromIdx === null || fromIdx === dropIdx) {
+      setDragOverIdx(null);
+      return;
+    }
+    setFrameOrder(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(dropIdx, 0, moved);
+      return next;
+    });
+    dragFromIdxRef.current = null;
+    setDragOverIdx(null);
   }
 
   // GIF 빌드
@@ -675,8 +726,13 @@ export function SpriteCanvas({
       ctx.clearRect(0, 0, sheetW, sheetH);
       // 각 패딩 프레임의 셀-원점(dragPad,dragPad)을 셀 위치(c*cellW,r*cellH)에 맞춰 그림.
       // 패딩 밴드는 이미 maskToCellComponent 로 이웃 잔재가 제거돼 자기 오버플로만 보존.
-      adjustedFrames.forEach((frame, i) => {
-        const { r, col } = framePos(i, rows, cols, order);
+      // 표시 순서(frameOrder)대로 셀 위치에 재배치 — 수동 재배열을 시트에 영속화.
+      const orderedFrames =
+        frameOrder.length === adjustedFrames.length
+          ? frameOrder.map(origIdx => adjustedFrames[origIdx])
+          : adjustedFrames;
+      orderedFrames.forEach((frame, displayPos) => {
+        const { r, col } = framePos(displayPos, rows, cols, order);
         ctx.drawImage(frame, col * cellW - dragPad, r * cellH - dragPad);
       });
       const dataUrl = c.toDataURL("image/png");
@@ -822,6 +878,20 @@ export function SpriteCanvas({
               >
                 행 보정
               </button>
+              {/* 순서 변경 — ON 이면 셀을 드래그해 프레임 순서 재배열(미리보기·GIF·ZIP·보정본에 반영). */}
+              {/* 토글 시 선택 해제 — 재배열 모드에선 화살표 nudge 가 잔존 선택 셀에 새지 않도록. */}
+              <button
+                onClick={() => { setReorderMode(m => !m); setSelectedIdx(null); }}
+                disabled={frames.length === 0}
+                className={`h-6 rounded border px-2 disabled:opacity-40 ${
+                  reorderMode
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border text-text-muted hover:text-text-primary"
+                }`}
+                title="프레임 순서 변경: 드래그로 프레임 순서 재배열"
+              >
+                순서 변경
+              </button>
               <button
                 onClick={autoAlign}
                 disabled={frames.length === 0}
@@ -843,6 +913,7 @@ export function SpriteCanvas({
           <p className="text-[11px] text-text-muted/60">
             드래그 또는 클릭으로 셀 선택 후 화살표 키(Shift = 10px)로 미세 조정. 점선 사각형은 원본 셀 경계이며, 출력은 ±{dragPad}px 여유까지 포함합니다.
             {rowMode && <span className="text-[color:var(--accent)]"> 행 보정 ON — 조정이 같은 행 전체에 적용됩니다.</span>}
+            {reorderMode && <span className="text-[color:var(--accent)]"> 순서 변경 ON — 셀을 드래그해 프레임 순서를 재배열하세요.</span>}
           </p>
           {selectedIdx !== null && (
             <div className="space-y-2 rounded border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2">
@@ -886,8 +957,11 @@ export function SpriteCanvas({
             className="grid gap-1"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
           >
-            {thumbs.map((src, i) => {
-              const off = offsets[i] ?? { x: 0, y: 0 };
+            {thumbs.map((src, displayIdx) => {
+              // displayIdx = 화면 표시 위치, origIdx = 원본 frames 배열 인덱스(offsets/selected/excluded 기준).
+              const origIdx = frameOrder[displayIdx] ?? displayIdx;
+              const off = offsets[origIdx] ?? { x: 0, y: 0 };
+              const isDragOver = reorderMode && dragOverIdx === displayIdx;
               // 패딩 캔버스(cellW+2*dragPad × cellH+2*dragPad) 에서
               // 원본 셀 경계는 dragPad/(padW) ~ (padW-dragPad)/padW 구간.
               const padW = cellW + 2 * dragPad;
@@ -898,51 +972,68 @@ export function SpriteCanvas({
               const cropH = (cellH / padH) * 100;
               return (
                 <div
-                  key={i}
+                  key={displayIdx}
+                  draggable={reorderMode}
+                  onDragStart={reorderMode ? (e) => handleReorderDragStart(displayIdx, e) : undefined}
+                  onDragOver={reorderMode ? (e) => { e.preventDefault(); setDragOverIdx(displayIdx); } : undefined}
+                  onDragLeave={reorderMode ? () => setDragOverIdx(null) : undefined}
+                  onDrop={reorderMode ? (e) => { e.preventDefault(); handleReorderDrop(displayIdx); } : undefined}
+                  onMouseDown={reorderMode ? undefined : (e) => {
+                    e.preventDefault();
+                    setSelectedIdx(origIdx);
+                    setDragging({ idx: origIdx, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
+                  }}
                   className={`group relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
-                    dragging?.idx === i
-                      ? "cursor-grabbing ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
-                      : selectedIdx === i
-                        ? "cursor-grab ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
-                        : "cursor-grab border-border"
+                    isDragOver
+                      ? "ring-2 ring-[color:var(--accent)] border-[color:var(--accent)] opacity-70"
+                      : dragging?.idx === origIdx
+                        ? "cursor-grabbing ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                        : selectedIdx === origIdx
+                          ? "cursor-grab ring-2 ring-[color:var(--accent)] border-[color:var(--accent)]"
+                          : reorderMode
+                            ? "cursor-grab border-[color:var(--accent)]/40 hover:border-[color:var(--accent)]"
+                            : "cursor-grab border-border"
                   }`}
                   style={{ aspectRatio: `${padW}/${padH}` }}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    setSelectedIdx(i);
-                    setDragging({ idx: i, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
-                  }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={src}
-                    alt={`frame ${i}`}
-                    className={`absolute inset-0 h-full w-full object-fill ${excludedFrames.has(i) ? "opacity-30" : ""}`}
+                    alt={`frame ${origIdx}`}
+                    className={`absolute inset-0 h-full w-full object-fill ${excludedFrames.has(origIdx) ? "opacity-30" : ""}`}
                     draggable={false}
                   />
                   {/* 제외된 프레임 — 어둡게 덮고 ✕ 표시. */}
-                  {excludedFrames.has(i) && (
+                  {excludedFrames.has(origIdx) && (
                     <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded bg-black/60">
                       <span className="text-lg font-bold text-white/80">✕</span>
                     </div>
                   )}
-                  {/* 호버 시 토글 버튼(우상단) — 제외/포함. 드래그 시작 방지. */}
+                  {/* 순서 변경 모드 — 현재 표시 순번(1-based) 좌상단 배지. */}
+                  {reorderMode && (
+                    <span className="pointer-events-none absolute left-0.5 top-0.5 rounded bg-black/70 px-1 text-[9px] tabular-nums text-white/90">
+                      {displayIdx + 1}
+                    </span>
+                  )}
+                  {/* 호버 시 토글 버튼(우상단) — 제외/포함. 드래그 시작 방지. 순서 변경 모드에선 숨김. */}
+                  {!reorderMode && (
                   <button
                     className="absolute right-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-white/30 bg-black/50 text-[9px] text-white opacity-0 transition-opacity hover:bg-red-500/80 group-hover:opacity-100"
-                    title={excludedFrames.has(i) ? "포함" : "제외"}
+                    title={excludedFrames.has(origIdx) ? "포함" : "제외"}
                     onMouseDown={e => {
                       e.stopPropagation();
                       e.preventDefault();
                       setExcludedFrames(prev => {
                         const next = new Set(prev);
-                        if (next.has(i)) next.delete(i);
-                        else next.add(i);
+                        if (next.has(origIdx)) next.delete(origIdx);
+                        else next.add(origIdx);
                         return next;
                       });
                     }}
                   >
-                    {excludedFrames.has(i) ? "+" : "×"}
+                    {excludedFrames.has(origIdx) ? "+" : "×"}
                   </button>
+                  )}
                   <svg
                     className="pointer-events-none absolute inset-0 h-full w-full"
                     viewBox="0 0 100 100"
