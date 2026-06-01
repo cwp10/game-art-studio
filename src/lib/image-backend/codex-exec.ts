@@ -125,9 +125,10 @@ function buildNaturalPrompt(job: ImageJob): string {
       );
     case "spritesheet": {
       // 이미지 첨부 순서 (server.ts overrideInputPaths 기준):
-      //   inputCount >= 2 → [0] = 그리드 템플릿, [1] = 참조 캐릭터
-      //   inputCount === 1 → [0] = 그리드 템플릿
-      // Codex 는 image[0] 을 primary 로 인식 → 그리드를 먼저 넣어 캔버스 구조를 강제.
+      //   inputCount === 1 → [0] 그리드 템플릿만
+      //   inputCount === 2 → [0] 참조 이미지(char ref 또는 pose guide), [1] 그리드 템플릿
+      //   inputCount >= 3  → [0] 포즈 가이드, [1] 참조 캐릭터, [2] 그리드 템플릿
+      // 그리드 템플릿은 항상 마지막 이미지.
       const inputCount = job.inputImagePaths?.length ?? 0;
       const seamlessLoop = job.params?.seamlessLoop === true;
 
@@ -142,44 +143,40 @@ function buildNaturalPrompt(job: ImageJob): string {
         : "";
 
       if (inputCount >= 3) {
-        // [0] 그리드 템플릿, [1] 참조 캐릭터, [2] base 포즈 레퍼런스
+        // [0] 포즈 레퍼런스, [1] 참조 캐릭터, [2] 그리드 템플릿
         const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
         return (
           PROMPT_HEADER +
           `I am attaching THREE images:\n` +
-          `(1) GRID TEMPLATE — the OUTPUT CANVAS. ` +
-          `Your output PNG must match its exact pixel dimensions, one animation frame per cell in the ${gridDim} grid.\n` +
+          `(1) BASE POSE REFERENCE — a stick-figure skeleton strip showing the exact leg/arm angles per column. ` +
+          `Use it ONLY as a form guide for leg positions and stride alternation. Do NOT copy its colors or style.\n` +
           `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
           `and proportions in every frame.\n` +
-          `(3) BASE POSE REFERENCE — a neutral mannequin showing the correct walking animation poses. ` +
-          `Use image 3 ONLY as a form guide for:\n` +
-          `  • Body proportions and scale per frame\n` +
-          `  • Leg positions, stride width, and foot alternation (which foot is forward in each frame)\n` +
-          `  • Body height arc (lower at weight-bearing frames, higher at toe-off frames)\n` +
-          `Do NOT copy image 3's skin color, face, or style — apply image 2's character design to image 3's poses.\n\n` +
+          `(3) GRID TEMPLATE — the OUTPUT CANVAS. ` +
+          `Your output PNG must match its exact pixel dimensions, one animation frame per cell in the ${gridDim} grid.\n\n` +
           `Task: ${job.prompt}\n\n` +
-          `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
-          `Each frame shows image 2's character in the corresponding pose from image 3. ` +
+          `Rules: fill every cell of the grid (image 3) with exactly one sequential frame. ` +
+          `Each frame shows image 2's character in the corresponding pose from image 1. ` +
           `Each character must be fully contained within its own cell. ` +
           loopRule
         );
       }
 
       if (inputCount >= 2) {
-        // [0] 그리드 템플릿, [1] 참조 캐릭터
+        // [0] 참조 이미지(캐릭터 ref 또는 포즈 가이드), [1] 그리드 템플릿
+        const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
         return (
           PROMPT_HEADER +
           `I am attaching TWO images:\n` +
-          `(1) GRID TEMPLATE — this is the OUTPUT CANVAS. ` +
-          `It shows a blank ${job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M"} grid with thin gray cell lines. ` +
+          `(1) REFERENCE IMAGE — either a character reference (reproduce its exact visual style, colors, outfit) ` +
+          `or a pose guide (use it only for leg/arm angles, do not copy its style).\n` +
+          `(2) GRID TEMPLATE — this is the OUTPUT CANVAS. ` +
+          `It shows a blank ${gridDim} grid with thin gray cell lines. ` +
           `Your output PNG must have EXACTLY the same pixel dimensions as this template, ` +
-          `with one sequential animation frame drawn inside each cell.\n` +
-          `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
-          `and proportions in every frame. Only the pose/action changes between frames.\n\n` +
+          `with one sequential animation frame drawn inside each cell.\n\n` +
           `Task: ${job.prompt}\n\n` +
-          `Rules: fill every cell of the grid (image 1) with exactly one sequential frame. ` +
-          `Each frame contains the reference character (image 2) performing a different step of the animation. ` +
-          `Each character must be fully contained within its own cell. ` +
+          `Rules: fill every cell of the grid (image 2) with exactly one sequential frame. ` +
+          `Each frame's content must be fully contained within its own cell. ` +
           loopRule
         );
       }

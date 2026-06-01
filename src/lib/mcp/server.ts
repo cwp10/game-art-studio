@@ -427,6 +427,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         const isWalk = isLocomotion(userPrompt);
         const isRun = isRunning(userPrompt);
+        const isSingleDirection = !directions || directions === 1;
         const loopInstruction = seamlessLoop
           ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
             `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
@@ -530,8 +531,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 결과는 templates/ 에 캐시 — 동일 요청은 파일 재사용.
         let poseRefPath: string | null = null;
         let poseFrameAnglesText = "";
-        if (isWalk && isCharacter && (!directions || directions === 1)) {
-          const isRun = isRunning(userPrompt);
+        if (isWalk && isCharacter && isSingleDirection) {
           try {
             const dirIndex = 6; // RIGHT(사이드뷰) 기본, 향후 파라미터로 확장
             const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
@@ -575,12 +575,19 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               : "")
           : "";
 
+        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid(항상 마지막)
+        const inputImages: string[] = [];
+        if (poseRefPath) inputImages.push(poseRefPath);
+        if (refPath) inputImages.push(refPath);
+        inputImages.push(gridTemplatePath);
+        const overrideInputPaths = inputImages;
+
         const decorated =
           `${userPrompt}. ` +
           equipmentRule +
           walkCycleRule +
           poseRefInstruction +
-          (poseRefPath || refPath
+          (inputImages.length > 1
             ? `The last attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `
             : `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `) +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
@@ -598,12 +605,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
-        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid(항상 마지막)
-        const inputImages: string[] = [];
-        if (poseRefPath) inputImages.push(poseRefPath);
-        if (refPath) inputImages.push(refPath);
-        inputImages.push(gridTemplatePath);
-        const overrideInputPaths = inputImages;
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
         // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
@@ -741,7 +742,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             // 보행 사이클 프레임 재배열 — Claude Vision 으로 자연스러운 순서 추론.
             // 단일 방향 보행 캐릭터 시트(directions 없음 또는 1)에서만. 방향 시트(directions≥2)는
             // 각 행이 독립 방향이라 전체 재배열이 무의미하므로 스킵. 에러는 non-fatal(원본 유지).
-            if (isWalk && isCharacter && (!directions || directions === 1)) {
+            if (isWalk && isCharacter && isSingleDirection) {
               try {
                 await reorderSpritesheetFrames(filePath, rows, cols, log);
               } catch (e) {

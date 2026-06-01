@@ -506,25 +506,33 @@ async function runChatCodexDirect(opts: {
     ended_at: Date.now(),
   });
 
-  const assistantMsg = createMessage({
-    session_id: sessionId,
-    role: "assistant",
-    content: [
-      { type: "tool_call", id: toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } },
-      { type: "tool_result", tool_call_id: toolCallId, result: `Generated via Codex. image ref id "${gen.id}".` },
-      { type: "image_ref", generation_id: gen.id },
-    ],
-    claude_session_id: null,
-  });
+  let assistantMsgId: string | null = null;
+  try {
+    const assistantMsg = createMessage({
+      session_id: sessionId,
+      role: "assistant",
+      content: [
+        { type: "tool_call", id: toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } },
+        { type: "tool_result", tool_call_id: toolCallId, result: `Generated via Codex. image ref id "${gen.id}".` },
+        { type: "image_ref", generation_id: gen.id },
+      ],
+      claude_session_id: null,
+    });
 
-  linkGeneration(gen.id, { session_id: sessionId, message_id: assistantMsg.id });
+    linkGeneration(gen.id, { session_id: sessionId, message_id: assistantMsg.id });
 
-  updateJob(jobId, {
-    status: "succeeded",
-    result: { generationId: gen.id, assistantMessageId: assistantMsg.id, generationIds: [gen.id], codexFallback: true },
-    ended_at: Date.now(),
-  });
+    updateJob(jobId, {
+      status: "succeeded",
+      result: { generationId: gen.id, assistantMessageId: assistantMsg.id, generationIds: [gen.id], codexFallback: true },
+      ended_at: Date.now(),
+    });
+    assistantMsgId = assistantMsg.id;
+  } catch (dbErr) {
+    // DB 마무리 실패 — 이미지는 생성됐으므로 카드는 표시. 잡은 오류 로그만 남기고 계속.
+    updateJob(jobId, { status: "failed", error: (dbErr as Error).message, ended_at: Date.now() });
+  }
 
+  // tool_call_finished: DB 성공/실패 무관하게 항상 전송 — 이미지 카드 표시
   send({
     type: "tool_call_finished",
     toolCallId,
@@ -538,8 +546,9 @@ async function runChatCodexDirect(opts: {
     },
   });
 
-  send({ type: "message_completed", messageId: assistantMsg.id });
-
-  if (isNewSession) renameSession(sessionId, deriveSessionTitle(messageText));
-  touchSession(sessionId);
+  if (assistantMsgId) {
+    send({ type: "message_completed", messageId: assistantMsgId });
+    if (isNewSession) renameSession(sessionId, deriveSessionTitle(messageText));
+    touchSession(sessionId);
+  }
 }
