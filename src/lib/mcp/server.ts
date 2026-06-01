@@ -542,9 +542,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
             `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
             `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
-            `STRIDE CONSISTENCY (CRITICAL): The stride length (distance between front foot and back foot) MUST be IDENTICAL across ALL contact frames. ` +
-            `Do NOT make any single frame have an exaggerated or wider stride than the others — if one frame has a wider spread than the rest, the animation will "pop" and look broken. ` +
-            `Keep a moderate, natural stride that is the SAME width in every contact frame. `
+            `LEG VISIBILITY (CRITICAL): In EVERY frame, BOTH legs must be clearly visible and spatially separated. ` +
+            `The gap between the two legs must be OBVIOUS — never draw them overlapping or merged into a single shape. ` +
+            `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
+            `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
+            `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. `
           : "";
 
         const decorated =

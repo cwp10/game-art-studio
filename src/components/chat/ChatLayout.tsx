@@ -76,6 +76,8 @@ export function ChatLayout() {
   const [composerAttachment, setComposerAttachment] = useState<ComposerAttachment | null>(null);
   // preset cache — handleSend 가 suffix 결합에 사용.
   const presetCache = useRef<Map<string, StylePreset>>(new Map());
+  // 항상 최신 activeSessionId 를 가리킴 — handleSend 클로저 스테일 방지.
+  const activeSessionIdRef = useRef<string | null>(null);
   // session 활성화 직후의 listMessages reload 를 건너뜀 — 클라이언트가 dispatch 로
   // 이미 items 를 채운 경우 (예: 업로드 흐름) race 로 items 가 빈 응답에 reset 되는 것 방지.
   const skipNextLoadRef = useRef(false);
@@ -97,6 +99,9 @@ export function ChatLayout() {
     }, sessionSearch ? 200 : 0);
     return () => clearTimeout(t);
   }, [sessionSearch]);
+
+  // activeSessionIdRef 항상 최신 동기화
+  activeSessionIdRef.current = state.activeSessionId;
 
   // 활성 세션 변경 시 메시지 로드
   useEffect(() => {
@@ -286,7 +291,9 @@ export function ChatLayout() {
       // 새 세션 전송: session_started 가 activeSessionId 를 바꾸면 세션 로드 effect 가
       // 발동해 아직 메시지가 저장되지 않은 빈 세션을 listMessages 로 읽어와 방금 만든
       // user/assistant 아이템을 덮어쓴다(→ 이후 SSE 이벤트가 전부 드롭). 그 1회 reload 를 skip.
-      if (!state.activeSessionId) skipNextLoadRef.current = true;
+      // activeSessionIdRef 는 렌더 사이클과 무관하게 항상 최신값 — 스테일 클로저 방지.
+      const currentSessionId = activeSessionIdRef.current;
+      if (!currentSessionId) skipNextLoadRef.current = true;
       dispatch({ type: "user_send", tempId, text: finalText });
 
       // 이 스트림의 토큰 — 세션 전환·다음 전송이 streamSeqRef 를 올리면 아래 콜백이
@@ -301,7 +308,7 @@ export function ChatLayout() {
       try {
         await streamChat(
           {
-            sessionId: state.activeSessionId ?? undefined,
+            sessionId: currentSessionId ?? undefined,
             message: finalText,
             attachmentGenerationIds: opts?.attachmentGenerationIds,
             maskGenerationId: opts?.maskGenerationId,
@@ -343,7 +350,7 @@ export function ChatLayout() {
       }
       return sendResult;
     },
-    [state.generating, state.activeSessionId, handleBatch],
+    [state.generating, handleBatch],
   );
 
   const handleCancel = useCallback(() => {
