@@ -134,17 +134,19 @@ export function ChatLayout() {
     return () => loadAbort.abort();
   }, [state.activeSessionId]);
 
-  // 새 세션
+  // 새 세션 — 생성 중에는 차단 (UI 잠금 외 키보드 단축키 등 모든 경로 방어)
   const handleNew = useCallback(() => {
-    streamSeqRef.current++; // 진행 중 스트림 무효화 — 이전 세션 응답 누수 차단
+    if (state.generating) return;
+    streamSeqRef.current++;
     dispatch({ type: "set_active", sessionId: null });
-  }, []);
+  }, [state.generating]);
 
-  // 세션 선택
+  // 세션 선택 — 생성 중에는 차단
   const handleSelect = useCallback((id: string) => {
-    streamSeqRef.current++; // 진행 중 스트림 무효화 — 이전 세션 응답 누수 차단
+    if (state.generating) return;
+    streamSeqRef.current++;
     dispatch({ type: "set_active", sessionId: id });
-  }, []);
+  }, [state.generating]);
 
   // 세션 삭제
   const handleDelete = useCallback(
