@@ -37,12 +37,23 @@ type Props = {
   onPickSuggestion?: (suggestId: string, body: string) => void;
 };
 
-/** tc.args 에서 subjectType 을 안전하게 추출 — make_sheet 시 SpriteGenPanel 초기 모드 결정. */
+/** tc.args 에서 subjectType 을 안전하게 추출 — make_sheet 시 SpriteGenPanel 초기 모드 결정.
+ *  make_spritesheet: args.subjectType 직접 사용.
+ *  generate_image/edit_image: args.prompt 키워드로 추론 (배경·아이템→object, 캐릭터→character).
+ */
 function extractSpriteSubjectMode(args: unknown): "character" | "object" | undefined {
   if (!args || typeof args !== "object") return undefined;
-  const st = (args as Record<string, unknown>).subjectType;
-  if (st === "object") return "object";
-  if (st === "character") return "character";
+  const a = args as Record<string, unknown>;
+
+  // 1. make_spritesheet 의 subjectType 직접 사용
+  if (a.subjectType === "object") return "object";
+  if (a.subjectType === "character") return "character";
+
+  // 2. generate_image / edit_image 의 prompt 키워드 추론
+  const p = typeof a.prompt === "string" ? a.prompt.toLowerCase() : "";
+  if (!p) return undefined;
+  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
+  if (/캐릭터|character|캐릭|인물|전사|마법사|궁수|기사|영웅|hero|warrior|knight|mage|wizard|archer/.test(p)) return "character";
   return undefined;
 }
 

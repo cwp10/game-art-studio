@@ -38,6 +38,15 @@ import type { StylePreset } from "@/types/db";
  *
  * 단일 useReducer 로 SSE 이벤트와 사용자 입력을 모두 받아 ChatItem 배열을 시간 순으로 누적.
  */
+/** 사용자 프롬프트에서 캐릭터/오브젝트 모드를 추론 — args 추출이 실패했을 때 2차 fallback. */
+function inferSubjectModeFromPrompt(prompt?: string): "character" | "object" | undefined {
+  if (!prompt) return undefined;
+  const p = prompt.toLowerCase();
+  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
+  if (/캐릭터|character|캐릭|인물|전사|마법사|궁수|기사|영웅|hero|warrior|knight|mage|wizard|archer/.test(p)) return "character";
+  return undefined;
+}
+
 const COLOR_KO: Record<string, string> = {
   red: "빨강", green: "초록", blue: "파랑", yellow: "노랑",
   cyan: "청록", magenta: "자홍", orange: "주황", purple: "보라",
@@ -466,7 +475,9 @@ export function ChatLayout() {
             kind: payload.kind,
             prompt: payload.prompt,
           },
-          initialSubjectMode: payload.subjectMode,
+          initialSubjectMode:
+            payload.subjectMode ??
+            inferSubjectModeFromPrompt(payload.prompt),
         });
       } else if (
         (action === "edit" ||
