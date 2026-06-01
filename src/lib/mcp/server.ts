@@ -514,16 +514,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
             : "";
 
-        // run.png: 걷기·달리기 모두 stride/arm-swing 포즈 가이드로 사용.
-        const runPosePath = path.join(REFERENCE_DIR, "run.png");
-        const hasRunPose = isCharacter && isWalk && fs.existsSync(runPosePath);
-        const posePath = hasRunPose ? runPosePath : null;
-        const basePoseInstruction = hasRunPose
-          ? `The last attached image is a locomotion posture reference showing BODY AND LEG MOVEMENT ONLY — the reference character carries NO weapons or accessories. ` +
-            `Use it strictly to guide leg stride alternation and torso lean across frames. ` +
-            `CRITICAL: The reference character's bare arms must NOT influence your character's equipment visibility. ` +
-            `Even when an arm swings backward, the weapon/item it holds must remain clearly visible in that frame. `
-          : "";
+        const basePoseInstruction = "";
 
         // 오브젝트 일관성 규칙 — 캐릭터 시트에서만 주입.
         const equipmentRule = isCharacter
@@ -608,13 +599,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
-        // 입력 이미지 순서:
-        // 보행: 가이드 템플릿(포즈 합성) → char ref → pose(run.png)
-        // 일반: grid → char ref → pose(run.png)
+        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid
         const primaryTemplate = poseRefPath ?? gridTemplatePath;
         const inputImages = [primaryTemplate];
         if (refPath) inputImages.push(refPath);
-        if (posePath) inputImages.push(posePath);
         const overrideInputPaths = inputImages;
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
