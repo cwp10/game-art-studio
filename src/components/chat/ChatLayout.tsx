@@ -50,6 +50,7 @@ type EditTarget = {
   width: number;
   height: number;
   kind?: string;
+  prompt?: string;
 };
 type Editing =
   | ({ mode: "inpaint" } & EditTarget)
@@ -461,6 +462,7 @@ export function ChatLayout() {
             width: payload.width,
             height: payload.height,
             kind: payload.kind,
+            prompt: payload.prompt,
           },
           initialSubjectMode: payload.subjectMode,
         });
@@ -966,6 +968,7 @@ export function ChatLayout() {
           <SpriteGenPanel
             referenceId={spriteGen.reference?.generationId}
             referenceImageUrl={spriteGen.reference?.imageUrl}
+            referencePrompt={spriteGen.reference?.prompt}
             initialSubjectMode={spriteGen.initialSubjectMode}
             onSubmit={handleSpriteGen}
             onClose={() => setSpriteGen(null)}

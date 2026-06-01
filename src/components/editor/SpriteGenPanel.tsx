@@ -42,6 +42,8 @@ type Props = {
   referenceId?: string;
   /** 참조 썸네일 URL. */
   referenceImageUrl?: string;
+  /** 참조 이미지 생성 프롬프트 — 이펙트 탭 AI 제안에서 캐릭터/오브젝트 추론에 사용. */
+  referencePrompt?: string;
   /** 패널 초기 컨텍스트. "character" → 캐릭터|이펙트, "object" → 오브젝트|이펙트. */
   initialSubjectMode?: ContextMode;
   onSubmit: (
@@ -116,13 +118,14 @@ const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
   ],
 };
 
-const RECENT_KEY = "sprite-recent-actions";
 const RECENT_MAX = 5;
 
-function loadRecents(): string[] {
+function recentKey(key: ExampleKey) { return `sprite-recent-${key}`; }
+
+function loadRecents(key: ExampleKey): string[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(RECENT_KEY);
+    const raw = window.localStorage.getItem(recentKey(key));
     if (!raw) return [];
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
@@ -131,14 +134,14 @@ function loadRecents(): string[] {
   }
 }
 
-function saveRecent(action: string) {
+function saveRecent(key: ExampleKey, action: string) {
   if (typeof window === "undefined") return;
   const trimmed = action.trim();
   if (trimmed.length < 20) return;
-  const prev = loadRecents().filter(x => x !== trimmed);
+  const prev = loadRecents(key).filter(x => x !== trimmed);
   const next = [trimmed, ...prev].slice(0, RECENT_MAX);
   try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    window.localStorage.setItem(recentKey(key), JSON.stringify(next));
   } catch {
     /* ignore quota */
   }
@@ -147,6 +150,7 @@ function saveRecent(action: string) {
 export function SpriteGenPanel({
   referenceId,
   referenceImageUrl,
+  referencePrompt,
   initialSubjectMode,
   onSubmit,
   onClose,
@@ -173,7 +177,6 @@ export function SpriteGenPanel({
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  const [recents, setRecents] = useState<string[]>(loadRecents);
   const [submitting, setSubmitting] = useState(false);
 
   const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
@@ -192,6 +195,12 @@ export function SpriteGenPanel({
     ? contextMode
     : `${contextMode}-effect` as ExampleKey;
 
+  // 카테고리별 최근 프롬프트 — exampleKey 변경 시 갱신
+  const [recents, setRecents] = useState<string[]>(() => loadRecents(exampleKey));
+  useEffect(() => {
+    setRecents(loadRecents(exampleKey));
+  }, [exampleKey]);
+
   async function handleAiSuggest() {
     if (aiLoading) return;
     setAiLoading(true);
@@ -206,6 +215,7 @@ export function SpriteGenPanel({
           question,
           subjectType,
           contextType: tab === "effect" ? contextMode : undefined,
+          referencePrompt: tab === "effect" ? referencePrompt : undefined,
           direction: subjectType === "character" ? direction : undefined,
           frames,
           seamlessLoop,
@@ -239,8 +249,8 @@ export function SpriteGenPanel({
         actionPrompt: actionPrompt.trim(),
       };
       const msg = buildSpriteMessage(state, suffix, referenceId ?? null);
-      saveRecent(state.actionPrompt);
-      setRecents(loadRecents());
+      saveRecent(exampleKey, state.actionPrompt);
+      setRecents(loadRecents(exampleKey));
       onSubmit([msg]);
     } finally {
       setSubmitting(false);

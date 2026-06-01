@@ -43,6 +43,8 @@ type Body = {
   subjectType?: string;
   /** effect 탭일 때 어떤 컨텍스트(character|object)의 이펙트인지. */
   contextType?: string;
+  /** 참조 이미지의 생성 프롬프트 — 이펙트 탭에서 캐릭터/오브젝트 특성 추론에 사용. */
+  referencePrompt?: string;
   direction?: string;
   frames?: number;
   seamlessLoop?: boolean;
@@ -60,6 +62,7 @@ export async function POST(req: NextRequest) {
 
   const subjectType = body.subjectType ?? "character";
   const contextType = body.contextType; // "character" | "object" — effect 탭일 때만 전달됨
+  const referencePrompt = body.referencePrompt?.trim().slice(0, 300);
   const direction = body.direction ?? "없음";
   const frames = body.frames ?? 8;
   const seamlessLoop = body.seamlessLoop ?? true;
@@ -78,10 +81,17 @@ export async function POST(req: NextRequest) {
         : "오브젝트에 어울리는 이펙트 (획득·파괴·상호작용 계열 고려)"
       : "";
 
+  // referencePrompt 로 캐릭터/오브젝트의 구체적 특성 추론
+  const referenceHint =
+    subjectType === "effect" && referencePrompt
+      ? `참조 ${contextType === "object" ? "오브젝트" : "캐릭터"} 설명: ${referencePrompt}`
+      : "";
+
   const userMessage = [
     `요청: ${question}`,
     `타입: ${subjectType}`,
     contextHint,
+    referenceHint,
     subjectType === "character" ? `방향: ${direction}` : "",
     `그리드: ${frames}프레임 ${frameGuide[frames] ?? ""}`,
     `seamlessLoop: ${seamlessLoop ? "켜짐 (첫·끝 프레임이 자연스럽게 이어져야 함)" : "꺼짐"}`,
