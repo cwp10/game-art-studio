@@ -587,7 +587,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
               ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
                 `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
                 `In stride/contact frames BOTH legs must extend — one leg forward, one backward — symmetrically. ` +
-                `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. `
+                `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. ` +
+                `STRIDE DEPTH (CRITICAL): The forward/leading leg is always drawn IN FRONT OF the trailing leg — the leading boot visibly overlaps the back boot. ` +
+                `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
+                `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
+                `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. `
               : "")
           : "";
 
