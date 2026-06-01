@@ -20,6 +20,17 @@ export const TMP_DIR = path.join(DATA_DIR, "tmp");
 export const LOGS_DIR = path.join(DATA_DIR, "logs");
 /** 수동 관리 참조 자산 (base.png 등). git 추적 대상 — 코드가 자동 생성하지 않는다. */
 export const REFERENCE_DIR = path.join(DATA_DIR, "reference");
+
+/** 걷기 포즈 가이드 템플릿 — 8방향 시트용 */
+export const POSE_GUIDE_WALK_8DIR = path.join(REFERENCE_DIR, "pose-guided-walk-8dir.png");
+/** 걷기 포즈 가이드 템플릿 — 단방향 사이드뷰용 */
+export const POSE_GUIDE_WALK_1DIR = path.join(REFERENCE_DIR, "pose-guided-walk-1dir.png");
+/** 달리기 포즈 가이드 템플릿 — 8방향 시트용 (보폭 크고, 뒤꿈치 킥, 몸통 기울음) */
+export const POSE_GUIDE_RUN_8DIR  = path.join(REFERENCE_DIR, "pose-guided-run-8dir.png");
+
+// 하위 호환 alias
+export const POSE_GUIDE_8DIR = POSE_GUIDE_WALK_8DIR;
+export const POSE_GUIDE_1DIR = POSE_GUIDE_WALK_1DIR;
 /** 자동 생성 그리드 템플릿 캐시. git 무시 — 런타임에 generateGridTemplate 이 채운다. */
 export const TEMPLATES_DIR = path.join(DATA_DIR, "templates");
 

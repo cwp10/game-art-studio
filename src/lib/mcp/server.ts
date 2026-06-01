@@ -44,6 +44,7 @@ import {
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
 import { reorderSpritesheetFrames } from "../image-backend/spritesheet-reorder.js";
+import { getCachedPoseRow } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -531,6 +532,31 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. `
           : "";
 
+        // 보행 캐릭터 시트: 포즈 레퍼런스 시트를 생성해 Codex 입력에 포함.
+        const refGen = refId ? getGeneration(refId) : null;
+        const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
+
+        // 보행 캐릭터: 방향×cols에 맞는 포즈 가이드를 생성해 Codex에 전달.
+        // buildPoseSvg로 직접 생성 → cols에 맞는 완전한 사이클 보장.
+        // 결과는 templates/ 에 캐시 — 동일 요청은 파일 재사용.
+        let poseRefPath: string | null = null;
+        let poseFrameAnglesText = "";
+        if (isWalk && isCharacter) {
+          const isRun = isRunning(userPrompt);
+          try {
+            const dirIndex = 6; // RIGHT(사이드뷰) 기본, 향후 파라미터로 확장
+            const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
+            poseRefPath = guidePath;
+            // 프레임별 각도 텍스트 생성 — "col1: L+32°/R-32°(L-CONTACT), col2: ..."
+            poseFrameAnglesText = angles
+              .map(a => `col${a.col + 1}: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`)
+              .join(", ");
+            log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
+          } catch (e) {
+            log(`make_spritesheet: pose guide failed (non-fatal): ${(e as Error).message}`);
+          }
+        }
+
         // 보행 사이클 다리 교차 규칙 — 걷기/달리기 캐릭터 시트에서만 주입.
         const walkCycleRule = isWalk && isCharacter
           ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
@@ -549,11 +575,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. `
           : "";
 
+        const poseRefInstruction = poseRefPath
+          ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
+            `Blue = left leg, Red = right leg. Each skeleton shows the EXACT leg angle required for that cell. ` +
+            `You MUST render your character OVER these skeletons, matching the leg positions shown. ` +
+            `The skeleton is your guide — replace it with the actual character while keeping the same leg angles. ` +
+            (poseFrameAnglesText
+              ? `EXACT LEG ANGLES PER COLUMN: ${poseFrameAnglesText}. ` +
+                `These are the precise angles you MUST reproduce — positive=forward, negative=back. `
+              : "")
+          : "";
+
         const decorated =
           `${userPrompt}. ` +
           basePoseInstruction +
           equipmentRule +
           walkCycleRule +
+          poseRefInstruction +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
@@ -570,20 +608,14 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           loopInstruction +
           `Do NOT include the gray guide lines in the output — they are reference only. ` +
           bgInstruction;
-        // 이미지 순서: 그리드 템플릿(index 0) → 참조 캐릭터(index 1, 있을 때만).
-        // Codex 는 image[0] 을 primary 로 인식하므로 그리드를 먼저 넣어
-        // "이 캔버스의 각 셀을 채워라" 의도를 강하게 전달.
-        // 참조 캐릭터가 있을 때 image[1] 로 넣어 스타일 힌트를 준다.
-        const refGen = refId ? getGeneration(refId) : null;
-        const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
-
-        const overrideInputPaths = refPath && posePath
-          ? [gridTemplatePath, refPath, posePath]      // [grid, char, pose(walk/run)]
-          : refPath
-            ? [gridTemplatePath, refPath]              // [grid, char]
-            : posePath
-              ? [gridTemplatePath, posePath]           // [grid, pose(walk/run) only]
-              : [gridTemplatePath];                    // [grid only]
+        // 입력 이미지 순서:
+        // 보행: 가이드 템플릿(포즈 합성) → char ref → pose(run.png)
+        // 일반: grid → char ref → pose(run.png)
+        const primaryTemplate = poseRefPath ?? gridTemplatePath;
+        const inputImages = [primaryTemplate];
+        if (refPath) inputImages.push(refPath);
+        if (posePath) inputImages.push(posePath);
+        const overrideInputPaths = inputImages;
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
         // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
