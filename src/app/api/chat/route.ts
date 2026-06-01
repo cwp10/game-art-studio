@@ -11,11 +11,13 @@ import {
   renameSession,
 } from "@/lib/db/repo/sessions";
 import { createMessage, lastClaudeSessionId } from "@/lib/db/repo/messages";
-import { getGeneration, linkGeneration } from "@/lib/db/repo/generations";
+import { getGeneration, linkGeneration, createGeneration } from "@/lib/db/repo/generations";
 import { createJob, updateJob } from "@/lib/db/repo/jobs";
-import { newJobId } from "@/lib/util/ids";
-import { spawnClaude } from "@/lib/cli/claude-cli";
+import { newJobId, newGenerationId } from "@/lib/util/ids";
+import { spawnClaude, checkClaudeAvailable } from "@/lib/cli/claude-cli";
 import { tailProgress } from "@/lib/cli/progress-tail";
+import { selectImageBackend } from "@/lib/image-backend";
+import { toRelative } from "@/lib/util/paths";
 
 /**
  * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
@@ -159,7 +161,23 @@ async function runChat(
   sseSignal.addEventListener("abort", onAbort, { once: true });
   reqSignal.addEventListener("abort", onAbort, { once: true });
 
-  // 5. Claude spawn — resume 가능하면 이어붙임
+  // 5. Claude CLI 가용성 확인 — 미연결 시 Codex 직접 실행 경로로 전환
+  if (!(await checkClaudeAvailable())) {
+    try {
+      await runChatCodexDirect({ body, send, sessionId, isNewSession, jobId, messageText, signal: combinedAbort.signal });
+    } catch (err) {
+      const msg = (err as Error).message;
+      updateJob(jobId, { status: "failed", error: msg, ended_at: Date.now() });
+      send({ type: "error", message: msg });
+    } finally {
+      sseSignal.removeEventListener("abort", onAbort);
+      reqSignal.removeEventListener("abort", onAbort);
+      close();
+    }
+    return;
+  }
+
+  // 6. Claude spawn — resume 가능하면 이어붙임
   const resumeId = lastClaudeSessionId(sessionId);
   const handle = spawnClaude({
     systemPrompt: getSystemPrompt(),
@@ -417,4 +435,107 @@ function extractGenerationId(content: unknown): {
 const GEN_ID_REGEX = /image ref id\s*"([a-z0-9]{16})"/i;
 function findIdInString(s: string): string | null {
   return s.match(GEN_ID_REGEX)?.[1] ?? null;
+}
+
+/**
+ * Claude CLI 없이 CodexExecBackend 를 직접 호출하는 fallback 경로.
+ *
+ * Claude 오케스트레이션 없이 단순 text2img 만 수행한다 (첨부 이미지·복합 도구 미지원).
+ * SSE 이벤트 포맷은 일반 경로와 동일하게 유지해서 클라이언트가 차이를 몰라도 된다.
+ */
+async function runChatCodexDirect(opts: {
+  body: ChatRequest;
+  send: (e: ChatEvent) => void;
+  sessionId: string;
+  isNewSession: boolean;
+  jobId: string;
+  messageText: string;
+  signal: AbortSignal;
+}): Promise<void> {
+  const { body, send, sessionId, isNewSession, jobId, messageText, signal } = opts;
+  const toolCallId = `codex_${jobId}`;
+
+  send({ type: "assistant_thinking" });
+  send({ type: "assistant_text", text: "(Claude CLI 연결 안 됨 — Codex로 직접 생성합니다)\n" });
+  send({ type: "tool_call_started", toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } });
+
+  const innerJobId = newJobId();
+  const generationId = newGenerationId();
+
+  createJob({
+    id: innerJobId,
+    session_id: sessionId,
+    kind: "codex_image",
+    args: { prompt: body.message, generationId, viaMcp: false },
+  });
+
+  const backend = await selectImageBackend();
+  let result: Awaited<ReturnType<typeof backend.execute>>;
+  try {
+    result = await backend.execute(
+      { id: innerJobId, generationId, kind: "text2img", prompt: body.message },
+      (stage, detail) => {
+        send({ type: "tool_call_progress", toolCallId, stage, detail });
+      },
+      signal,
+    );
+  } catch (err) {
+    updateJob(innerJobId, { status: "failed", error: (err as Error).message, ended_at: Date.now() });
+    throw err;
+  }
+
+  const gen = createGeneration({
+    id: generationId,
+    session_id: sessionId,
+    message_id: null,
+    kind: "text2img",
+    prompt: body.message,
+    image_path: toRelative(result.imagePath),
+    width: result.width,
+    height: result.height,
+    backend: "codex_exec",
+  });
+
+  updateJob(innerJobId, {
+    status: "succeeded",
+    result: { generationId, elapsedMs: result.elapsedMs },
+    ended_at: Date.now(),
+  });
+
+  send({
+    type: "tool_call_finished",
+    toolCallId,
+    result: {
+      generationId: gen.id,
+      imageUrl: `/api/images/${gen.id}`,
+      width: result.width,
+      height: result.height,
+      kind: "text2img",
+      createdAt: gen.created_at,
+    },
+  });
+
+  const assistantMsg = createMessage({
+    session_id: sessionId,
+    role: "assistant",
+    content: [
+      { type: "tool_call", id: toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } },
+      { type: "tool_result", tool_call_id: toolCallId, result: `Generated via Codex. image ref id "${gen.id}".` },
+      { type: "image_ref", generation_id: gen.id },
+    ],
+    claude_session_id: null,
+  });
+
+  linkGeneration(gen.id, { session_id: sessionId, message_id: assistantMsg.id });
+
+  updateJob(jobId, {
+    status: "succeeded",
+    result: { generationId: gen.id, assistantMessageId: assistantMsg.id, generationIds: [gen.id], codexFallback: true },
+    ended_at: Date.now(),
+  });
+
+  send({ type: "message_completed", messageId: assistantMsg.id });
+
+  if (isNewSession) renameSession(sessionId, deriveSessionTitle(messageText));
+  touchSession(sessionId);
 }

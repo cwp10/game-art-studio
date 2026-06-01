@@ -282,6 +282,28 @@ function normalize(parsed: unknown): ClaudeStreamEvent[] {
   return [{ kind: "raw", raw: obj }];
 }
 
+let _claudeAvailCache: { v: boolean; ts: number } | null = null;
+
+/**
+ * claude CLI 가 이 머신에 설치되어 기본 응답이 가능한지 확인.
+ * 결과를 60초 캐시 — 매 요청마다 프로세스 spawn 방지.
+ * 주의: `claude --version` 은 인증 상태와 무관하게 0을 반환하므로
+ *       이 함수는 "바이너리 존재 여부"만 보장한다.
+ */
+export async function checkClaudeAvailable(): Promise<boolean> {
+  if (_claudeAvailCache && Date.now() - _claudeAvailCache.ts < 60_000) {
+    return _claudeAvailCache.v;
+  }
+  const v = await new Promise<boolean>(resolve => {
+    const c = spawn("claude", ["--version"], { stdio: "ignore" });
+    const t = setTimeout(() => { c.kill(); resolve(false); }, 5000);
+    c.on("error", () => { clearTimeout(t); resolve(false); });
+    c.on("exit", code => { clearTimeout(t); resolve(code === 0); });
+  });
+  _claudeAvailCache = { v, ts: Date.now() };
+  return v;
+}
+
 /**
  * 단순 1-turn 호출. stream-json 없이 plain text 응답을 통째로 받아 반환.
  *
