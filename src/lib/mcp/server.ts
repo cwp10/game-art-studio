@@ -531,10 +531,27 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. `
           : "";
 
+        // 보행 사이클 다리 교차 규칙 — 걷기/달리기 캐릭터 시트에서만 주입.
+        const walkCycleRule = isWalk && isCharacter
+          ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
+            `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
+            `(1) CONTACT — left leg fully forward, right leg fully back; ` +
+            `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
+            `(3) CONTACT — right leg fully forward, left leg fully back; ` +
+            `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
+            `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
+            `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
+            `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
+            `STRIDE CONSISTENCY (CRITICAL): The stride length (distance between front foot and back foot) MUST be IDENTICAL across ALL contact frames. ` +
+            `Do NOT make any single frame have an exaggerated or wider stride than the others — if one frame has a wider spread than the rest, the animation will "pop" and look broken. ` +
+            `Keep a moderate, natural stride that is the SAME width in every contact frame. `
+          : "";
+
         const decorated =
           `${userPrompt}. ` +
           basePoseInstruction +
           equipmentRule +
+          walkCycleRule +
           `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). ` +
           `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
           rowCountRule +
