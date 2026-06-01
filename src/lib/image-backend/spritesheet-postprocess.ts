@@ -798,6 +798,18 @@ export async function normalizeSpritesheetCells(
     return;
   }
 
+  // 잔재 필터 (캐릭터 시트 전용): 다른 셀 캐릭터에서 셀 경계를 넘어 흘러내린
+  // 발·다리 파편은 bbH 가 최대 높이의 50% 미만. 이런 셀은 빈 셀로 처리한다.
+  if (subjectType === "character" && cells.length >= 2) {
+    const heightThreshold = maxBbH * 0.5;
+    const filtered = cells.filter(c => c.bbH >= heightThreshold);
+    const discarded = cells.length - filtered.length;
+    if (discarded > 0) {
+      cells.splice(0, cells.length, ...filtered);
+      log(`normalizeSpritesheetCells: discarded ${discarded} remnant cells (bbH < 50% of maxBbH=${maxBbH})`);
+    }
+  }
+
   // ── 패스 2: 시트-전역 단일 scale ────────────────────────────────────────────
   const cellSafeW = cellW - 2 * margin;
   const cellSafeH = cellH - 2 * margin;
