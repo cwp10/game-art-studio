@@ -43,6 +43,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
+import { reorderSpritesheetFrames } from "../image-backend/spritesheet-reorder.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -698,6 +699,17 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             });
             log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
 
+            // 보행 사이클 프레임 재배열 — Claude Vision 으로 자연스러운 순서 추론.
+            // 단일 방향 보행 캐릭터 시트(directions 없음 또는 1)에서만. 방향 시트(directions≥2)는
+            // 각 행이 독립 방향이라 전체 재배열이 무의미하므로 스킵. 에러는 non-fatal(원본 유지).
+            if (isWalk && isCharacter && (!directions || directions === 1)) {
+              try {
+                await reorderSpritesheetFrames(filePath, rows, cols, log);
+              } catch (e) {
+                log(`make_spritesheet reorder failed (non-fatal): ${(e as Error).message}`);
+              }
+            }
+
             // 업스케일: 384px/셀 → 512px/셀 (×4/3). codex 네이티브 안에서 생성한 뒤
             // sharp lanczos3 로 최종 출력 해상도를 확보.
             const upW = cols * FINAL_CELL_PX;
@@ -903,6 +915,31 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                     subjectType: reskinSubject,
                     log,
                   });
+                } else if (wantsTransparent) {
+                  // reskin 출력에 green 배경 없음(black RGB 등) → 원본 alpha 마스크 적용.
+                  // 원본을 결과와 동일 치수(canvasW×canvasH)로 리사이즈해서 읽어야 픽셀
+                  // 인덱스가 일치한다(filePath 는 위에서 이미 canvasW×canvasH 로 리사이즈됨).
+                  const { data: origData, info: origInfo } = await sharp(inputPath)
+                    .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
+                    .ensureAlpha()
+                    .raw()
+                    .toBuffer({ resolveWithObject: true });
+                  const { data: reskinData } = await sharp(filePath)
+                    .ensureAlpha()
+                    .raw()
+                    .toBuffer({ resolveWithObject: true });
+                  // 원본 alpha → reskin 에 복사
+                  for (let i = 0; i < origInfo.width * origInfo.height; i++) {
+                    reskinData[i * 4 + 3] = origData[i * 4 + 3];
+                  }
+                  const tmpMask = `${filePath}.mask.tmp`;
+                  await sharp(Buffer.from(reskinData), {
+                    raw: { width: origInfo.width, height: origInfo.height, channels: 4 },
+                  })
+                    .png()
+                    .toFile(tmpMask);
+                  fs.renameSync(tmpMask, filePath);
+                  log(`reskin_image: applied original alpha mask to reskin result`);
                 } else {
                   log(`reskin_image: chroma-key keyedOut=0, skipping normalize (non-green background)`);
                 }

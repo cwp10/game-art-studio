@@ -189,6 +189,9 @@ export function MaskCanvas({
     const ctx = c.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, displayW, displayH);
+    // 투명 영역이 어두운 배경색으로 보이는 것을 방지: 이미지 아래 흰 배경을 깔아 투명 픽셀을 흰색으로 표시.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, displayW, displayH);
     ctx.drawImage(img, 0, 0, displayW, displayH);
   }, [imgLoaded, displayW, displayH]);
 
