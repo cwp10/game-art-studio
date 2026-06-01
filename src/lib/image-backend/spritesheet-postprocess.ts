@@ -37,7 +37,7 @@ export async function chromaKeyFile(
   log: Logger = noop,
   // 셀 면적(px) — enclosed 포켓 키아웃 임계 기준. 시트는 cellW*cellH, 단일 이미지는 미지정(전체).
   cellArea?: number,
-): Promise<void> {
+): Promise<number> {
   const { data, info } = await sharp(filePath)
     .ensureAlpha()
     .raw()
@@ -211,6 +211,7 @@ export async function chromaKeyFile(
     .toFile(tmpPath);
   fs.renameSync(tmpPath, filePath);
   log(`chromaKeyFile(${keyColor}): hardThresh=${hardThresh} keyedOut=${keyedOut}/${N}`);
+  return keyedOut;
 }
 
 /**

@@ -889,17 +889,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                   .png()
                   .toFile(resizeTmp);
                 fs.renameSync(resizeTmp, filePath);
+                // chroma-key 제거 후 keyedOut=0이면 배경이 green이 아님(black 등).
+                // 이 경우 normalizeSpritesheetCells 는 전체를 하나의 content로 인식해
+                // scale=0.2 수준으로 축소시키므로 스킵한다.
+                let keyedOut = 0;
                 if (wantsTransparent) {
-                  await chromaKeyFile(filePath, "green", log);
+                  keyedOut = await chromaKeyFile(filePath, "green", log);
                 }
-                // 부모 generation 의 subjectType 상속 → 앵커 도출(effect→center, 그 외→feet).
-                // 부모 정보 없으면 기존 동작(feet)로 폴백.
                 const parentSubject = inputGen.params?.subjectType;
                 const reskinSubject: SubjectType = parentSubject === "effect" ? "effect" : "character";
-                await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
-                  subjectType: reskinSubject,
-                  log,
-                });
+                if (keyedOut > 0) {
+                  await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
+                    subjectType: reskinSubject,
+                    log,
+                  });
+                } else {
+                  log(`reskin_image: chroma-key keyedOut=0, skipping normalize (non-green background)`);
+                }
                 log(`reskin_image sheet post-process gen=${genId} ${cols}x${rows} transparent=${wantsTransparent} subject=${reskinSubject}`);
               }
             } catch (e) {
