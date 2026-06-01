@@ -264,9 +264,16 @@ async function runChat(
           break;
         }
 
-        case "result":
+        case "result": {
           if (!claudeSessionId && ev.sessionId) claudeSessionId = ev.sessionId;
+          // result_type이 network_error 등 비정상이면 즉시 에러로 처리.
+          const raw = ev.raw as Record<string, unknown>;
+          const resultType = typeof raw?.result_type === "string" ? raw.result_type : null;
+          if (resultType && resultType !== "success") {
+            throw new Error(`claude ${resultType}`);
+          }
           break;
+        }
 
         case "raw":
           // 디버그: 모르는 메시지는 로그 파일에 이미 기록됨. SSE 로는 전달 안 함.

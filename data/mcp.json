@@ -5,7 +5,7 @@
       "args": ["--import", "tsx", "./src/lib/mcp/server.ts"],
       "env": {
         "IMAGEGEN_DATA_DIR": "./data",
-        "NODE_OPTIONS": "--max-old-space-size=4096"
+        "NODE_OPTIONS": "--max-old-space-size=8192"
       }
     }
   }

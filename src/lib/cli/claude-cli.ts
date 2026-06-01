@@ -274,6 +274,8 @@ function normalize(parsed: unknown): ClaudeStreamEvent[] {
 
   if (type === "result") {
     const sessionId = typeof obj.session_id === "string" ? obj.session_id : "";
+    // result_type: "network_error" 등 비정상 종료 — 호출부가 exit code 로 처리하지만
+    // 이벤트에도 실어서 로그 추적이 쉽게.
     return [{ kind: "result", sessionId, raw: obj }];
   }
 

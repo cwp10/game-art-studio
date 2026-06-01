@@ -357,7 +357,7 @@ export class CodexExecBackend implements ImageBackend {
     const startedAt = performance.now();
     const child = spawn("codex", args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=4096" },
+      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
     });
 
     // AbortSignal 연결
