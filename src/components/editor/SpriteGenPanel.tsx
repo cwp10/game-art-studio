@@ -27,7 +27,7 @@ export type Direction =
   | "DOWN-RIGHT"
   | "UP-LEFT"
   | "UP-RIGHT";
-export type FrameCount = 6 | 8 | 12 | 16;
+export type FrameCount = 4 | 6 | 8 | 12 | 16;
 
 export type SpriteGenState = {
   subjectType: SubjectType;
@@ -83,11 +83,13 @@ const COMPASS: Array<Direction | null> = [
 // 프레임 옵션 — 게임표준 그리드(짝수·장축 최소). 좌우대칭 동작(걷기/달리기)은 8(2×4)이 정석.
 // 장축 셀 수가 적을수록 모델(gpt-image, 장축 ~1536px)이 셀당 더 디테일하게 그린다.
 const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
-  { value: 6, rows: 2, cols: 3 },
-  { value: 8, rows: 2, cols: 4 },
+  { value: 4,  rows: 2, cols: 2 },
+  { value: 6,  rows: 2, cols: 3 },
+  { value: 8,  rows: 2, cols: 4 },
   { value: 12, rows: 4, cols: 3 },
   { value: 16, rows: 4, cols: 4 },
 ];
+
 
 // subjectType 별 예시 — 라벨 + 동작 묘사(actionPrompt 에 삽입).
 const EXAMPLES: Record<SubjectType, Array<{ label: string; text: string }>> = {
@@ -378,6 +380,13 @@ export function SpriteGenPanel({ referenceId, referenceImageUrl, onSubmit, onClo
             rows={3}
             className="block min-h-[78px] w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
           />
+
+          {/* 걷기·달리기 추천 옵션 */}
+          {subjectType === "character" && (
+            <p className="text-[11px] text-text-muted/60 leading-relaxed">
+              걷기·달리기는 <span className="text-text-muted">8프레임(2×4)</span> + <span className="text-text-muted">루프 켜기</span> 추천
+            </p>
+          )}
 
           {/* AI 제안 결과 */}
           {(aiError || aiResult) && (
