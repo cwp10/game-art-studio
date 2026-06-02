@@ -36,6 +36,7 @@ import sharp from "sharp";
 import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
 import {
   chromaKeyFile,
+  fallbackBgRemove,
   detectFill,
   isGreenDominant,
   normalizeSpritesheetCells,
@@ -729,8 +730,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
               if (wantsTransparent) {
                 // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
-                await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
+                const ckOut = await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
                 log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
+                if (ckOut === 0) {
+                  await fallbackBgRemove(filePath, log);
+                }
               }
               // 빈 셀 감지 — 방향 시트만(비방향은 항상 1회 채택이라 측정 불필요).
               if (retryEnabled) {
@@ -971,6 +975,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                 let keyedOut = 0;
                 if (wantsTransparent) {
                   keyedOut = await chromaKeyFile(filePath, "green", log);
+                  if (keyedOut === 0) {
+                    keyedOut = await fallbackBgRemove(filePath, log);
+                  }
                 }
                 const parentSubject = inputGen.params?.subjectType;
                 const reskinSubject: SubjectType = parentSubject === "effect" ? "effect" : "character";

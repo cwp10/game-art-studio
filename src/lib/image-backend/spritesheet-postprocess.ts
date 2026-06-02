@@ -72,8 +72,8 @@ export async function chromaKeyFile(
     // 캐릭터를 먹지 않도록 [30,50] 으로 클램프.
     hardThresh = Math.max(30, Math.min(50, Math.round(median * 0.5)));
   }
-  const fringeFloor = 5;
-  const fringeSpan = Math.max(10, hardThresh - fringeFloor);
+  const fringeFloor = 2;
+  const fringeSpan = Math.max(8, Math.round((hardThresh - fringeFloor) * 0.6));
 
   // 2. hard-key 후보 마스크.
   const isHardKey = new Uint8Array(N);
@@ -149,7 +149,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = 5; // 3→5: 발/테두리 2~3px fringe 녹색 잔재 흡수
+  const DESPILL_RADIUS = 8; // 5→8: 실루엣 경계 6px+ 떨어진 fringe 녹색 잔재까지 흡수
   const bgDist = new Uint8Array(N).fill(255);
   {
     const bfs: number[] = [];
@@ -195,6 +195,7 @@ export async function chromaKeyFile(
     // despill: 키 채널을 반대 채널 쪽으로 끌어내림(green→g=max(r,b), magenta→r,b=g).
     if (keyColor === "green") {
       data[i + 1] = Math.max(data[i], data[i + 2]);
+      if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 2);
     } else {
       data[i] = data[i + 1];
       data[i + 2] = data[i + 1];
@@ -895,4 +896,129 @@ export async function normalizeSpritesheetCells(
     `normalizeSpritesheetCells: ${cols}x${rows} cells, anchor=${alignKind} scale=${scale.toFixed(3)} ` +
       `${layers.length} non-empty (maxBb=${maxBbW}x${maxBbH})`,
   );
+}
+
+/**
+ * corner flood-fill 배경 제거 폴백 (in-place).
+ * chromaKeyFile keyedOut=0 이후 호출. 이미지 4개 코너 픽셀을 샘플링해 단색 배경인지 판정,
+ * 맞으면 테두리에서 4-connectivity flood-fill 로 배경을 투명화한다.
+ *
+ * 동작 조건:
+ *   - 4개 코너(각 3x3 평균)가 서로 CORNER_UNIFORM_TOL 이내 → 단색 배경으로 판정
+ *   - 판정 실패 시 0 반환(이미지 미변경)
+ *
+ * WHY: 모델이 green/magenta 대신 어두운(검정) 배경을 생성할 때 chroma-key가 동작하지 않음.
+ *   corner 기반으로 배경색을 자동 감지해 단색이면 제거.
+ */
+export async function fallbackBgRemove(
+  filePath: string,
+  log: Logger = noop,
+): Promise<number> {
+  const { data, info } = await sharp(filePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const ch = info.channels;
+  const W = info.width;
+  const H = info.height;
+  const N = W * H;
+
+  // 코너 3x3 평균 색상 샘플링
+  const SAMPLE_R = 2; // 5x5 영역
+  const sampleCorner = (cx: number, cy: number): [number, number, number] => {
+    let r = 0, g = 0, b = 0, cnt = 0;
+    for (let dy = -SAMPLE_R; dy <= SAMPLE_R; dy++) {
+      for (let dx = -SAMPLE_R; dx <= SAMPLE_R; dx++) {
+        const x = Math.min(Math.max(cx + dx, 0), W - 1);
+        const y = Math.min(Math.max(cy + dy, 0), H - 1);
+        const i = (y * W + x) * ch;
+        r += data[i]; g += data[i + 1]; b += data[i + 2];
+        cnt++;
+      }
+    }
+    return [Math.round(r / cnt), Math.round(g / cnt), Math.round(b / cnt)];
+  };
+
+  const corners: [number, number, number][] = [
+    sampleCorner(0, 0),
+    sampleCorner(W - 1, 0),
+    sampleCorner(0, H - 1),
+    sampleCorner(W - 1, H - 1),
+  ];
+
+  // 코너 균일도 체크: 평균 대비 최대 채널 합 편차
+  const avgR = corners.reduce((s, c) => s + c[0], 0) / 4;
+  const avgG = corners.reduce((s, c) => s + c[1], 0) / 4;
+  const avgB = corners.reduce((s, c) => s + c[2], 0) / 4;
+  const CORNER_UNIFORM_TOL = 40;
+  const maxCornerDiff = Math.max(
+    ...corners.map(
+      (c) => Math.abs(c[0] - avgR) + Math.abs(c[1] - avgG) + Math.abs(c[2] - avgB),
+    ),
+  );
+  if (maxCornerDiff > CORNER_UNIFORM_TOL) {
+    log(`fallbackBgRemove: corners not uniform (maxDiff=${maxCornerDiff}), skip`);
+    return 0;
+  }
+
+  const bgR = Math.round(avgR);
+  const bgG = Math.round(avgG);
+  const bgB = Math.round(avgB);
+
+  // 색상 허용 오차 — 배경이 어두울수록 타이트하게(캐릭터 보호)
+  const brightness = (bgR + bgG + bgB) / 3;
+  // 매우 어둡거나 밝으면 20, 중간이면 28
+  const FILL_TOL = brightness < 40 || brightness > 220 ? 20 : 28;
+
+  const inTol = (p: number): boolean => {
+    const i = p * ch;
+    if (data[i + 3] === 0) return false; // 이미 투명
+    return (
+      Math.abs(data[i] - bgR) <= FILL_TOL &&
+      Math.abs(data[i + 1] - bgG) <= FILL_TOL &&
+      Math.abs(data[i + 2] - bgB) <= FILL_TOL
+    );
+  };
+
+  // 테두리에서 flood-fill (4-conn BFS)
+  const visited = new Uint8Array(N);
+  const queue: number[] = [];
+  const enqueue = (p: number) => {
+    if (p >= 0 && p < N && visited[p] === 0 && inTol(p)) {
+      visited[p] = 1;
+      queue.push(p);
+    }
+  };
+  for (let x = 0; x < W; x++) { enqueue(x); enqueue((H - 1) * W + x); }
+  for (let y = 1; y < H - 1; y++) { enqueue(y * W); enqueue(y * W + (W - 1)); }
+
+  let removed = 0;
+  let head = 0;
+  while (head < queue.length) {
+    const p = queue[head++];
+    data[p * ch + 3] = 0;
+    removed++;
+    const x = p % W;
+    if (x > 0) enqueue(p - 1);
+    if (x < W - 1) enqueue(p + 1);
+    if (p >= W) enqueue(p - W);
+    if (p < N - W) enqueue(p + W);
+  }
+
+  if (removed === 0) {
+    log(`fallbackBgRemove: no pixels matched bg(${bgR},${bgG},${bgB}) tol=${FILL_TOL}`);
+    return 0;
+  }
+
+  const tmpPath = filePath + ".fallback.tmp";
+  await sharp(data, {
+    raw: { width: W, height: H, channels: ch as 1 | 2 | 3 | 4 },
+  })
+    .png()
+    .toFile(tmpPath);
+  fs.renameSync(tmpPath, filePath);
+  log(
+    `fallbackBgRemove: bg=(${bgR},${bgG},${bgB}) tol=${FILL_TOL} removed=${removed}/${N}`,
+  );
+  return removed;
 }
