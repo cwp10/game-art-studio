@@ -16,6 +16,7 @@ import { listPresets } from "@/lib/api/client";
 
 export type SubjectType = "character" | "effect" | "object";
 export type ContextMode = "character" | "object";
+export type Perspective = "side" | "topdown" | "isometric" | "2.5d-topdown";
 export type Direction =
   | "DOWN"
   | "LEFT"
@@ -36,6 +37,7 @@ export type SpriteGenState = {
   stylePresetId: string | null;
   seamlessLoop: boolean;
   actionPrompt: string;
+  perspective?: Perspective;
 };
 
 type Props = {
@@ -171,6 +173,7 @@ export function SpriteGenPanel({
   const [stylePresetId, setStylePresetId] = useState<string | null>(null);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
+  const [perspective, setPerspective] = useState<Perspective>("side");
 
   // 참조 이미지 연결·해제 시 방향 자동 전환 — 함수형 업데이트로 stale closure 방지
   useEffect(() => {
@@ -259,6 +262,7 @@ export function SpriteGenPanel({
         stylePresetId,
         seamlessLoop,
         actionPrompt: actionPrompt.trim(),
+        perspective,
       };
       const msg = buildSpriteMessage(state, suffix, referenceId ?? null);
       saveRecent(exampleKey, state.actionPrompt);
@@ -412,6 +416,33 @@ export function SpriteGenPanel({
             />
             루프
           </label>
+        </div>
+
+        {/* 시점 선택 */}
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs text-text-muted">시점</span>
+          <div className="flex rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+            {(
+              [
+                { value: "side", label: "사이드" },
+                { value: "topdown", label: "탑다운" },
+                { value: "isometric", label: "아이소" },
+                { value: "2.5d-topdown", label: "2.5D" },
+              ] as { value: Perspective; label: string }[]
+            ).map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setPerspective(opt.value)}
+                className={`flex h-7 items-center px-3 rounded-md transition-colors ${
+                  perspective === opt.value
+                    ? "bg-[color:var(--accent)]/20 text-text-primary"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* 동작 프롬프트 */}
@@ -717,13 +748,24 @@ export function buildSpriteMessage(
   const anchor = isCharacter ? "feet" : "center";
   const grid = FRAME_OPTS.find(f => f.value === state.frames) ?? { rows: 2, cols: 4 };
 
+  const viewpointClause =
+    state.perspective && state.perspective !== "side"
+      ? `; viewpoint=${state.perspective}`
+      : "";
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
-    `framesPerDir=${state.frames}; rows=${grid.rows}; cols=${grid.cols}; ` +
-    `seamlessLoop=${state.seamlessLoop}]`;
+    `framesPerDir=${state.frames}; rows=${grid.rows}; cols=${grid.cols}` +
+    `${viewpointClause}; seamlessLoop=${state.seamlessLoop}]`;
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
+  const perspectivePhrase: Partial<Record<Perspective, string>> = {
+    topdown: "top-down bird's-eye view",
+    isometric: "isometric 45-degree angle view",
+    "2.5d-topdown": "2.5D top-down perspective, slightly overhead",
+  };
+  const perspPhrase = perspectivePhrase[state.perspective ?? "side"];
+  if (perspPhrase) nlParts.push(perspPhrase);
   // REF 방향은 참조 이미지가 실제로 첨부될 때만 의미가 있음
   if (isCharacter && (state.direction !== "REF" || referenceId)) {
     nlParts.push(facingPhrase(state.direction));

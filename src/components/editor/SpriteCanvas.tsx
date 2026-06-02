@@ -7,6 +7,7 @@ import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 
 type Order = "row" | "col";
+type AtlasFormat = "custom" | "unity" | "godot" | "phaser";
 
 // make_spritesheet 가 generation.params 에 영속하는 메타(전부 선택 — 구버전 시트는 비어있음).
 type SheetParams = {
@@ -80,6 +81,7 @@ export function SpriteCanvas({
     });
     return () => { cancelled = true; };
   }, [parentGenerationId]);
+  const [atlasFormat, setAtlasFormat] = useState<AtlasFormat>("custom");
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifBusy, setGifBusy] = useState(false);
   const [gifError, setGifError] = useState<string | null>(null);
@@ -683,30 +685,138 @@ export function SpriteCanvas({
 
   // ⑧ 아틀라스 메타데이터(.json) — 엔진(Unity/Godot/Phaser)에서 바로 슬라이싱.
   // params 우선, 없으면(구버전) 현재 rows/cols/fps 로 최선. anchor 는 셀-로컬 피벗.
-  function buildAtlasJson(): Record<string, unknown> {
+  function buildAtlasJson(format: AtlasFormat = "custom"): Record<string, unknown> {
     const directions =
       isDirSheet && dirLabels.length === rows
         ? dirLabels
         : directionCount && dirLabels.length
           ? dirLabels
           : undefined;
+
+    if (format === "custom") {
+      return {
+        image: `${parentGenerationId}.png`,
+        cellWidth: cellW,
+        cellHeight: cellH,
+        rows,
+        cols,
+        subjectType: params?.subjectType ?? undefined,
+        directions, // rows=방향일 때 행 순서 라벨, 아니면 생략
+        framesPerDirection: directions ? cols : undefined,
+        fps,
+        loop: params?.seamlessLoop ?? true,
+        anchor: params?.anchor ?? undefined, // 셀-로컬 피벗(발/엉덩이 라인)
+      };
+    }
+
+    const total = rows * cols;
+    const sheetW = cols * cellW;
+    const sheetH = rows * cellH;
+    const loop = params?.seamlessLoop ?? true;
+    // row-order 0-based, 4자리 패딩 프레임 이름.
+    const frameName = (i: number) => `frame_${String(i).padStart(4, "0")}`;
+    const cellOf = (i: number) => {
+      const r = Math.floor(i / cols);
+      const c = i % cols;
+      return { x: c * cellW, y: r * cellH };
+    };
+
+    if (format === "unity") {
+      const frameEntries: Record<string, unknown> = {};
+      for (let i = 0; i < total; i++) {
+        const { x, y } = cellOf(i);
+        frameEntries[`${frameName(i)}.png`] = {
+          frame: { x, y, w: cellW, h: cellH },
+          rotated: false,
+          trimmed: false,
+          spriteSourceSize: { x: 0, y: 0, w: cellW, h: cellH },
+          sourceSize: { w: cellW, h: cellH },
+        };
+      }
+      const frameTags =
+        directions && isDirSheet
+          ? directions.map((name, i) => ({
+              name,
+              from: i * cols,
+              to: i * cols + cols - 1,
+              direction: "forward",
+            }))
+          : [];
+      return {
+        frames: frameEntries,
+        meta: {
+          app: "image-generator",
+          version: "1.0",
+          image: `${parentGenerationId}.png`,
+          format: "RGBA8888",
+          size: { w: sheetW, h: sheetH },
+          scale: "1",
+          frameTags,
+        },
+      };
+    }
+
+    if (format === "godot") {
+      const frameList = Array.from({ length: total }, (_, i) => {
+        const { x, y } = cellOf(i);
+        return { index: i, region: { x, y, w: cellW, h: cellH } };
+      });
+      const animations =
+        directions && isDirSheet
+          ? directions.map((name, i) => ({
+              name,
+              fps,
+              loop,
+              frames: Array.from({ length: cols }, (_, f) => i * cols + f),
+            }))
+          : [
+              {
+                name: "default",
+                fps,
+                loop,
+                frames: Array.from({ length: total }, (_, i) => i),
+              },
+            ];
+      return {
+        image: `${parentGenerationId}.png`,
+        imageSize: { w: sheetW, h: sheetH },
+        frameWidth: cellW,
+        frameHeight: cellH,
+        columns: cols,
+        rows,
+        frames: frameList,
+        animations,
+      };
+    }
+
+    // phaser
+    const phaserFrames = Array.from({ length: total }, (_, i) => {
+      const { x, y } = cellOf(i);
+      return {
+        filename: frameName(i),
+        rotated: false,
+        trimmed: false,
+        sourceSize: { w: cellW, h: cellH },
+        spriteSourceSize: { x: 0, y: 0, w: cellW, h: cellH },
+        frame: { x, y, w: cellW, h: cellH },
+      };
+    });
     return {
-      image: `${parentGenerationId}.png`,
-      cellWidth: cellW,
-      cellHeight: cellH,
-      rows,
-      cols,
-      subjectType: params?.subjectType ?? undefined,
-      directions, // rows=방향일 때 행 순서 라벨, 아니면 생략
-      framesPerDirection: directions ? cols : undefined,
-      fps,
-      loop: params?.seamlessLoop ?? true,
-      anchor: params?.anchor ?? undefined, // 셀-로컬 피벗(발/엉덩이 라인)
+      textures: [
+        {
+          image: `${parentGenerationId}.png`,
+          format: "RGBA8888",
+          size: { w: sheetW, h: sheetH },
+          scale: 1,
+          frames: phaserFrames,
+        },
+      ],
+      meta: { app: "image-generator", version: "1.0" },
     };
   }
 
   function downloadAtlasJson() {
-    const json = JSON.stringify(buildAtlasJson(), null, 2);
+    const json = JSON.stringify(buildAtlasJson(atlasFormat), null, 2);
     triggerDownload(new Blob([json], { type: "application/json" }), `${parentGenerationId}.json`);
   }
 
@@ -1164,6 +1274,21 @@ export function SpriteCanvas({
               {savedMsg}
             </span>
           )}
+        </div>
+        {/* Atlas 포맷 선택 */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-text-muted">Atlas 포맷</span>
+          <select
+            value={atlasFormat}
+            onChange={e => setAtlasFormat(e.target.value as AtlasFormat)}
+            disabled={frames.length === 0}
+            className="h-7 flex-1 rounded border border-border bg-bg-app px-2 text-text-primary disabled:opacity-40"
+          >
+            <option value="custom">Custom JSON</option>
+            <option value="unity">Unity (TexturePacker)</option>
+            <option value="godot">Godot</option>
+            <option value="phaser">Phaser 3</option>
+          </select>
         </div>
         <div className="flex gap-2">
           <button
