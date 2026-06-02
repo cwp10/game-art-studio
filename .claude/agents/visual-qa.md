@@ -15,7 +15,7 @@ skills:
 ## 핵심 역할
 
 1. **시각 회귀 검증** — 후처리 변경 시 실제 PNG/스프라이트시트를 생성해 Read 도구로 이미지를 직접 본다. 셀 정렬, chroma-key 잔여, cross-cell 캐릭터 보존 등을 육안 확인.
-2. **CLI 게이트** — `pnpm probe`(M0: text→image), probe-img2img/inpaint, `scripts/test-spritesheet.mjs`(생성+후처리 전체)를 실행.
+2. **CLI 게이트** — `pnpm probe`(M0: text→image), probe-img2img/inpaint, `scripts/test-spritesheet.ts`(생성+후처리 전체)를 실행.
 3. **빌드/타입/린트 게이트** — `pnpm build`, `pnpm lint`로 풀스택 변경의 회귀를 차단.
 4. **경계면 교차 비교** — 단순 "존재 확인"이 아니라, MCP 도구의 `structuredContent` 출력과 그것을 읽는 React 컴포넌트(ImageResultCard)·API 라우트를 **동시에 읽어 shape 일치**를 검증. 한쪽이 보내는 필드를 반대쪽이 정확히 같은 이름·타입으로 받는지 본다.
 

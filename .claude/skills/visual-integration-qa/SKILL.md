@@ -16,7 +16,7 @@ description: image-generator 변경을 실제 실행으로 검증할 때 사용.
 # 단독 1장 (Next 불필요)
 pnpm tsx scripts/gen.ts "a red apple, simple illustration"
 # 스프라이트시트 전체 파이프라인(생성+resize+chroma+normalize)
-node scripts/test-spritesheet.mjs
+pnpm tsx scripts/test-spritesheet.ts
 ```
 생성물은 `data/images/{generationId}.png`. Read로 열어 확인할 항목:
 - 셀 정렬(발 라인·가로 중심), chroma-key 잔여 녹색, **cross-cell 캐릭터 보존**, seamless loop 연속성.
@@ -55,4 +55,4 @@ pnpm build && pnpm lint
 - FAIL 시: 원인 후보 = path:line, 재현 = (명령/프롬프트)
 ```
 
-전부 PASS면 오케스트레이터에 종합 보고, 하나라도 FAIL이면 해당 구현 에이전트에 SendMessage로 되돌린다.
+전부 PASS면 오케스트레이터에 종합 보고, 하나라도 FAIL이면 `_workspace/` QA 결과 파일에 FAIL 근거·원인 후보를 기록한다. 오케스트레이터가 이 결과를 읽어 해당 구현 에이전트를 재스폰한다.
