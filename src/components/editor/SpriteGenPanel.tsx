@@ -24,7 +24,8 @@ export type Direction =
   | "DOWN-LEFT"
   | "DOWN-RIGHT"
   | "UP-LEFT"
-  | "UP-RIGHT";
+  | "UP-RIGHT"
+  | "REF";
 export type FrameCount = 4 | 6 | 8 | 12 | 16;
 
 export type SpriteGenState = {
@@ -61,6 +62,7 @@ const DIRECTION_LABELS: Record<Direction, string> = {
   "DOWN-RIGHT": "↘",
   "UP-LEFT": "↖",
   "UP-RIGHT": "↗",
+  REF: "↻ 참조",
 };
 
 const DIRECTION_SYMBOLS: Record<Direction, string> = {
@@ -72,12 +74,13 @@ const DIRECTION_SYMBOLS: Record<Direction, string> = {
   "DOWN-RIGHT": "↘",
   "UP-LEFT": "↖",
   "UP-RIGHT": "↗",
+  REF: "↻",
 };
 
 const COMPASS: Array<Direction | null> = [
-  "UP-LEFT", "UP", "UP-RIGHT",
-  "LEFT", null, "RIGHT",
-  "DOWN-LEFT", "DOWN", "DOWN-RIGHT",
+  "UP-LEFT", "UP",  "UP-RIGHT",
+  "LEFT",    "REF", "RIGHT",
+  "DOWN-LEFT","DOWN","DOWN-RIGHT",
 ];
 
 const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
@@ -169,6 +172,11 @@ export function SpriteGenPanel({
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
 
+  // 참조 이미지가 없어지면 REF 방향을 DOWN 으로 리셋
+  useEffect(() => {
+    if (direction === "REF" && !referenceImageUrl) setDirection("DOWN");
+  }, [referenceImageUrl, direction]);
+
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
@@ -216,7 +224,7 @@ export function SpriteGenPanel({
           subjectType,
           contextType: tab === "effect" ? contextMode : undefined,
           referencePrompt: tab === "effect" ? referencePrompt : undefined,
-          direction: subjectType === "character" ? direction : undefined,
+          direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
           frames,
           seamlessLoop,
         }),
@@ -362,6 +370,7 @@ export function SpriteGenPanel({
                     setDirOpen(false);
                   }}
                   onClose={() => setDirOpen(false)}
+                  referenceImageUrl={referenceImageUrl}
                 />
               )}
             </div>
@@ -522,10 +531,12 @@ function DirectionPopover({
   selected,
   onSelect,
   onClose,
+  referenceImageUrl,
 }: {
   selected: Direction;
   onSelect: (d: Direction) => void;
   onClose: () => void;
+  referenceImageUrl?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useOutsideClose(ref, onClose);
@@ -535,10 +546,35 @@ function DirectionPopover({
       className="absolute left-0 top-full z-30 mt-1 w-[180px] rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
     >
       <div className="grid grid-cols-3 gap-1.5">
-        {COMPASS.map((d, i) =>
-          d === null ? (
-            <span key={i} />
-          ) : (
+        {COMPASS.map((d, i) => {
+          if (d === null) return <span key={i} />;
+
+          // 중앙 REF 버튼 — 참조 이미지가 없으면 빈 칸
+          if (d === "REF") {
+            if (!referenceImageUrl) return <span key="REF" />;
+            return (
+              <button
+                key="REF"
+                onClick={() => onSelect("REF")}
+                title="참조 이미지 방향·포즈 기준"
+                className={`flex h-12 w-full flex-col items-center justify-center gap-0.5 overflow-hidden rounded-lg border text-base leading-none ${
+                  selected === "REF"
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border bg-bg-card text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={referenceImageUrl}
+                  alt="참조"
+                  className="h-8 w-8 rounded object-contain"
+                />
+                <span className="text-[9px] leading-none opacity-60">참조</span>
+              </button>
+            );
+          }
+
+          return (
             <button
               key={d}
               onClick={() => onSelect(d)}
@@ -556,8 +592,8 @@ function DirectionPopover({
                 </span>
               )}
             </button>
-          ),
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -658,6 +694,7 @@ function useOutsideClose(
 // 메시지 빌더 + 스타일 suffix 해석
 
 function facingPhrase(label: Direction): string {
+  if (label === "REF") return "facing the exact same direction as the reference character, preserving its pose and orientation";
   if (label.startsWith("DOWN-")) return `facing ${label} (3/4 front view)`;
   if (label.startsWith("UP-")) return `facing ${label} (3/4 back view)`;
   if (label.startsWith("DOWN")) return "facing DOWN (front view)";
