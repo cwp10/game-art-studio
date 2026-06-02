@@ -354,11 +354,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           if (genId) {
             const filePath = imagePathFor(genId);
             try {
-              const ckOut = await chromaKeyFile(filePath, genChromaKey, log);
+              const ckOut = await applyTransparentPostProcess(filePath, genChromaKey);
               log(`generate_image chroma-keyed gen=${genId} key=${genChromaKey} keyedOut=${ckOut}`);
-              if (ckOut === 0) {
-                await fallbackBgRemove(filePath, log);
-              }
             } catch (e) {
               log(`generate_image post-process fail: ${(e as Error).message}`);
             }
@@ -791,11 +788,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
               if (wantsTransparent) {
                 // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
-                const ckOut = await chromaKeyFile(filePath, chromaKeyColor, log, cellW * cellH);
+                await applyTransparentPostProcess(filePath, chromaKeyColor, cellW * cellH);
                 log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
-                if (ckOut === 0) {
-                  await fallbackBgRemove(filePath, log);
-                }
               }
               // 빈 셀 감지 — 방향 시트만(비방향은 항상 1회 채택이라 측정 불필요).
               if (retryEnabled) {
@@ -1035,10 +1029,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                 // scale=0.2 수준으로 축소시키므로 스킵한다.
                 let keyedOut = 0;
                 if (wantsTransparent) {
-                  keyedOut = await chromaKeyFile(filePath, "green", log);
-                  if (keyedOut === 0) {
-                    keyedOut = await fallbackBgRemove(filePath, log);
-                  }
+                  keyedOut = await applyTransparentPostProcess(filePath, "green");
                 }
                 const parentSubject = inputGen.params?.subjectType;
                 const reskinSubject: SubjectType = parentSubject === "effect" ? "effect" : "character";
@@ -1097,6 +1088,23 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
     };
   }
 });
+
+// ─── post-process helpers ────────────────────────────────────────────────────
+
+/**
+ * 투명 배경 후처리: chromaKeyFile → keyedOut=0이면 fallbackBgRemove 로 폴백.
+ * generate_image / make_spritesheet / reskin_image 세 경로 공통 시퀀스.
+ * cellArea 미지정 시 이미지 전체를 단일 셀로 간주(단일 이미지 경로).
+ */
+async function applyTransparentPostProcess(
+  filePath: string,
+  chromaKey: ChromaKeyColor,
+  cellArea?: number,
+): Promise<number> {
+  const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea);
+  if (keyedOut === 0) return await fallbackBgRemove(filePath, log);
+  return keyedOut;
+}
 
 // ─── shared executor ─────────────────────────────────────────────────────────
 
