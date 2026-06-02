@@ -95,14 +95,14 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
 
 // 애니메이션 타입 프리셋 — frames 자동 설정 + 비어 있을 때 동작 힌트 채움 (로컬 UI 전용)
 const ANIM_PRESETS = [
-  { key: "custom", label: "커스텀",  frames: null,        hint: "" },
-  { key: "idle",   label: "대기",    frames: 4 as const,  hint: "idle breathing animation, subtle movement" },
-  { key: "walk",   label: "걷기",    frames: 8 as const,  hint: "walking cycle animation" },
-  { key: "run",    label: "달리기",  frames: 8 as const,  hint: "running cycle animation, fast movement" },
-  { key: "attack", label: "공격",    frames: 6 as const,  hint: "attack animation, swing motion" },
-  { key: "jump",   label: "점프",    frames: 6 as const,  hint: "jump arc animation" },
-  { key: "death",  label: "사망",    frames: 6 as const,  hint: "death animation, falling down" },
-  { key: "cast",   label: "시전",    frames: 8 as const,  hint: "spell casting animation, magical gesture" },
+  { key: "custom", label: "커스텀",  frames: null, hint: "" },
+  { key: "idle",   label: "대기",    frames: 4,    hint: "idle breathing animation, subtle movement" },
+  { key: "walk",   label: "걷기",    frames: 8,    hint: "walking cycle animation" },
+  { key: "run",    label: "달리기",  frames: 8,    hint: "running cycle animation, fast movement" },
+  { key: "attack", label: "공격",    frames: 6,    hint: "attack animation, swing motion" },
+  { key: "jump",   label: "점프",    frames: 6,    hint: "jump arc animation" },
+  { key: "death",  label: "사망",    frames: 6,    hint: "death animation, falling down" },
+  { key: "cast",   label: "시전",    frames: 8,    hint: "spell casting animation, magical gesture" },
 ] as const;
 
 type AnimType = (typeof ANIM_PRESETS)[number]["key"];
@@ -437,6 +437,7 @@ export function SpriteGenPanel({
                 selected={frames}
                 onSelect={f => {
                   setFrames(f);
+                  setAnimType("custom");
                   setFrameOpen(false);
                 }}
                 onClose={() => setFrameOpen(false)}
@@ -480,7 +481,10 @@ export function SpriteGenPanel({
               const preset = ANIM_PRESETS.find(p => p.key === key);
               if (!preset) return;
               if (preset.frames !== null) setFrames(preset.frames);
-              if (preset.hint && actionPrompt.trim().length === 0) {
+              const isPresetHint = ANIM_PRESETS.some(p => p.hint && p.hint === actionPrompt.trim());
+              if (key === "custom") {
+                if (isPresetHint) setActionPrompt("");
+              } else if (preset.hint && (actionPrompt.trim().length === 0 || isPresetHint)) {
                 setActionPrompt(preset.hint);
               }
             }}
@@ -569,7 +573,7 @@ export function SpriteGenPanel({
           {/* 걷기·달리기 추천 힌트 — 캐릭터 탭만 */}
           {subjectType === "character" && (
             <p className="text-[11px] text-text-muted/60 leading-relaxed">
-              걷기·달리기는 <span className="text-text-muted">8프레임(2×4)</span> + <span className="text-text-muted">루프 켜기</span> 추천
+              걷기·달리기는 <span className="text-text-muted">{ANIM_PRESETS.find(p => p.key === "walk")!.frames}프레임</span> + <span className="text-text-muted">루프 켜기</span> 추천
             </p>
           )}
 
