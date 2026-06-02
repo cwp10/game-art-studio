@@ -494,145 +494,20 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           y: Math.round(anchorY * pivotScale),
         };
 
-        // ── 빈 셀 자동 재생성 루프 ──────────────────────────────────────────
-        // 모델이 그리드를 100% 못 채우는 가챠(신뢰성 ~50%)를 재시도로 흡수한다.
-        // 캐릭터 시트는 방향 수 관계없이 재시도 — 발 교차 등 품질이 1회로는 불안정.
-        // 이펙트/오브젝트는 1회(그리드 충만도 실패 가능성이 낮고 과금 절약).
         const retryEnabled = isCharacter;
-        const MAX_RETRIES = retryEnabled ? 2 : 0; // 총 최대 3시도(방향 시트), 1시도(그 외)
         const spritesheetParams = {
-          seamlessLoop,
-          subjectType,
-          anchorStrategy,
-          directions: directions ?? undefined,
-          anchor: anchorPivot,
-          rows,
-          cols,
-          cellW: FINAL_CELL_PX,
-          cellH: FINAL_CELL_PX,
-          fps: 12,
+          seamlessLoop, subjectType, anchorStrategy,
+          directions: directions ?? undefined, anchor: anchorPivot,
+          rows, cols, cellW: FINAL_CELL_PX, cellH: FINAL_CELL_PX, fps: 12,
         };
 
-        let best: Awaited<ReturnType<typeof runImageTool>> | null = null;
-        let bestFilled = -1;
-        let cumulativeMs = 0;
-        let lastStats: Awaited<ReturnType<typeof detectFill>> | null = null;
+        const { best, cumulativeMs } = await runSpritesheetAttempts({
+          name, decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
+          wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
+          anchorStrategy, subjectType, resolvedAnchor,
+          finalCellPx: FINAL_CELL_PX, sessionId,
+        });
 
-        const cleanupResult = (r: Awaited<ReturnType<typeof runImageTool>>) => {
-          const gid = r?.structuredContent?.generationId;
-          if (!gid) return;
-          try {
-            const fp = imagePathFor(gid);
-            if (fs.existsSync(fp)) fs.unlinkSync(fp);
-            deleteGeneration(gid);
-            log(`make_spritesheet retry: discarded gen=${gid} (lower fill)`);
-          } catch (e) {
-            log(`make_spritesheet retry cleanup fail gen=${gid}: ${(e as Error).message}`);
-          }
-        };
-
-        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-          const mcpResult = await runImageTool({
-            name,
-            kind: "spritesheet",
-            prompt: decorated,
-            inputGenerationIds: refId ? [refId] : [],  // DB input_image_ids 추적용
-            overrideInputPaths,                         // Codex 실제 입력 순서 제어
-            params: spritesheetParams,
-            sessionId,
-            progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
-          });
-          cumulativeMs += mcpResult?.structuredContent?.elapsedMs ?? 0;
-
-          // ── 후처리 1단계: 리사이즈 + chroma-key (normalize 는 best 선택 후 1회만) ──
-          // 1) 정확한 배수 크기로 강제 리사이즈 (셀 경계 픽셀-단위 정렬)
-          // 2) wantsTransparent: chroma-key → alpha 0 변환
-          const genId: string | undefined = mcpResult?.structuredContent?.generationId;
-          let stats: Awaited<ReturnType<typeof detectFill>> | null = null;
-          if (genId) {
-            const filePath = imagePathFor(genId);
-            try {
-              const resizeTmp = `${filePath}.resize.tmp`;
-              await sharp(filePath)
-                .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
-                .png()
-                .toFile(resizeTmp);
-              fs.renameSync(resizeTmp, filePath);
-              log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
-
-              if (wantsTransparent) {
-                // cellW*cellH 를 enclosed-포켓 키아웃 임계 기준으로 전달(다리 사이 포켓 흡수).
-                await applyTransparentPostProcess(filePath, chromaKeyColor, cellW * cellH);
-                log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
-              }
-              // 빈 셀 감지 — 방향 시트만(비방향은 항상 1회 채택이라 측정 불필요).
-              if (retryEnabled) {
-                stats = await detectFill(filePath, rows, cols, log);
-              }
-            } catch (e) {
-              log(`make_spritesheet post-process fail: ${(e as Error).message}`);
-            }
-          }
-
-          // best 선택: filledCells 가 더 크면 교체(이전 best 정리), 아니면 이번 결과 정리.
-          // 비방향(stats=null)은 첫 결과를 그대로 best 로(MAX_RETRIES=0 이라 루프 1회).
-          const filled = stats ? stats.filledCells : Number.MAX_SAFE_INTEGER;
-          if (filled > bestFilled) {
-            if (best) cleanupResult(best);
-            best = mcpResult;
-            bestFilled = filled;
-            lastStats = stats;
-          } else {
-            cleanupResult(mcpResult);
-          }
-
-          if (!stats || stats.complete) break;
-          log(
-            `make_spritesheet attempt ${attempt + 1}/${MAX_RETRIES + 1}: ` +
-              `${stats.filledCells}/${stats.expected} cells — ${stats.complete ? "complete" : "retrying"}`,
-          );
-        }
-
-        // ── 후처리 2단계: best 에만 normalize 적용 → 최종 반환 ──
-        const finalGenId: string | undefined = best?.structuredContent?.generationId;
-        if (finalGenId) {
-          const filePath = imagePathFor(finalGenId);
-          try {
-            // 셀 정규화: 연결 컴포넌트를 픽셀이 가장 많은 셀에 재배치 + 시트-전역 단일
-            // scale-to-fit + 앵커 전략별 정렬. 셀 경계 이탈·잔재를 후처리로 흡수한다.
-            await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
-              anchorStrategy,
-              subjectType,
-              log,
-            });
-            log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
-
-            // 업스케일: 384px/셀 → 512px/셀 (×4/3). codex 네이티브 안에서 생성한 뒤
-            // sharp lanczos3 로 최종 출력 해상도를 확보.
-            const upW = cols * FINAL_CELL_PX;
-            const upH = rows * FINAL_CELL_PX;
-            const upTmp = `${filePath}.up.tmp`;
-            await sharp(filePath)
-              .resize(upW, upH, { kernel: "lanczos3", fit: "fill" })
-              .png()
-              .toFile(upTmp);
-            fs.renameSync(upTmp, filePath);
-            // DB width/height 동기화 — runImageTool 이 기록한 생성 시점 크기를 업스케일 후 값으로 갱신.
-            setGenerationDimensions(finalGenId, upW, upH);
-            log(`make_spritesheet upscaled gen=${finalGenId} to ${upW}x${upH}`);
-          } catch (e) {
-            log(`make_spritesheet post-process fail: ${(e as Error).message}`);
-          }
-          // 미완으로 재시도 소진 시 경고(몇/몇 셀) — 무한루프·과금폭주 금지, best 로 진행.
-          if (retryEnabled && lastStats && !lastStats.complete) {
-            log(
-              `make_spritesheet WARNING: ${MAX_RETRIES + 1} attempts exhausted, ` +
-                `best fill ${lastStats.filledCells}/${lastStats.expected} cells (incomplete) — proceeding with best`,
-            );
-          }
-        }
-
-        // structuredContent: elapsedMs 누적값 + 업스케일 후 실제 치수로 갱신.
         if (best?.structuredContent) {
           best.structuredContent.elapsedMs = cumulativeMs;
           best.structuredContent.width = cols * FINAL_CELL_PX;
@@ -1124,6 +999,151 @@ async function buildSpritePrompt(
     bgInstruction;
 
   return { decorated, overrideInputPaths };
+}
+
+type SpritesheetAttemptsSpec = {
+  name: string;
+  decorated: string;
+  overrideInputPaths: string[];
+  refId: string | null;
+  spritesheetParams: Record<string, unknown>;
+  retryEnabled: boolean;
+  wantsTransparent: boolean;
+  chromaKeyColor: ChromaKeyColor;
+  rows: number;
+  cols: number;
+  canvasW: number;
+  canvasH: number;
+  anchorStrategy: AnchorStrategy;
+  subjectType: SubjectType;
+  resolvedAnchor: Exclude<AnchorStrategy, "auto">;
+  finalCellPx: number;
+  sessionId: string | null;
+};
+
+/**
+ * 스프라이트시트 시도 루프 + 후처리.
+ *   1. 최대 MAX_RETRIES+1 회 codex 생성 → 리사이즈 → chroma-key → detectFill
+ *   2. filledCells 기준으로 best 선택 (낮은 시도는 파일·DB 정리)
+ *   3. best 에만 normalizeSpritesheetCells + 업스케일(cellPx→finalCellPx) 적용
+ */
+async function runSpritesheetAttempts(
+  spec: SpritesheetAttemptsSpec,
+): Promise<{ best: Awaited<ReturnType<typeof runImageTool>> | null; cumulativeMs: number }> {
+  const {
+    name, decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
+    wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
+    anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId,
+  } = spec;
+  const MAX_RETRIES = retryEnabled ? 2 : 0;
+  const cellArea = (canvasW / cols) * (canvasH / rows);
+
+  let best: Awaited<ReturnType<typeof runImageTool>> | null = null;
+  let bestFilled = -1;
+  let cumulativeMs = 0;
+  let lastStats: Awaited<ReturnType<typeof detectFill>> | null = null;
+
+  const cleanupResult = (r: Awaited<ReturnType<typeof runImageTool>>) => {
+    const gid = r?.structuredContent?.generationId;
+    if (!gid) return;
+    try {
+      const fp = imagePathFor(gid);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      deleteGeneration(gid);
+      log(`make_spritesheet retry: discarded gen=${gid} (lower fill)`);
+    } catch (e) {
+      log(`make_spritesheet retry cleanup fail gen=${gid}: ${(e as Error).message}`);
+    }
+  };
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const mcpResult = await runImageTool({
+      name,
+      kind: "spritesheet",
+      prompt: decorated,
+      inputGenerationIds: refId ? [refId] : [],
+      overrideInputPaths,
+      params: spritesheetParams,
+      sessionId,
+      progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
+    });
+    cumulativeMs += mcpResult?.structuredContent?.elapsedMs ?? 0;
+
+    const genId: string | undefined = mcpResult?.structuredContent?.generationId;
+    let stats: Awaited<ReturnType<typeof detectFill>> | null = null;
+    if (genId) {
+      const filePath = imagePathFor(genId);
+      try {
+        const resizeTmp = `${filePath}.resize.tmp`;
+        await sharp(filePath)
+          .resize(canvasW, canvasH, { kernel: "lanczos3", fit: "fill" })
+          .png()
+          .toFile(resizeTmp);
+        fs.renameSync(resizeTmp, filePath);
+        log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
+        if (wantsTransparent) {
+          await applyTransparentPostProcess(filePath, chromaKeyColor, cellArea);
+          log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
+        }
+        if (retryEnabled) {
+          stats = await detectFill(filePath, rows, cols, log);
+        }
+      } catch (e) {
+        log(`make_spritesheet post-process fail: ${(e as Error).message}`);
+      }
+    }
+
+    const filled = stats ? stats.filledCells : Number.MAX_SAFE_INTEGER;
+    if (filled > bestFilled) {
+      if (best) cleanupResult(best);
+      best = mcpResult;
+      bestFilled = filled;
+      lastStats = stats;
+    } else {
+      cleanupResult(mcpResult);
+    }
+
+    if (!stats || stats.complete) break;
+    log(
+      `make_spritesheet attempt ${attempt + 1}/${MAX_RETRIES + 1}: ` +
+        `${stats.filledCells}/${stats.expected} cells — retrying`,
+    );
+  }
+
+  // best 에만 normalize + 업스케일 적용
+  const finalGenId: string | undefined = best?.structuredContent?.generationId;
+  if (finalGenId) {
+    const filePath = imagePathFor(finalGenId);
+    try {
+      await normalizeSpritesheetCells(filePath, rows, cols, wantsTransparent, {
+        anchorStrategy,
+        subjectType,
+        log,
+      });
+      log(`make_spritesheet normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
+
+      const upW = cols * finalCellPx;
+      const upH = rows * finalCellPx;
+      const upTmp = `${filePath}.up.tmp`;
+      await sharp(filePath)
+        .resize(upW, upH, { kernel: "lanczos3", fit: "fill" })
+        .png()
+        .toFile(upTmp);
+      fs.renameSync(upTmp, filePath);
+      setGenerationDimensions(finalGenId, upW, upH);
+      log(`make_spritesheet upscaled gen=${finalGenId} to ${upW}x${upH}`);
+    } catch (e) {
+      log(`make_spritesheet post-process fail: ${(e as Error).message}`);
+    }
+    if (retryEnabled && lastStats && !lastStats.complete) {
+      log(
+        `make_spritesheet WARNING: ${MAX_RETRIES + 1} attempts exhausted, ` +
+          `best fill ${lastStats.filledCells}/${lastStats.expected} cells (incomplete) — proceeding with best`,
+      );
+    }
+  }
+
+  return { best, cumulativeMs };
 }
 
 // ─── shared executor ─────────────────────────────────────────────────────────
