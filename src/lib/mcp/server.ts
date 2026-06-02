@@ -654,14 +654,19 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         const poseRefInstruction = poseRefPath
           ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
-            `Blue = left leg, Red = right leg. Each skeleton shows the EXACT leg angle required for that cell. ` +
-            `You MUST render your character OVER these skeletons, matching the leg positions shown. ` +
-            `The skeleton is your guide — replace it with the actual character while keeping the same leg angles. ` +
+            `CRITICAL COLOR CODING — Blue skeleton line = LEFT leg (character's own left); Red skeleton line = RIGHT leg (character's own right). ` +
+            `Each skeleton shows the EXACT per-leg angle required for that cell. ` +
+            `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
+            `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +
+            `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
             (poseFrameAnglesText
-              ? `EXACT LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
-                `These are the precise angles you MUST reproduce — positive=forward, negative=back` +
-                (singleDirWalkDir ? ` (forward = screen-${singleDirWalkDir}, the walking direction)` : "") +
-                `. `
+              ? `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
+                `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
+                (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
+                `, negative = back. ` +
+                `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
+                `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
+                `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. `
               : "")
           : "";
 
