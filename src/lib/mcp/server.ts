@@ -518,7 +518,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const equipmentRule = isCharacter
           ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
             `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
-            `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. `
+            `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. ` +
+            `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, cloak, shield, backpack, wings, scabbard, or any item worn on the back) are part of the character silhouette and MUST remain visible in EVERY frame. ` +
+            `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. `
           : "";
 
         // 보행 캐릭터 시트: 포즈 레퍼런스 시트를 생성해 Codex 입력에 포함.

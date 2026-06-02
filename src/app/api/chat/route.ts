@@ -178,19 +178,18 @@ async function runChat(
   }
 
   // 6. Claude spawn — resume 가능하면 이어붙임
-  const resumeId = lastClaudeSessionId(sessionId);
-  const handle = spawnClaude({
+  let resumeId: string | null = lastClaudeSessionId(sessionId);
+  const spawnOpts = {
     systemPrompt: getSystemPrompt(),
     mcpConfigPath: MCP_CONFIG_PATH,
     allowedTools: MCP_TOOL_NAMES,
-    resumeSessionId: resumeId,
     userMessage: messageText,
     logPrefix: `claude-${jobId}`,
     signal: combinedAbort.signal,
     cwd: process.cwd(),
-  });
+  };
 
-  // 6. 이벤트 소비. 종료 시점에 assistant 메시지를 한번에 저장.
+  // 7. 이벤트 소비. 종료 시점에 assistant 메시지를 한번에 저장.
   const turnStartTime = Date.now();
   const blocks: MessageBlock[] = [];
   const accumulatedText: string[] = [];
@@ -204,7 +203,10 @@ async function runChat(
   send({ type: "assistant_thinking" });
 
   try {
-    for await (const ev of handle.events) {
+    // resume 세션이 만료된 경우(이벤트 없이 exit 1) 새 세션으로 재시도.
+    spawnLoop: for (let attempt = 0; attempt <= 1; attempt++) {
+      const handle = spawnClaude({ ...spawnOpts, resumeSessionId: resumeId });
+      for await (const ev of handle.events) {
       switch (ev.kind) {
         case "session_init":
           claudeSessionId = ev.sessionId;
@@ -299,9 +301,16 @@ async function runChat(
       }
     }
 
-    const exit = await handle.done;
-    if (exit !== 0) {
-      throw new Error(`claude exited with code ${exit} (see data/logs/claude-${jobId}-*.log)`);
+      const exit = await handle.done;
+      if (exit !== 0) {
+        // resume 세션 만료로 즉시 실패한 경우: 새 세션으로 재시도
+        if (attempt === 0 && resumeId && !claudeSessionId && blocks.length === 0) {
+          resumeId = null;
+          continue spawnLoop;
+        }
+        throw new Error(`claude exited with code ${exit} (see data/logs/claude-${jobId}-*.log)`);
+      }
+      break spawnLoop;
     }
 
     // 7. assistant 메시지 영구화 + generation 들 ownership 채우기
