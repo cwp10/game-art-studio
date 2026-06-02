@@ -166,16 +166,17 @@ export function SpriteGenPanel({
   // tab + contextMode → subjectType
   const subjectType: SubjectType = tab === "effect" ? "effect" : contextMode;
 
-  const [direction, setDirection] = useState<Direction>("DOWN");
+  const [direction, setDirection] = useState<Direction>(referenceImageUrl ? "REF" : "DOWN");
   const [frames, setFrames] = useState<FrameCount>(8);
   const [stylePresetId, setStylePresetId] = useState<string | null>(null);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
 
-  // 참조 이미지가 없어지면 REF 방향을 DOWN 으로 리셋
+  // 참조 이미지 연결·해제 시 방향 자동 전환
   useEffect(() => {
-    if (direction === "REF" && !referenceImageUrl) setDirection("DOWN");
-  }, [referenceImageUrl, direction]);
+    if (referenceImageUrl) setDirection("REF");
+    else if (direction === "REF") setDirection("DOWN");
+  }, [referenceImageUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
