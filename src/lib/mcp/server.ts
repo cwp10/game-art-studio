@@ -453,27 +453,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         }
         const chromaKeyColor: ChromaKeyColor = greenSubject || refIsGreen ? "magenta" : "green";
 
-        // 투명 배경은 chroma-key 방식: 모델에게 키색 위에 그리게 하고 후처리로 keying.
-        // 모델이 직접 알파를 그리면 흰색 fringe / 회색 잔재가 남음.
-        const bgInstruction = wantsTransparent
-          ? chromaKeyColor === "magenta"
-            ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
-            : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the green to produce true transparency."
-          : "White background.";
-
-        const isWalk = isLocomotion(userPrompt);
-        const isRun = isRunning(userPrompt);
-        const isSingleDirection = !directions || directions === 1;
-        const loopInstruction = seamlessLoop
-          ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
-            `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
-            `Design a CLOSED CYCLE with no beginning and no end: ` +
-            `• Walk/run: Frame N's pose flows naturally back into Frame 1's pose. ` +
-            `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
-            `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
-            `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
-          : "";
-
         // 피사체 종류·앵커 전략 해석 — 명시 param 우선, 없으면 키워드 추론 폴백.
         // subjectType 은 normalize 정렬·이펙트 가드의 결정적 입력 신호.
         const subjectType: SubjectType =
@@ -482,223 +461,19 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
         const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
           anchorStrategy !== "auto" ? anchorStrategy : (subjectType === "effect" || subjectType === "object") ? "center" : "feet";
-        // 가드·콘텐츠 열거·캐릭터 프레이밍은 subjectType 로 게이팅(앵커 전략과 무관).
-        // 배치(placement)만 resolvedAnchor 로 분기 — character+center 도 캐릭터 프레이밍/가드 유지.
-        const isCharacter = subjectType === "character";
-        const isObject = subjectType === "object";
-        const cx = Math.round(cellW / 2);
-        const cy = Math.round(cellH / 2);
-        // (5) 배치 규칙 — 5전략별. character 의 center 는 "수직 중앙"(접지 언급 X),
-        // effect 의 center 만 "VFX radiates symmetrically / no ground line" 문구.
-        const placementRule = ((): string => {
-          switch (resolvedAnchor) {
-            case "feet":
-              return `keep the feet on a consistent ground line and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
-            case "hip":
-              return `keep the hip/waist near the cell center X=${cx}, Y=${cy} with the feet falling naturally below, and identical character height in every frame; only limbs and body parts move between frames. `;
-            case "top":
-              return `keep the top of the head near the cell's upper edge in every frame and identical character height; only limbs and body parts move between frames, not the whole body. `;
-            case "center":
-              return isCharacter
-                ? `place the WHOLE character vertically centered so its visual center sits at the cell center X=${cx}, Y=${cy} in EVERY cell, identical character height; only limbs and body parts move between frames. `
-                : isObject
-                ? `center the object so its visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
-                  `Keep the object at a CONSISTENT scale across all frames — only the animated aspect (rotation angle, deformation, etc.) changes between frames. ` +
-                  `The object's complete bounding box must be vertically and horizontally centered; do NOT rest it on the bottom edge or use any ground line. `
-                : `this is a visual effect / VFX, NOT a grounded character. ` +
-                  `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
-                  `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
-                  `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
-                  `The trailing tail must NOT reach or touch the bottom edge. ` +
-                  `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `;
-          }
-        })();
-        const anchorRule = `(5) ${isCharacter ? "CHARACTER" : isObject ? "OBJECT" : "EFFECT"} ANCHOR — ${placementRule}`;
 
-        // rule (1)/(3) 의 콘텐츠 열거는 시트 종류에 따라 분기.
-        // character 시트는 발산 VFX 를 콘텐츠로 전제하면 안 됨(③) — 몸·무기·천만 나열.
-        const containedContent = isCharacter
-          ? "the character's body, weapon, and any flowing cape or robe"
-          : isObject
-          ? "the complete object, including its texture, decorations, materials, and any intrinsic glow or inset effects"
-          : "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes";
-        const oversizeContent = isCharacter
-          ? "especially a large pose or a wide weapon swing"
-          : isObject
-          ? "especially the object at an extreme angle or with a wide decorative extension"
-          : "especially a sweeping effect like a slash, blast, beam, or trail";
-
-        // ③ 캐릭터 시트 이펙트 가드 — subjectType=character 면 anchor 무관하게 항상 주입.
-        // 외부로 발산되는 액션/능력 VFX 만 금지, 캐릭터 고유 디자인은 허용.
-        const effectGuard = isCharacter
-          ? `Render the character's body and its INTRINSIC design only. ` +
-            `Do NOT add action or ability visual effects: NO attack slash trails, ` +
-            `NO spell or magic particles, NO projectiles, NO emitted auras around the body, ` +
-            `NO motion lines, NO impact flashes, NO smoke, NO sparkles, NO extra decorative VFX. ` +
-            `The character's OWN intrinsic material is fine (e.g. a robot's status lights or ` +
-            `glowing core, a fire creature's flame body, a weapon that glows as part of its ` +
-            `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `
-          : "";
-
-        // ② 방향 라벨 지시 — 캐릭터 시트 + directions≥2 에서만 의미. 이펙트엔 주입 X.
-        const directionPrompt =
-          isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
-
-        // ②-b 행(방향) 개수 강제 — 모델이 directions 행을 fewer 줄로 압축하는 회귀 방지.
-        // directionPrompt 와 동일 가드(isCharacter && directions). 레이아웃 설명에 직접 주입.
-        const rowCountRule =
-          isCharacter && directions
-            ? `The sheet MUST have EXACTLY ${rows} horizontal rows of cells (one row per direction), filled from top to bottom. ` +
-              `Draw all ${rows} rows — do NOT compress, merge, or omit rows, do NOT leave any row empty, and keep EQUAL vertical spacing between the ${rows} rows. `
-            : "";
-
-        // ②-c 열(프레임) 개수 강제 — 모델이 cols 프레임을 fewer 열로 압축(중앙/끝 빈 열)하는 회귀 방지.
-        // rowCountRule 과 동일 가드·대칭 문구. 각 방향 행이 cols 프레임을 가로로 빠짐없이 채우게 한다.
-        const colCountRule =
-          isCharacter && directions
-            ? `Each row MUST contain EXACTLY ${cols} frames placed left to right, filling every column. ` +
-              `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
-            : "";
-
-        // 오브젝트 일관성 규칙 — 캐릭터 시트에서만 주입.
-        const equipmentRule = isCharacter
-          ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
-            `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
-            `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. ` +
-            `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, cloak, shield, backpack, wings, scabbard, or any item worn on the back) are part of the character silhouette and MUST remain visible in EVERY frame. ` +
-            `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. `
-          : "";
-
-        // 보행 캐릭터 시트: 포즈 레퍼런스 시트를 생성해 Codex 입력에 포함.
         const refGen = refId ? getGeneration(refId) : null;
         const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-        // 보행 캐릭터: 방향×cols에 맞는 포즈 가이드를 생성해 Codex에 전달.
-        // buildPoseSvg로 직접 생성 → cols에 맞는 완전한 사이클 보장.
-        // 결과는 templates/ 에 캐시 — 동일 요청은 파일 재사용.
-        let poseRefPath: string | null = null;
-        let poseFrameAnglesText = "";
-        if (isWalk && isCharacter && isSingleDirection) {
-          // 프롬프트에서 facing 방향 감지 — LEFT 키워드 있으면 dirIndex=2, 기본은 RIGHT(6).
-          const dirIndex = /facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? 2 : 6;
+        const { decorated, overrideInputPaths } = await buildSpritePrompt({
+          userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
+          wantsTransparent, chromaKeyColor, seamlessLoop,
+          subjectType, resolvedAnchor, directions,
+          refPath, gridTemplatePath,
+        });
 
-          // angles 배열 → 각도 텍스트 변환 (rows=1: col1…, rows>1: row1col1…)
-          const toAngleText = (angles: { col: number; leftDeg: number; rightDeg: number; label: string }[], r: number) =>
-            angles
-              .map((a, i) =>
-                (r > 1 ? `row${Math.floor(i / cols) + 1}col${(i % cols) + 1}` : `col${a.col + 1}`) +
-                `: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`,
-              )
-              .join(", ");
-
-          try {
-            const { path: guidePath, angles } = await extractPoseGuideGrid(
-              dirIndex, cols, rows, CELL_PX, REFERENCE_DIR, TEMPLATES_DIR, isRun,
-            );
-            poseRefPath = guidePath;
-            poseFrameAnglesText = toAngleText(angles, rows);
-            log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
-          } catch (e) {
-            // 레퍼런스 파일 없거나 오류 → SVG 기반 가이드로 fallback (cols 프레임, rows=1).
-            log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
-            try {
-              const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
-              poseRefPath = guidePath;
-              poseFrameAnglesText = toAngleText(angles, 1);
-              log(`make_spritesheet: pose guide (SVG fallback) → ${path.basename(guidePath)}`);
-            } catch (e2) {
-              log(`make_spritesheet: pose guide failed (non-fatal): ${(e2 as Error).message}`);
-            }
-          }
-        }
-
-        // 보행 사이클 다리 교차 규칙 — 걷기/달리기 캐릭터 시트에서만 주입.
-        const singleDirWalkDir = isSingleDirection
-          ? (/facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? "LEFT" : "RIGHT")
-          : null;
-        const walkCycleRule = isWalk && isCharacter
-          ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
-            `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
-            `(1) CONTACT — left leg fully forward, right leg fully back; ` +
-            `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
-            `(3) CONTACT — right leg fully forward, left leg fully back; ` +
-            `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
-            `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
-            `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
-            `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
-            `LEG VISIBILITY (CRITICAL): In EVERY frame, BOTH legs must be clearly visible and spatially separated. ` +
-            `The gap between the two legs must be OBVIOUS — never draw them overlapping or merged into a single shape. ` +
-            `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
-            `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
-            `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. ` +
-            (singleDirWalkDir
-              ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
-                `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
-                `In stride/contact frames BOTH legs must extend — one leg forward, one backward — symmetrically. ` +
-                `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. ` +
-                `STRIDE DEPTH (CRITICAL): The forward/leading leg is always drawn IN FRONT OF the trailing leg — the leading boot visibly overlaps the back boot. ` +
-                `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
-                `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
-                `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. ` +
-                `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
-                `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
-                `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — ` +
-                `when LEFT leg is forward (+angle), RIGHT leg MUST be back (-angle) at equal magnitude, and vice versa. ` +
-                `Typical contact stride: one leg at approximately +25° to +35°, the other at -25° to -35°. ` +
-                `MID-STANCE/CROSSOVER frames: both legs are near vertical (0°) but STILL at slightly different positions — ` +
-                `e.g. LEFT at +5°, RIGHT at -5° — they are crossing, NOT both at 0° simultaneously. ` +
-                `NEVER draw both legs at the same angle in any frame. Symmetric leg poses (both legs identical) indicate a static T-pose, NOT a walk cycle — this is a critical error. `
-              : "")
-          : "";
-
-        const poseRefInstruction = poseRefPath
-          ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
-            `CRITICAL COLOR CODING — Blue skeleton line = LEFT leg (character's own left); Red skeleton line = RIGHT leg (character's own right). ` +
-            `Each skeleton shows the EXACT per-leg angle required for that cell. ` +
-            `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
-            `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +
-            `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
-            (poseFrameAnglesText
-              ? `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
-                `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
-                (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
-                `, negative = back. ` +
-                `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
-                `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
-                `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. `
-              : "")
-          : "";
-
-        // 입력 이미지 순서: 포즈 가이드(있을 때) → char ref → grid(항상 마지막)
-        const inputImages: string[] = [];
-        if (poseRefPath) inputImages.push(poseRefPath);
-        if (refPath) inputImages.push(refPath);
-        inputImages.push(gridTemplatePath);
-        const overrideInputPaths = inputImages;
-
-        const decorated =
-          `${userPrompt}. ` +
-          equipmentRule +
-          walkCycleRule +
-          poseRefInstruction +
-          (inputImages.length > 1
-            ? `The last attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `
-            : `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `) +
-          `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
-          rowCountRule +
-          colCountRule +
-          `Place exactly one animation frame per cell, filling every cell. ` +
-          `CRITICAL framing rules (apply to EVERY cell): ` +
-          `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
-          `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
-          `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
-          `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
-          anchorRule +
-          directionPrompt +
-          effectGuard +
-          loopInstruction +
-          `Do NOT include the gray guide lines in the output — they are reference only. ` +
-          bgInstruction;
+        const isCharacter = subjectType === "character";
+        const cx = Math.round(cellW / 2);
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
         // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
@@ -713,7 +488,6 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                 ? Math.round(cellH - paddingBottom - 1 - cellH * 0.9 * 0.45)
                 : cellH - paddingBottom - 1; // feet
         // anchorPivot: 저장·export 는 FINAL_CELL_PX(512) 공간 기준이므로 ×(512/384) 스케일.
-        // codex 프롬프트(anchorRule)는 위 cx/cellH(384 공간) 값을 그대로 쓴다.
         const pivotScale = FINAL_CELL_PX / CELL_PX;
         const anchorPivot = {
           x: Math.round(cx * pivotScale),
@@ -1104,6 +878,252 @@ async function applyTransparentPostProcess(
   const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea);
   if (keyedOut === 0) return await fallbackBgRemove(filePath, log);
   return keyedOut;
+}
+
+type SpritePromptInput = {
+  userPrompt: string;
+  rows: number;
+  cols: number;
+  cellW: number;
+  cellH: number;
+  canvasW: number;
+  canvasH: number;
+  wantsTransparent: boolean;
+  chromaKeyColor: ChromaKeyColor;
+  seamlessLoop: boolean;
+  subjectType: SubjectType;
+  resolvedAnchor: Exclude<AnchorStrategy, "auto">;
+  directions: Directions | null;
+  refPath: string | null;
+  gridTemplatePath: string;
+};
+
+/**
+ * make_spritesheet Codex 프롬프트 조립.
+ * 포즈 가이드 로딩(async) + 모든 rule 문자열 조합 → { decorated, overrideInputPaths }.
+ * 순수 문자열 조립 및 파일 읽기만 수행 — DB·이미지 생성 없음.
+ */
+async function buildSpritePrompt(
+  p: SpritePromptInput,
+): Promise<{ decorated: string; overrideInputPaths: string[] }> {
+  const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
+    wantsTransparent, chromaKeyColor, seamlessLoop,
+    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath } = p;
+
+  const isCharacter = subjectType === "character";
+  const isObject = subjectType === "object";
+  const isWalk = isLocomotion(userPrompt);
+  const isRun = isRunning(userPrompt);
+  const isSingleDirection = !directions || directions === 1;
+  const cx = Math.round(cellW / 2);
+  const cy = Math.round(cellH / 2);
+
+  const singleDirWalkDir = isSingleDirection
+    ? (/facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? "LEFT" : "RIGHT")
+    : null;
+
+  // ── 배경·루프 지시 ──────────────────────────────────────────────────────
+  const bgInstruction = wantsTransparent
+    ? chromaKeyColor === "magenta"
+      ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
+      : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the green to produce true transparency."
+    : "White background.";
+
+  const loopInstruction = seamlessLoop
+    ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
+      `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
+      `Design a CLOSED CYCLE with no beginning and no end: ` +
+      `• Walk/run: Frame N's pose flows naturally back into Frame 1's pose. ` +
+      `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
+      `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
+      `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
+    : "";
+
+  // ── 앵커·콘텐츠 규칙 ────────────────────────────────────────────────────
+  const placementRule = ((): string => {
+    switch (resolvedAnchor) {
+      case "feet":
+        return `keep the feet on a consistent ground line and identical character height in every frame; only limbs and body parts move between frames, not the whole body. `;
+      case "hip":
+        return `keep the hip/waist near the cell center X=${cx}, Y=${cy} with the feet falling naturally below, and identical character height in every frame; only limbs and body parts move between frames. `;
+      case "top":
+        return `keep the top of the head near the cell's upper edge in every frame and identical character height; only limbs and body parts move between frames, not the whole body. `;
+      case "center":
+        return isCharacter
+          ? `place the WHOLE character vertically centered so its visual center sits at the cell center X=${cx}, Y=${cy} in EVERY cell, identical character height; only limbs and body parts move between frames. `
+          : isObject
+          ? `center the object so its visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
+            `Keep the object at a CONSISTENT scale across all frames — only the animated aspect (rotation angle, deformation, etc.) changes between frames. ` +
+            `The object's complete bounding box must be vertically and horizontally centered; do NOT rest it on the bottom edge or use any ground line. `
+          : `this is a visual effect / VFX, NOT a grounded character. ` +
+            `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
+            `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
+            `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
+            `The trailing tail must NOT reach or touch the bottom edge. ` +
+            `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `;
+    }
+  })();
+  const anchorRule = `(5) ${isCharacter ? "CHARACTER" : isObject ? "OBJECT" : "EFFECT"} ANCHOR — ${placementRule}`;
+
+  const containedContent = isCharacter
+    ? "the character's body, weapon, and any flowing cape or robe"
+    : isObject
+    ? "the complete object, including its texture, decorations, materials, and any intrinsic glow or inset effects"
+    : "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes";
+  const oversizeContent = isCharacter
+    ? "especially a large pose or a wide weapon swing"
+    : isObject
+    ? "especially the object at an extreme angle or with a wide decorative extension"
+    : "especially a sweeping effect like a slash, blast, beam, or trail";
+
+  const effectGuard = isCharacter
+    ? `Render the character's body and its INTRINSIC design only. ` +
+      `Do NOT add action or ability visual effects: NO attack slash trails, ` +
+      `NO spell or magic particles, NO projectiles, NO emitted auras around the body, ` +
+      `NO motion lines, NO impact flashes, NO smoke, NO sparkles, NO extra decorative VFX. ` +
+      `The character's OWN intrinsic material is fine (e.g. a robot's status lights or ` +
+      `glowing core, a fire creature's flame body, a weapon that glows as part of its ` +
+      `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `
+    : "";
+
+  const directionPrompt = isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
+  const rowCountRule = isCharacter && directions
+    ? `The sheet MUST have EXACTLY ${rows} horizontal rows of cells (one row per direction), filled from top to bottom. ` +
+      `Draw all ${rows} rows — do NOT compress, merge, or omit rows, do NOT leave any row empty, and keep EQUAL vertical spacing between the ${rows} rows. `
+    : "";
+  const colCountRule = isCharacter && directions
+    ? `Each row MUST contain EXACTLY ${cols} frames placed left to right, filling every column. ` +
+      `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
+    : "";
+  const equipmentRule = isCharacter
+    ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
+      `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
+      `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. ` +
+      `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, cloak, shield, backpack, wings, scabbard, or any item worn on the back) are part of the character silhouette and MUST remain visible in EVERY frame. ` +
+      `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. `
+    : "";
+
+  // ── 포즈 가이드 로딩 (걷기 캐릭터 단일 방향만) ─────────────────────────
+  let poseRefPath: string | null = null;
+  let poseFrameAnglesText = "";
+  if (isWalk && isCharacter && isSingleDirection) {
+    const CELL_PX = cellW; // buildSpritePrompt 에서는 cellW===cellH===CELL_PX
+    const dirIndex = /facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? 2 : 6;
+    const toAngleText = (
+      angles: { col: number; leftDeg: number; rightDeg: number; label: string }[],
+      r: number,
+    ) =>
+      angles
+        .map((a, i) =>
+          (r > 1 ? `row${Math.floor(i / cols) + 1}col${(i % cols) + 1}` : `col${a.col + 1}`) +
+          `: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`,
+        )
+        .join(", ");
+    try {
+      const { path: guidePath, angles } = await extractPoseGuideGrid(
+        dirIndex, cols, rows, CELL_PX, REFERENCE_DIR, TEMPLATES_DIR, isRun,
+      );
+      poseRefPath = guidePath;
+      poseFrameAnglesText = toAngleText(angles, rows);
+      log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
+    } catch (e) {
+      log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
+      try {
+        const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
+        poseRefPath = guidePath;
+        poseFrameAnglesText = toAngleText(angles, 1);
+        log(`make_spritesheet: pose guide (SVG fallback) → ${path.basename(guidePath)}`);
+      } catch (e2) {
+        log(`make_spritesheet: pose guide failed (non-fatal): ${(e2 as Error).message}`);
+      }
+    }
+  }
+
+  // ── 보행 사이클 규칙 ────────────────────────────────────────────────────
+  const walkCycleRule = isWalk && isCharacter
+    ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
+      `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
+      `(1) CONTACT — left leg fully forward, right leg fully back; ` +
+      `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
+      `(3) CONTACT — right leg fully forward, left leg fully back; ` +
+      `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
+      `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
+      `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
+      `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
+      `LEG VISIBILITY (CRITICAL): In EVERY frame, BOTH legs must be clearly visible and spatially separated. ` +
+      `The gap between the two legs must be OBVIOUS — never draw them overlapping or merged into a single shape. ` +
+      `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
+      `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
+      `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. ` +
+      (singleDirWalkDir
+        ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
+          `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
+          `In stride/contact frames BOTH legs must extend — one leg forward, one backward — symmetrically. ` +
+          `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. ` +
+          `STRIDE DEPTH (CRITICAL): The forward/leading leg is always drawn IN FRONT OF the trailing leg — the leading boot visibly overlaps the back boot. ` +
+          `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
+          `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
+          `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. ` +
+          `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
+          `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
+          `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — ` +
+          `when LEFT leg is forward (+angle), RIGHT leg MUST be back (-angle) at equal magnitude, and vice versa. ` +
+          `Typical contact stride: one leg at approximately +25° to +35°, the other at -25° to -35°. ` +
+          `MID-STANCE/CROSSOVER frames: both legs are near vertical (0°) but STILL at slightly different positions — ` +
+          `e.g. LEFT at +5°, RIGHT at -5° — they are crossing, NOT both at 0° simultaneously. ` +
+          `NEVER draw both legs at the same angle in any frame. Symmetric leg poses (both legs identical) indicate a static T-pose, NOT a walk cycle — this is a critical error. `
+        : "")
+    : "";
+
+  const poseRefInstruction = poseRefPath
+    ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
+      `CRITICAL COLOR CODING — Blue skeleton line = LEFT leg (character's own left); Red skeleton line = RIGHT leg (character's own right). ` +
+      `Each skeleton shows the EXACT per-leg angle required for that cell. ` +
+      `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
+      `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +
+      `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
+      (poseFrameAnglesText
+        ? `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
+          `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
+          (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
+          `, negative = back. ` +
+          `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
+          `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
+          `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. `
+        : "")
+    : "";
+
+  // ── 입력 이미지 순서 + 최종 조립 ────────────────────────────────────────
+  const overrideInputPaths: string[] = [];
+  if (poseRefPath) overrideInputPaths.push(poseRefPath);
+  if (refPath) overrideInputPaths.push(refPath);
+  overrideInputPaths.push(gridTemplatePath);
+
+  const decorated =
+    `${userPrompt}. ` +
+    equipmentRule +
+    walkCycleRule +
+    poseRefInstruction +
+    (overrideInputPaths.length > 1
+      ? `The last attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `
+      : `The attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `) +
+    `Generate a sprite sheet with EXACTLY the same dimensions as the template. ` +
+    rowCountRule +
+    colCountRule +
+    `Place exactly one animation frame per cell, filling every cell. ` +
+    `CRITICAL framing rules (apply to EVERY cell): ` +
+    `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
+    `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
+    `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
+    `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
+    anchorRule +
+    directionPrompt +
+    effectGuard +
+    loopInstruction +
+    `Do NOT include the gray guide lines in the output — they are reference only. ` +
+    bgInstruction;
+
+  return { decorated, overrideInputPaths };
 }
 
 // ─── shared executor ─────────────────────────────────────────────────────────
