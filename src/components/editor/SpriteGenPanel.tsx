@@ -93,6 +93,26 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 16, rows: 4, cols: 4 },
 ];
 
+// gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
+const SPRITE_CELL_PX = 384;
+const API_MAX_PX = 8_294_400; // 최대 픽셀 (≈8.3M)
+const API_MAX_EDGE = 3_840; // 최대 한 변
+const API_MAX_RATIO = 3; // 장축/단축 종횡비
+
+function frameCanvasInfo(rows: number, cols: number): {
+  w: number; h: number; totalPx: number;
+  status: "safe" | "near" | "over";
+} {
+  const w = cols * SPRITE_CELL_PX;
+  const h = rows * SPRITE_CELL_PX;
+  const totalPx = w * h;
+  const maxEdge = Math.max(w, h);
+  const ratio = maxEdge / Math.min(w, h);
+  const isOver = totalPx > API_MAX_PX || maxEdge > API_MAX_EDGE || ratio > API_MAX_RATIO;
+  const isNear = !isOver && totalPx > API_MAX_PX * 0.72; // 6M 이상
+  return { w, h, totalPx, status: isOver ? "over" : isNear ? "near" : "safe" };
+}
+
 type ExampleKey = "character" | "object" | "character-effect" | "object-effect";
 
 const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
@@ -418,6 +438,19 @@ export function SpriteGenPanel({
           </label>
         </div>
 
+        {/* 프레임 한계 경고 — near/over 일 때만 */}
+        {(() => {
+          const info = frameCanvasInfo(grid.rows, grid.cols);
+          if (info.status === "safe") return null;
+          const mpx = (info.totalPx / 1_000_000).toFixed(1);
+          return (
+            <p className={`text-[11px] ${info.status === "over" ? "text-red-400" : "text-orange-400"}`}>
+              {info.status === "over" ? "⚠ API 한계 초과:" : "⚠ API 한계 근접:"}{" "}
+              {info.w}×{info.h} = {mpx}M / {(API_MAX_PX / 1_000_000).toFixed(1)}M px — 생성 실패 가능
+            </p>
+          );
+        })()}
+
         {/* 시점 선택 */}
         <div className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-text-muted">시점</span>
@@ -653,6 +686,8 @@ function FramePopover({
       <div className="grid grid-cols-2 gap-2">
         {FRAME_OPTS.map(f => {
           const active = selected === f.value;
+          const info = frameCanvasInfo(f.rows, f.cols);
+          const mpx = (info.totalPx / 1_000_000).toFixed(1);
           return (
             <button
               key={f.value}
@@ -660,13 +695,34 @@ function FramePopover({
               className={`relative rounded-lg border p-3 text-left text-xs ${
                 active
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border bg-bg-card text-text-muted hover:border-[color:var(--accent)]/40"
+                  : info.status === "over"
+                    ? "border-red-500/40 bg-red-500/5 text-text-muted hover:border-red-500/60"
+                    : "border-border bg-bg-card text-text-muted hover:border-[color:var(--accent)]/40"
               }`}
             >
               <div className="font-medium text-text-primary">{f.value}프레임</div>
               <div className="text-[11px] text-text-muted/70">
                 {f.rows}×{f.cols}
               </div>
+              {/* 캔버스 크기 정보 */}
+              <div className={`mt-1 text-[10px] tabular-nums ${
+                info.status === "over" ? "text-red-400"
+                : info.status === "near" ? "text-orange-400"
+                : "text-text-muted/50"
+              }`}>
+                {info.w}×{info.h} · {mpx}M
+              </div>
+              {/* 상태 뱃지 */}
+              {info.status === "over" && (
+                <span className="absolute right-1.5 top-1.5 rounded bg-red-500/20 px-1 py-0.5 text-[9px] font-medium text-red-400">
+                  한계 초과
+                </span>
+              )}
+              {info.status === "near" && (
+                <span className="absolute right-1.5 top-1.5 rounded bg-orange-500/20 px-1 py-0.5 text-[9px] font-medium text-orange-400">
+                  한계 근접
+                </span>
+              )}
             </button>
           );
         })}

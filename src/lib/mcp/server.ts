@@ -114,8 +114,14 @@ const SCHEMAS = {
     type: "object" as const,
     properties: {
       ...PROMPT_PROP,
-      rows: { type: "integer", minimum: 1, maximum: 16, description: "세로 셀 개수" },
-      cols: { type: "integer", minimum: 1, maximum: 16, description: "가로 셀 개수. 방향 캐릭터 시트(directions≥2)는 최대 8 권장 — 12 이상은 모델이 발 교대를 제대로 못 그림." },
+      rows: {
+        type: "integer", minimum: 1, maximum: 10,
+        description: "세로 셀 개수. 셀 384px 기준 한 변 최대 10셀(3840px). rows×cols×384²≤8.29M 필수.",
+      },
+      cols: {
+        type: "integer", minimum: 1, maximum: 10,
+        description: "가로 셀 개수. 셀 384px 기준 한 변 최대 10셀(3840px). 방향 캐릭터 시트(directions≥2)는 최대 8 권장. rows×cols×384²≤8.29M 필수.",
+      },
       inputGenerationId: {
         type: "string",
         description:
@@ -390,6 +396,43 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           rows = Math.round(Math.sqrt(n));
           cols = Math.ceil(n / rows);
           log(`make_spritesheet auto-reshape: 1×${n} → ${rows}×${cols}`);
+        }
+
+        // gpt-image-2 API 제약 검증 — 384px 셀 기준: 최대 한 변 3840px(10셀), 총 8.29M px, 비율 ≤ 3:1.
+        // auto-reshape 후 최종 rows/cols 에 적용.
+        {
+          const VALIDATION_CELL_PX = 384;
+          const cW = cols * VALIDATION_CELL_PX;
+          const cH = rows * VALIDATION_CELL_PX;
+          const API_MAX_EDGE = 3840;
+          const API_MAX_PX = 8_294_400;
+          const API_MAX_RATIO = 3;
+          const maxCellsPerEdge = Math.floor(API_MAX_EDGE / VALIDATION_CELL_PX); // 10
+          const maxTotalCells = Math.floor(API_MAX_PX / (VALIDATION_CELL_PX * VALIDATION_CELL_PX)); // 56
+
+          if (Math.max(cW, cH) > API_MAX_EDGE) {
+            const overDim = cW > cH ? `cols=${cols}` : `rows=${rows}`;
+            const overPx = Math.max(cW, cH);
+            throw new Error(
+              `make_spritesheet 캔버스 장축 초과: ${overDim} → ${overPx}px (한계 ${API_MAX_EDGE}px). ` +
+              `셀 ${VALIDATION_CELL_PX}px 기준 한 변 최대 ${maxCellsPerEdge}셀.`,
+            );
+          }
+          const totalPx = cW * cH;
+          if (totalPx > API_MAX_PX) {
+            throw new Error(
+              `make_spritesheet 총 픽셀 초과: ${rows}×${cols}=${rows * cols}셀 → ` +
+              `${cW}×${cH}=${(totalPx / 1_000_000).toFixed(1)}M px (한계 ${(API_MAX_PX / 1_000_000).toFixed(1)}M). ` +
+              `총 셀 수를 ${maxTotalCells}개 이하로 줄이세요.`,
+            );
+          }
+          const ratio = Math.max(cW, cH) / Math.min(cW, cH);
+          if (ratio > API_MAX_RATIO) {
+            throw new Error(
+              `make_spritesheet 종횡비 초과: ${cW}×${cH} = ${ratio.toFixed(2)}:1 (한계 ${API_MAX_RATIO}:1). ` +
+              `rows:cols 비율을 ${API_MAX_RATIO}:1 이하로 조정하세요.`,
+            );
+          }
         }
 
         // 생성 셀 384px 고정 → codex 네이티브 장축(1536px) 안으로 캔버스가 들어온다.
