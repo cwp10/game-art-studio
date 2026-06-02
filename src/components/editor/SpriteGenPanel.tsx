@@ -172,11 +172,14 @@ export function SpriteGenPanel({
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
 
-  // 참조 이미지 연결·해제 시 방향 자동 전환
+  // 참조 이미지 연결·해제 시 방향 자동 전환 — 함수형 업데이트로 stale closure 방지
   useEffect(() => {
-    if (referenceImageUrl) setDirection("REF");
-    else if (direction === "REF") setDirection("DOWN");
-  }, [referenceImageUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (referenceImageUrl) {
+      setDirection("REF");
+    } else {
+      setDirection(prev => prev === "REF" ? "DOWN" : prev);
+    }
+  }, [referenceImageUrl]);
 
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
@@ -721,7 +724,10 @@ export function buildSpriteMessage(
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
-  if (isCharacter) nlParts.push(facingPhrase(state.direction));
+  // REF 방향은 참조 이미지가 실제로 첨부될 때만 의미가 있음
+  if (isCharacter && (state.direction !== "REF" || referenceId)) {
+    nlParts.push(facingPhrase(state.direction));
+  }
   nlParts.push("transparent background");
   const nl = nlParts.join(", ");
 

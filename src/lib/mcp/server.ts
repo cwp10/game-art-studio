@@ -882,7 +882,6 @@ async function buildSpritePrompt(
   let poseRefPath: string | null = null;
   let poseFrameAnglesText = "";
   if (isWalk && isCharacter && isSingleDirection) {
-    const CELL_PX = cellW; // buildSpritePrompt 에서는 cellW===cellH===CELL_PX
     const dirIndex = /facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? 2 : 6;
     const toAngleText = (
       angles: { col: number; leftDeg: number; rightDeg: number; label: string }[],
@@ -896,7 +895,7 @@ async function buildSpritePrompt(
         .join(", ");
     try {
       const { path: guidePath, angles } = await extractPoseGuideGrid(
-        dirIndex, cols, rows, CELL_PX, REFERENCE_DIR, TEMPLATES_DIR, isRun,
+        dirIndex, cols, rows, cellW, REFERENCE_DIR, TEMPLATES_DIR, isRun,
       );
       poseRefPath = guidePath;
       poseFrameAnglesText = toAngleText(angles, rows);
@@ -904,7 +903,7 @@ async function buildSpritePrompt(
     } catch (e) {
       log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
       try {
-        const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, CELL_PX, TEMPLATES_DIR, isRun);
+        const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, cellW, TEMPLATES_DIR, isRun);
         poseRefPath = guidePath;
         poseFrameAnglesText = toAngleText(angles, 1);
         log(`make_spritesheet: pose guide (SVG fallback) → ${path.basename(guidePath)}`);
@@ -1036,7 +1035,7 @@ async function runSpritesheetAttempts(
     anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId,
   } = spec;
   const MAX_RETRIES = retryEnabled ? 2 : 0;
-  const cellArea = (canvasW / cols) * (canvasH / rows);
+  const cellArea = Math.floor(canvasW / cols) * Math.floor(canvasH / rows);
 
   let best: Awaited<ReturnType<typeof runImageTool>> | null = null;
   let bestFilled = -1;
