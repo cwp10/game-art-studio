@@ -16,6 +16,11 @@ export type AnchorStrategy = "auto" | "feet" | "hip" | "center" | "top";
 export type SubjectType = "character" | "effect" | "object";
 export type ChromaKeyColor = "green" | "magenta";
 
+/** 셀 높이 대비 하단 여백 비율. normalizeSpritesheetCells 및 server.ts 앵커 산출에서 동일 값 사용. */
+export const PADDING_BOTTOM_RATIO = 0.03;
+/** 셀 최소변 대비 사방 마진 비율. normalizeSpritesheetCells 및 server.ts 앵커 산출에서 동일 값 사용. */
+export const CELL_MARGIN_RATIO = 0.05;
+
 type Logger = (line: string) => void;
 const noop: Logger = () => {};
 
@@ -425,8 +430,8 @@ export async function normalizeSpritesheetCells(
   const cellW = Math.floor(W / cols);
   const cellH = Math.floor(H / rows);
   const N = W * H;
-  const paddingBottom = Math.round(cellH * 0.03);
-  const margin = Math.round(Math.min(cellW, cellH) * 0.05);
+  const paddingBottom = Math.round(cellH * PADDING_BOTTOM_RATIO);
+  const margin = Math.round(Math.min(cellW, cellH) * CELL_MARGIN_RATIO);
 
   const isContent = (i: number) => {
     if (wantsTransparent) return data[i + 3] > 10;

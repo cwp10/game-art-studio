@@ -40,6 +40,8 @@ import {
   detectFill,
   isGreenDominant,
   normalizeSpritesheetCells,
+  PADDING_BOTTOM_RATIO,
+  CELL_MARGIN_RATIO,
   type AnchorStrategy,
   type ChromaKeyColor,
   type SubjectType,
@@ -703,8 +705,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
 
         // ⑧ 앵커 피벗(셀-로컬) 결정적 산출 — normalize 의 고정 목표선과 일치.
         // export(Phase 3) 가 이 좌표를 그대로 사용. paddingBottom/margin 은 normalize 와 동일 식.
-        const paddingBottom = Math.round(cellH * 0.03);
-        const anchorMargin = Math.round(Math.min(cellW, cellH) * 0.05);
+        const paddingBottom = Math.round(cellH * PADDING_BOTTOM_RATIO);
+        const anchorMargin = Math.round(Math.min(cellW, cellH) * CELL_MARGIN_RATIO);
         const anchorY =
           resolvedAnchor === "center"
             ? Math.round(cellH / 2)
