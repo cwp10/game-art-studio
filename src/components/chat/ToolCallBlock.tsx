@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, ChevronRight, Loader2, AlertCircle } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { ToolCallState } from "./chat-state";
 
 /** 진행 단계의 사람이 읽기 좋은 라벨. */
@@ -17,6 +17,21 @@ type Props = { state: ToolCallState };
 
 export function ToolCallBlock({ state }: Props) {
   const [expanded, setExpanded] = useState(state.status !== "succeeded");
+  const [elapsed, setElapsed] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (state.status !== "running") {
+      startedAtRef.current = null;
+      setElapsed(0);
+      return;
+    }
+    if (startedAtRef.current === null) startedAtRef.current = Date.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAtRef.current!) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [state.status]);
 
   const isDone = state.status === "succeeded";
   const isError = state.status === "failed";
@@ -49,6 +64,9 @@ export function ToolCallBlock({ state }: Props) {
               <li className="flex items-center gap-2 text-text-primary">
                 <Loader2 className="animate-spin" size={10} />
                 <span className="shimmer">진행 중…</span>
+                {elapsed > 0 && (
+                  <span className="ml-auto tabular-nums text-text-muted/60">{elapsed}s</span>
+                )}
               </li>
             )}
             {isError && state.error && (
