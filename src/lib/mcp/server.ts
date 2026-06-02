@@ -115,12 +115,12 @@ const SCHEMAS = {
     properties: {
       ...PROMPT_PROP,
       rows: {
-        type: "integer", minimum: 1, maximum: 10,
-        description: "세로 셀 개수. 셀 384px 기준 한 변 최대 10셀(3840px). rows×cols×384²≤8.29M 필수.",
+        type: "integer", minimum: 1, maximum: 4,
+        description: "세로 셀 개수. CELL_PX=384 기준 최대 4셀(1536px).",
       },
       cols: {
-        type: "integer", minimum: 1, maximum: 10,
-        description: "가로 셀 개수. 셀 384px 기준 한 변 최대 10셀(3840px). 방향 캐릭터 시트(directions≥2)는 최대 8 권장. rows×cols×384²≤8.29M 필수.",
+        type: "integer", minimum: 1, maximum: 4,
+        description: "가로 셀 개수. 최대 4셀. 방향 캐릭터 시트는 최대 4×4=16셀.",
       },
       inputGenerationId: {
         type: "string",
@@ -152,6 +152,45 @@ const SCHEMAS = {
       ...SESSION_PROP,
     },
     required: ["prompt", "rows", "cols"],
+  },
+  make_emote_sheet: {
+    type: "object" as const,
+    properties: {
+      prompt: { type: "string", description: "추가 캐릭터 묘사나 지시 (선택)" },
+      inputGenerationId: { type: "string", description: "참조 캐릭터 이미지 generation ID (필수)" },
+      emotions: {
+        type: "array",
+        items: { type: "string" },
+        description: "표정 목록 (기본: neutral, happy, sad, angry, surprised, fearful)",
+      },
+      ...SESSION_PROP,
+    },
+    required: ["inputGenerationId"],
+  },
+  make_tileset: {
+    type: "object" as const,
+    properties: {
+      prompt: { type: "string", description: "타일 묘사 (예: 'grass field', 'stone floor')" },
+      tileSize: {
+        type: "integer",
+        enum: [64, 128, 256, 512],
+        description: "최종 타일 크기 px (기본: 128). 생성 후 sharp resize 적용.",
+      },
+      ...SESSION_PROP,
+    },
+    required: ["prompt"],
+  },
+  generate_normal_map: {
+    type: "object" as const,
+    properties: {
+      inputGenerationId: { type: "string", description: "원본 이미지 generation ID" },
+      strength: {
+        type: "number",
+        description: "노멀맵 강도 배율 (0.5–2.0, 기본 1.0)",
+      },
+      ...SESSION_PROP,
+    },
+    required: ["inputGenerationId"],
   },
   edit_image: {
     type: "object" as const,
@@ -242,6 +281,29 @@ const TOOLS = [
     inputSchema: SCHEMAS.make_spritesheet,
   },
   {
+    name: "make_emote_sheet",
+    description:
+      "캐릭터 참조 이미지를 받아 여러 표정/감정 변형을 그리드로 생성. " +
+      "inputGenerationId 필수. 표정 수에 따라 자동으로 그리드 크기 결정. " +
+      "60–120초 소요.",
+    inputSchema: SCHEMAS.make_emote_sheet,
+  },
+  {
+    name: "make_tileset",
+    description:
+      "텍스트 프롬프트로 seamless tileable 게임 맵 타일 텍스처를 생성. " +
+      "좌우·상하 엣지가 이어지도록 프롬프트 특화. best-effort seamlessness. " +
+      "60–120초 소요.",
+    inputSchema: SCHEMAS.make_tileset,
+  },
+  {
+    name: "generate_normal_map",
+    description:
+      "기존 이미지에서 Normal Map을 생성. Sharp 기반 Sobel 필터로 결정적 처리, " +
+      "Codex 호출 없음(1초 이내). RGB 인코딩: R=X기울기, G=Y기울기, B=255.",
+    inputSchema: SCHEMAS.generate_normal_map,
+  },
+  {
     name: "edit_image",
     description:
       "기존 이미지를 자연어로 편집. inputGenerationId 가 필수. " +
@@ -309,6 +371,9 @@ type CallArgs = {
   rows?: number;
   cols?: number;
   targetSize?: number;
+  emotions?: string[];
+  tileSize?: number;
+  strength?: number;
   seamlessLoop?: boolean;
   subjectType?: SubjectType;
   anchorStrategy?: AnchorStrategy;
@@ -404,11 +469,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           const VALIDATION_CELL_PX = 384;
           const cW = cols * VALIDATION_CELL_PX;
           const cH = rows * VALIDATION_CELL_PX;
-          const API_MAX_EDGE = 3840;
-          const API_MAX_PX = 8_294_400;
+          const API_MAX_EDGE = 1536;        // 생성 캔버스 실측 최대 (CELL_PX=384 × 4)
+          const API_MAX_PX = 1536 * 1536;   // = 2_359_296
           const API_MAX_RATIO = 3;
-          const maxCellsPerEdge = Math.floor(API_MAX_EDGE / VALIDATION_CELL_PX); // 10
-          const maxTotalCells = Math.floor(API_MAX_PX / (VALIDATION_CELL_PX * VALIDATION_CELL_PX)); // 56
+          const maxCellsPerEdge = Math.floor(API_MAX_EDGE / VALIDATION_CELL_PX); // 4
+          const maxTotalCells = Math.floor(API_MAX_PX / (VALIDATION_CELL_PX * VALIDATION_CELL_PX)); // 16
 
           if (Math.max(cW, cH) > API_MAX_EDGE) {
             const overDim = cW > cH ? `cols=${cols}` : `rows=${rows}`;
@@ -773,6 +838,236 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           }
         }
         return mcpResult;
+      }
+
+      case "make_emote_sheet": {
+        const inputGenerationId = requireString(args.inputGenerationId, "inputGenerationId");
+        const userPrompt = typeof args.prompt === "string" ? args.prompt : "";
+        const emotions: string[] =
+          Array.isArray(args.emotions) && args.emotions.length > 0
+            ? (args.emotions as string[])
+            : ["neutral", "happy", "sad", "angry", "surprised", "fearful"];
+
+        const n = emotions.length;
+        const cols = Math.ceil(Math.sqrt(n));
+        const rows = Math.ceil(n / cols);
+
+        // API 한계 검증 — 생성 캔버스 실측 최대 1536px(CELL_PX=384 × 4).
+        const CELL_PX_E = 384;
+        if (Math.max(rows, cols) * CELL_PX_E > 1536) {
+          throw new Error(
+            `make_emote_sheet: ${n}개 표정 → ${rows}×${cols}그리드 캔버스(${cols * CELL_PX_E}×${rows * CELL_PX_E}px)가 한계(1536px) 초과.`,
+          );
+        }
+
+        const refGen = getGeneration(inputGenerationId);
+        if (!refGen) throw new Error(`make_emote_sheet: generation ${inputGenerationId} 없음`);
+        const refPath = path.join(DATA_DIR, refGen.image_path);
+
+        const emotionLayout = emotions
+          .map((e, i) => {
+            const r = Math.floor(i / cols) + 1;
+            const c = (i % cols) + 1;
+            return `row${r}-col${c}=${e}`;
+          })
+          .join(", ");
+
+        const gridTemplatePath = await generateGridTemplate(cols, rows, 384, 384);
+
+        const prompt =
+          `${rows}×${cols} emotion sheet, same character from reference, ` +
+          `different facial expressions per cell: ${emotionLayout}. ` +
+          (userPrompt ? `${userPrompt}. ` : "") +
+          `transparent background`;
+
+        return await runImageTool({
+          name,
+          kind: "emote_sheet",
+          prompt,
+          inputGenerationIds: [inputGenerationId],
+          overrideInputPaths: [refPath, gridTemplatePath],
+          params: {
+            rows, cols,
+            cellW: 512, cellH: 512,
+            emotions,
+            fps: 4,
+            seamlessLoop: false,
+          },
+          sessionId,
+          signal: extra.signal,
+        });
+      }
+
+      case "make_tileset": {
+        const userPrompt = requireString(args.prompt, "prompt");
+        const VALID_SIZES = [64, 128, 256, 512] as const;
+        const tileSize: 64 | 128 | 256 | 512 =
+          VALID_SIZES.includes(Number(args.tileSize) as 64 | 128 | 256 | 512)
+            ? (Number(args.tileSize) as 64 | 128 | 256 | 512)
+            : 128;
+
+        // 모델 네이티브 해상도로 생성 후 sharp resize → tileSize
+        const result = await runImageTool({
+          name,
+          kind: "tileset",
+          prompt: userPrompt,
+          inputGenerationIds: [],
+          params: { tileSize },
+          sessionId,
+          signal: extra.signal,
+        });
+
+        // post-process: tileSize 로 리사이즈. structuredContent.imagePath 는 /api URL 이므로
+        // 실제 파일은 imagePathFor(genId) 로 접근하고 tmp→rename 후 dimensions 갱신.
+        const genId = result?.structuredContent?.generationId;
+        if (genId && result.structuredContent.width !== tileSize) {
+          const filePath = imagePathFor(genId);
+          const tmp = `${filePath}.tile.tmp`;
+          await sharp(filePath)
+            .resize(tileSize, tileSize, { kernel: "lanczos3", fit: "fill" })
+            .png()
+            .toFile(tmp);
+          fs.renameSync(tmp, filePath);
+          setGenerationDimensions(genId, tileSize, tileSize);
+          result.structuredContent.width = tileSize;
+          result.structuredContent.height = tileSize;
+          log(`make_tileset resized gen=${genId} to ${tileSize}x${tileSize}`);
+        }
+
+        return result;
+      }
+
+      case "generate_normal_map": {
+        const inputId = requireString(args.inputGenerationId, "inputGenerationId");
+        const strength = typeof args.strength === "number"
+          ? Math.max(0.5, Math.min(2.0, args.strength))
+          : 1.0;
+
+        const inputGen = getGeneration(inputId);
+        if (!inputGen) throw new Error(`generate_normal_map: generation ${inputId} 없음`);
+
+        const inputPath = path.join(DATA_DIR, inputGen.image_path);
+        const generationId = newGenerationId();
+        const jobId = newJobId();
+        const outPath = imagePathFor(generationId);
+
+        log(
+          `generate_normal_map start job=${jobId} gen=${generationId} ` +
+            `input=${inputId} strength=${strength} session=${sessionId}`,
+        );
+        createJob({
+          id: jobId,
+          session_id: sessionId,
+          kind: "codex_image",
+          args: { tool: "generate_normal_map", inputGenerationId: inputId, generationId, viaMcp: true },
+        });
+
+        fs.mkdirSync(IMAGES_DIR, { recursive: true });
+        const startedAt = performance.now();
+
+        // 메타 읽기
+        const meta = await sharp(inputPath).metadata();
+        const width = meta.width ?? 0;
+        const height = meta.height ?? 0;
+        if (!width || !height) throw new Error("generate_normal_map: 이미지 크기 읽기 실패");
+
+        // 알파 채널 보존용: 원본 알파 추출
+        const hasAlpha = meta.hasAlpha ?? false;
+        let alphaBuf: Buffer | null = null;
+        if (hasAlpha) {
+          alphaBuf = await sharp(inputPath)
+            .extractChannel("alpha")
+            .raw()
+            .toBuffer();
+        }
+
+        // 투명 영역을 중간 회색(128)으로 flatten 후 greyscale → Sobel
+        const base = sharp(inputPath).flatten({ background: { r: 128, g: 128, b: 128 } }).greyscale();
+
+        const scale = Math.round(1.0 / strength);
+        const k = strength;
+
+        const [rBuf, gBuf] = await Promise.all([
+          base.clone()
+            .convolve({
+              width: 3, height: 3,
+              kernel: [-k, 0, k, -2 * k, 0, 2 * k, -k, 0, k].map(Math.round),
+              scale: scale,
+              offset: 128,
+            })
+            .raw().toBuffer(),
+          base.clone()
+            .convolve({
+              width: 3, height: 3,
+              kernel: [-k, -2 * k, -k, 0, 0, 0, k, 2 * k, k].map(Math.round),
+              scale: scale,
+              offset: 128,
+            })
+            .raw().toBuffer(),
+        ]);
+
+        // RGB 채널 조합: R=X기울기, G=Y기울기, B=255
+        const pixels = width * height;
+        const channels = hasAlpha ? 4 : 3;
+        const out = Buffer.alloc(pixels * channels, 0);
+        for (let i = 0; i < pixels; i++) {
+          const alpha = alphaBuf ? alphaBuf[i] : 255;
+          if (alpha < 10) {
+            // 완전 투명 픽셀 → flat normal (128,128,255)
+            out[i * channels]     = 128;
+            out[i * channels + 1] = 128;
+            out[i * channels + 2] = 255;
+          } else {
+            out[i * channels]     = rBuf[i];
+            out[i * channels + 1] = gBuf[i];
+            out[i * channels + 2] = 255;
+          }
+          if (channels === 4) out[i * channels + 3] = alpha;
+        }
+
+        await sharp(out, { raw: { width, height, channels } })
+          .png()
+          .toFile(outPath);
+
+        const elapsedMs = Math.round(performance.now() - startedAt);
+
+        const gen = createGeneration({
+          id: generationId,
+          session_id: sessionId,
+          message_id: null,
+          kind: "normal_map",
+          prompt: `Normal map from ${inputId} (strength=${strength})`,
+          input_image_ids: [inputId],
+          image_path: toRelative(outPath),
+          thumbnail_path: null,
+          width,
+          height,
+          backend: "direct",
+        });
+        updateJob(jobId, {
+          status: "succeeded",
+          result: { generationId: gen.id, elapsedMs },
+          ended_at: Date.now(),
+        });
+
+        log(`generate_normal_map done job=${jobId} gen=${gen.id} ${width}x${height} ${elapsedMs}ms`);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `노멀맵 생성 완료: ${width}×${height}, ${(elapsedMs / 1000).toFixed(1)}s. ` +
+                `Show it with image ref id "${gen.id}".`,
+            },
+          ],
+          structuredContent: {
+            generationId: gen.id,
+            imagePath: `/api/images/${gen.id}`,
+            width,
+            height,
+            elapsedMs,
+          },
+        };
       }
 
       default:

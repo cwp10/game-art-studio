@@ -253,7 +253,36 @@ function buildNaturalPrompt(job: ImageJob): string {
         sheetRule
       );
     }
+    case "emote_sheet": {
+      const inputCount = job.inputImagePaths?.length ?? 0;
+      if (inputCount >= 2) {
+        // [0] 참조 캐릭터, [1] 그리드 템플릿
+        return (
+          PROMPT_HEADER +
+          `I am attaching TWO images:\n` +
+          `(1) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, and proportions in every cell.\n` +
+          `(2) GRID TEMPLATE — the OUTPUT CANVAS with thin gray cell lines. Your output PNG must match its exact pixel dimensions.\n\n` +
+          `Task: ${job.prompt}\n\n` +
+          `Rules: draw the SAME character in each cell, only the FACIAL EXPRESSION changes. ` +
+          `Keep the body pose, outfit, and proportions identical across all cells. ` +
+          `Transparent background.`
+        );
+      }
+      return PROMPT_HEADER + `Generate an emotion expression sheet: ${job.prompt}. Transparent background.`;
+    }
+
+    case "tileset":
+      return (
+        PROMPT_HEADER +
+        `Generate a seamless tileable game texture: ${job.prompt}. ` +
+        `CRITICAL: this texture must tile perfectly in all 4 directions — left edge must seamlessly match ` +
+        `the right edge, top edge must match the bottom edge, with no visible seams when tiled. ` +
+        `Use flat uniform lighting with no vignettes, gradients, or darkening near the edges. ` +
+        `2D game-ready top-down or side-view tile asset.`
+      );
+
     // mask/layer/external 은 외부 업로드·레이어 행이라 codex 로 생성되지 않음 — 도달 시 버그.
+    // normal_map 은 sharp 결정적 처리(server.ts)라 codex 미경유.
     default:
       throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);
   }

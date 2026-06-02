@@ -40,7 +40,10 @@ export type GenerationKind =
   | "layer"
   | "reskin"
   | "resize"
-  | "external";
+  | "external"
+  | "emote_sheet"
+  | "tileset"
+  | "normal_map";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";
 

@@ -94,9 +94,10 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
 ];
 
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
+// 실측 built-in tool 한계: 한 변 최대 1536px(CELL_PX=384 × 4). MCP server.ts 검증과 동일.
 const SPRITE_CELL_PX = 384;
-const API_MAX_PX = 8_294_400; // 최대 픽셀 (≈8.3M)
-const API_MAX_EDGE = 3_840; // 최대 한 변
+const API_MAX_PX = 1_536 * 1_536; // = 2_359_296 (최대 픽셀, 4×4)
+const API_MAX_EDGE = 1_536; // 최대 한 변 (CELL_PX=384 × 4)
 const API_MAX_RATIO = 3; // 장축/단축 종횡비
 
 function frameCanvasInfo(rows: number, cols: number): {
@@ -108,8 +109,10 @@ function frameCanvasInfo(rows: number, cols: number): {
   const totalPx = w * h;
   const maxEdge = Math.max(w, h);
   const ratio = maxEdge / Math.min(w, h);
-  const isOver = totalPx > API_MAX_PX || maxEdge > API_MAX_EDGE || ratio > API_MAX_RATIO;
-  const isNear = !isOver && totalPx > API_MAX_PX * 0.72; // 6M 이상
+  // px 는 >= 로 한계 동치(4×4=2.36M)도 초과 표시. edge·ratio 는 strict > 유지
+  // (12프레임 높이 1536px 가 한계 동치라 >= 면 잘못 초과 처리됨).
+  const isOver = totalPx >= API_MAX_PX || maxEdge > API_MAX_EDGE || ratio > API_MAX_RATIO;
+  const isNear = !isOver && totalPx > API_MAX_PX * 0.72; // ≈ 1.7M px
   return { w, h, totalPx, status: isOver ? "over" : isNear ? "near" : "safe" };
 }
 
