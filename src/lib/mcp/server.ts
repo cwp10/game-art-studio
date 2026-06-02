@@ -149,6 +149,14 @@ const SCHEMAS = {
         enum: [1, 2, 4, 8],
         description: "(선택) 방향 수. 지정 시 rows=방향수, cols=방향당 프레임수로 해석. 캐릭터 시트 전용.",
       },
+      viewpoint: {
+        type: "string",
+        enum: ["side", "topdown", "isometric", "2.5d-topdown"],
+        description:
+          "(선택) 카메라 시점. side=사이드스크롤(기본), topdown=탑다운 버드아이뷰, " +
+          "isometric=45도 아이소메트릭, 2.5d-topdown=2.5D 약간 위에서 내려보는 탑다운. " +
+          "[spritesheet: ...] 디렉티브의 viewpoint 값을 그대로 전달.",
+      },
       ...SESSION_PROP,
     },
     required: ["prompt", "rows", "cols"],
@@ -378,6 +386,7 @@ type CallArgs = {
   subjectType?: SubjectType;
   anchorStrategy?: AnchorStrategy;
   directions?: Directions;
+  viewpoint?: string;
   sessionId?: string;
 };
 
@@ -442,6 +451,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         let cols = requireInt(args.cols, "cols");
         const userPrompt = requireString(args.prompt, "prompt");
         const seamlessLoop = args.seamlessLoop === true;
+        const viewpoint = typeof args.viewpoint === "string" ? args.viewpoint : "side";
         const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
           ? args.inputGenerationId
           : null;
@@ -579,7 +589,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
           wantsTransparent, chromaKeyColor, seamlessLoop,
           subjectType, resolvedAnchor, directions,
-          refPath, gridTemplatePath,
+          refPath, gridTemplatePath, viewpoint,
         });
 
         const isCharacter = subjectType === "character";
@@ -1116,7 +1126,28 @@ type SpritePromptInput = {
   directions: Directions | null;
   refPath: string | null;
   gridTemplatePath: string;
+  viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
 };
+
+/** 카메라 시점 규칙. side(기본)는 빈 문자열 — 모델 기본값 유지. */
+function buildViewpointRule(viewpoint: string): string {
+  if (viewpoint === "topdown") {
+    return `CRITICAL CAMERA ANGLE — TOP-DOWN BIRD'S-EYE VIEW: The camera looks straight down from directly overhead. ` +
+      `Render as seen from above: tops of heads/objects are visible, sides and feet are mostly hidden under the body. ` +
+      `NO side-scroll perspective. The subject silhouette reads as if projected onto a horizontal ground plane. `;
+  }
+  if (viewpoint === "isometric") {
+    return `CRITICAL CAMERA ANGLE — ISOMETRIC VIEW: Render in classic isometric projection (~45° diagonal, elevated viewpoint). ` +
+      `Horizontal lines run diagonally. The scene has depth with both the top surface and one or two side faces of objects visible. ` +
+      `Use the fixed isometric 2:1 angle standard in RPG/strategy games. NO straight side-scroll. `;
+  }
+  if (viewpoint === "2.5d-topdown") {
+    return `CRITICAL CAMERA ANGLE — 2.5D TOP-DOWN PERSPECTIVE: Camera is elevated ~60-70° above horizontal, slightly behind and above the subject. ` +
+      `Shows top-of-head and back of shoulders; ground/floor plane is prominent. ` +
+      `Common in ARPG and MOBA games. NOT a straight side view, NOT fully overhead. `;
+  }
+  return "";
+}
 
 /**
  * make_spritesheet Codex 프롬프트 조립.
@@ -1128,7 +1159,8 @@ async function buildSpritePrompt(
 ): Promise<{ decorated: string; overrideInputPaths: string[] }> {
   const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
     wantsTransparent, chromaKeyColor, seamlessLoop,
-    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath } = p;
+    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint } = p;
+  const normalizedViewpoint = viewpoint ?? "side";
 
   const isCharacter = subjectType === "character";
   const isObject = subjectType === "object";
@@ -1138,9 +1170,16 @@ async function buildSpritePrompt(
   const cx = Math.round(cellW / 2);
   const cy = Math.round(cellH / 2);
 
-  const singleDirWalkDir = isSingleDirection
-    ? (/facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? "LEFT" : "RIGHT")
-    : null;
+  const parsedWalkDir = isSingleDirection ? ((): string | null => {
+    if (/facing left|face left|to the left|왼쪽|left[\s-]facing/i.test(userPrompt)) return "LEFT";
+    if (/facing right|face right|to the right|오른쪽|right[\s-]facing/i.test(userPrompt)) return "RIGHT";
+    if (/facing down(?!-)|face down|front.?view|정면/i.test(userPrompt)) return "DOWN";
+    if (/facing up(?!-)|face up|back.?view|후면/i.test(userPrompt)) return "UP";
+    if (/facing (down-|up-)/i.test(userPrompt)) return "DIAGONAL";
+    return "RIGHT";
+  })() : null;
+  // side walk gait rules(toe direction)은 LEFT/RIGHT에만 적용
+  const singleDirWalkDir = (parsedWalkDir === "LEFT" || parsedWalkDir === "RIGHT") ? parsedWalkDir : null;
 
   // ── 배경·루프 지시 ──────────────────────────────────────────────────────
   const bgInstruction = wantsTransparent
@@ -1318,8 +1357,10 @@ async function buildSpritePrompt(
   if (refPath) overrideInputPaths.push(refPath);
   overrideInputPaths.push(gridTemplatePath);
 
+  const viewpointRule = buildViewpointRule(normalizedViewpoint);
   const decorated =
     `${userPrompt}. ` +
+    viewpointRule +
     equipmentRule +
     walkCycleRule +
     poseRefInstruction +

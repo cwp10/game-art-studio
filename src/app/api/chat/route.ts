@@ -60,6 +60,9 @@ const MCP_TOOL_NAMES = [
   "mcp__imggen__remove_background",
   "mcp__imggen__inpaint_image",
   "mcp__imggen__reskin_image",
+  "mcp__imggen__make_emote_sheet",
+  "mcp__imggen__make_tileset",
+  "mcp__imggen__generate_normal_map",
 ];
 
 let cachedSystemPrompt: string | null = null;

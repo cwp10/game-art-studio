@@ -21,6 +21,8 @@ type Props = {
       | "reskin"
       | "overlay"
       | "make_sheet"
+      | "make_emote_sheet"
+      | "make_normal_map"
       | "reference"
       | "compare",
     payload: {

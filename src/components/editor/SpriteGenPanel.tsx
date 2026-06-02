@@ -787,8 +787,11 @@ function useOutsideClose(
 // ────────────────────────────────────────────────────────────────────────────
 // 메시지 빌더 + 스타일 suffix 해석
 
-function facingPhrase(label: Direction): string {
+function facingPhrase(label: Direction, perspective: Perspective = "side"): string {
   if (label === "REF") return "facing the exact same direction as the reference character, preserving its pose and orientation";
+  if (perspective !== "side") {
+    return `facing ${label}`;
+  }
   if (label.startsWith("DOWN-")) return `facing ${label} (3/4 front view)`;
   if (label.startsWith("UP-")) return `facing ${label} (3/4 back view)`;
   if (label.startsWith("DOWN")) return "facing DOWN (front view)";
@@ -827,7 +830,7 @@ export function buildSpriteMessage(
   if (perspPhrase) nlParts.push(perspPhrase);
   // REF 방향은 참조 이미지가 실제로 첨부될 때만 의미가 있음
   if (isCharacter && (state.direction !== "REF" || referenceId)) {
-    nlParts.push(facingPhrase(state.direction));
+    nlParts.push(facingPhrase(state.direction, state.perspective ?? "side"));
   }
   nlParts.push("transparent background");
   const nl = nlParts.join(", ");
