@@ -69,6 +69,7 @@ import {
   TEMPLATES_DIR,
 } from "../util/paths.js";
 import type { GenerationKind } from "../../types/db.js";
+import { detectSpriteGrid } from "../shared/detect-sprite-grid.js";
 
 const RESIZE_TARGET_SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192] as const;
 
@@ -309,7 +310,7 @@ type CallArgs = {
   sessionId?: string;
 };
 
-server.setRequestHandler(CallToolRequestSchema, async req => {
+server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   const name = req.params.name;
   const args = (req.params.arguments ?? {}) as CallArgs;
   const sessionId = args.sessionId ?? null;
@@ -346,6 +347,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt,
           inputGenerationIds: [],
           sessionId,
+          signal: extra.signal,
         });
 
         // 투명 배경 후처리: chroma-key 제거 → fallback flood-fill
@@ -505,7 +507,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           name, decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
           wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
           anchorStrategy, subjectType, resolvedAnchor,
-          finalCellPx: FINAL_CELL_PX, sessionId,
+          finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
         });
 
         if (best?.structuredContent) {
@@ -523,6 +525,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt: requireString(args.prompt, "prompt"),
           inputGenerationIds: [requireString(args.inputGenerationId, "inputGenerationId")],
           sessionId,
+          signal: extra.signal,
         });
 
       case "upscale_image":
@@ -532,6 +535,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt: "Upscale to approximately 2x resolution preserving all detail.",
           inputGenerationIds: [requireString(args.inputGenerationId, "inputGenerationId")],
           sessionId,
+          signal: extra.signal,
         });
 
       case "resize_image": {
@@ -559,6 +563,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt: "Remove the background, keep the subject sharp and intact.",
           inputGenerationIds: [inputId],
           sessionId,
+          signal: extra.signal,
         });
       }
 
@@ -572,6 +577,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           prompt,
           inputGenerationIds: ids,
           sessionId,
+          signal: extra.signal,
         });
       }
 
@@ -648,6 +654,7 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             spritesheet: isSheet,
           },
           sessionId,
+          signal: extra.signal,
         });
 
         // 스프라이트시트 입력이면 후처리: resize → chroma-key → normalizeSpritesheetCells.
@@ -1018,6 +1025,7 @@ type SpritesheetAttemptsSpec = {
   resolvedAnchor: Exclude<AnchorStrategy, "auto">;
   finalCellPx: number;
   sessionId: string | null;
+  signal?: AbortSignal;
 };
 
 /**
@@ -1032,7 +1040,7 @@ async function runSpritesheetAttempts(
   const {
     name, decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
     wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
-    anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId,
+    anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId, signal,
   } = spec;
   const MAX_RETRIES = retryEnabled ? 2 : 0;
   const cellArea = Math.floor(canvasW / cols) * Math.floor(canvasH / rows);
@@ -1065,6 +1073,7 @@ async function runSpritesheetAttempts(
       params: spritesheetParams,
       sessionId,
       progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
+      signal,
     });
     cumulativeMs += mcpResult?.structuredContent?.elapsedMs ?? 0;
 
@@ -1171,25 +1180,19 @@ function ensureTransparentDefault(prompt: string): string {
  * 게임 캐릭터 에셋은 보통 꼭짓점이 배경이므로 충분히 정확하다.
  */
 async function detectTransparentBg(imagePath: string): Promise<boolean> {
-  const meta = await sharp(imagePath).metadata();
-  if (!meta.hasAlpha) return false;
-  const w = meta.width ?? 2;
-  const h = meta.height ?? 2;
-  const corners = [
-    { left: 0, top: 0 },
-    { left: Math.max(0, w - 1), top: 0 },
-    { left: 0, top: Math.max(0, h - 1) },
-    { left: Math.max(0, w - 1), top: Math.max(0, h - 1) },
+  const { data, info } = await sharp(imagePath)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width: w, height: h } = info;
+  const ch = 4; // RGBA (ensureAlpha 보장)
+  const offsets = [
+    0,
+    (w - 1) * ch,
+    (h - 1) * w * ch,
+    ((h - 1) * w + (w - 1)) * ch,
   ];
-  for (const { left, top } of corners) {
-    const px = await sharp(imagePath)
-      .extract({ left, top, width: 1, height: 1 })
-      .ensureAlpha()
-      .raw()
-      .toBuffer();
-    if (px[3] < 10) return true; // 꼭짓점 픽셀이 투명 → 투명 배경
-  }
-  return false;
+  return offsets.some(o => data[o + 3] < 10);
 }
 
 /**
@@ -1241,43 +1244,6 @@ async function generateGridTemplate(
   return cachePath;
 }
 
-/**
- * 스프라이트 시트 이미지 크기에서 rows × cols 를 역산 (gcd 기반).
- * make_spritesheet 는 정사각 셀(cellW=cellH=min(512, floor(2048/max(rows,cols)))) 을 쓰므로
- * gcd(width,height) 의 약수 중 64~512 px 범위에서 rows/cols 가 1~16 정수가 되는 셀 크기를 찾는다.
- *
- * NOTE: src/components/editor/SpriteCanvas.tsx 의 detectSpriteGrid 와 동일 로직.
- *       한 쪽을 고치면 다른 쪽도 동기화할 것.
- */
-function detectSpriteGrid(
-  width: number,
-  height: number,
-): { rows: number; cols: number } | null {
-  if (!width || !height) return null;
-  const g = gcd(width, height);
-  const divs: number[] = [];
-  for (let d = 1; d * d <= g; d++) {
-    if (g % d === 0) {
-      divs.push(d);
-      if (d !== g / d) divs.push(g / d);
-    }
-  }
-  divs.sort((a, b) => b - a);
-  for (const d of divs) {
-    if (d < 64 || d > 512) continue;
-    const c = width / d;
-    const r = height / d;
-    if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
-      return { rows: r, cols: c };
-    }
-  }
-  return null;
-}
-
-function gcd(a: number, b: number): number {
-  return b === 0 ? a : gcd(b, a % b);
-}
-
 async function runImageTool(spec: {
   name: string;
   /** codex 프롬프트 선택용 kind (buildNaturalPrompt). */
@@ -1296,11 +1262,12 @@ async function runImageTool(spec: {
   /** reskin 모드(b): 색 팔레트만 교체. */
   paletteOnly?: boolean;
   params?: Record<string, unknown>;
+  signal?: AbortSignal;
   sessionId: string | null;
   /** 진행 보고 detail 에 붙일 접두사(예: 재시도 "attempt 2/3"). 사용자가 재시도 중임을 알게. */
   progressPrefix?: string;
 }) {
-  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, sessionId, progressPrefix } = spec;
+  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, signal, sessionId, progressPrefix } = spec;
   const persistedKind = storeKind ?? kind;
 
   // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
@@ -1354,7 +1321,7 @@ async function runImageTool(spec: {
     const d = progressPrefix ? `[${progressPrefix}]${detail ? " " + detail : ""}` : detail;
     log(`  ${jobId} stage=${stage}${d ? " " + d : ""}`);
     appendProgress(stage, d);
-  });
+  }, signal);
 
   const gen = createGeneration({
     id: generationId,
@@ -1444,14 +1411,11 @@ async function runResizeTool(spec: {
   const outH = info.height;
   const elapsedMs = Math.round(performance.now() - startedAt);
 
-  // generations.kind CHECK 제약: text2img|img2img|upscale|remove_bg|inpaint|spritesheet|mask|layer|external.
-  // resize 는 'upscale' 의미가 가장 가까워 그대로 재활용 (의미가 약간 늘어남: 원본보다 작아도
-  // 같은 kind 로 분류 — kind enum 확장은 별도 마이그레이션 필요).
   const gen = createGeneration({
     id: generationId,
     session_id: spec.sessionId,
     message_id: null,
-    kind: "upscale",
+    kind: "resize",
     prompt: `Resize longest side to ${spec.targetSize}px (→ ${outW}×${outH}, aspect preserved)`,
     input_image_ids: [spec.inputGenerationId],
     image_path: toRelative(destPath),

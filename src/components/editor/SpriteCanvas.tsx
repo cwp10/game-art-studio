@@ -4,6 +4,7 @@ import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, L
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
+import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 
 type Order = "row" | "col";
 
@@ -1315,46 +1316,6 @@ function GridOverlay({ rows, cols, w, h }: { rows: number; cols: number; w: numb
 }
 
 // ─── 그리드 자동 감지 ────────────────────────────────────────────────────────
-
-/**
- * 스프라이트 시트 이미지 크기에서 rows × cols 를 역산.
- *
- * make_spritesheet 는 cellW = cellH = Math.min(512, floor(2048 / max(rows,cols))) 로
- * 정사각 셀을 쓰므로, cellSize = gcd(width, height) 의 약수 중 가장 큰 적합한 값을 찾는다.
- *
- * 예) 2048×2048 → gcd=2048, 최대 유효 약수=512, cols=4, rows=4
- *     2044×1752 → gcd=292,  cols=7, rows=6
- *     1636×2045 → gcd=409,  cols=4, rows=5
- */
-function detectSpriteGrid(
-  width: number,
-  height: number,
-): { rows: number; cols: number } | null {
-  if (!width || !height) return null;
-  const g = gcd(width, height);
-  // g 의 모든 약수를 구해 내림차순 정렬
-  const divs: number[] = [];
-  for (let d = 1; d * d <= g; d++) {
-    if (g % d === 0) {
-      divs.push(d);
-      if (d !== g / d) divs.push(g / d);
-    }
-  }
-  divs.sort((a, b) => b - a);
-  for (const d of divs) {
-    if (d < 64 || d > 512) continue; // 64 ~ 512 px 범위 셀만 유효
-    const c = width / d;
-    const r = height / d;
-    if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
-      return { rows: r, cols: c };
-    }
-  }
-  return null;
-}
-
-function gcd(a: number, b: number): number {
-  return b === 0 ? a : gcd(b, a % b);
-}
 
 // 프레임 빌드 순서(order)에 맞춘 인덱스 → (행 r, 열 col) 역산. push 루프와 정확히 대응.
 //   row-order: r*cols + col / col-order: col*rows + r.

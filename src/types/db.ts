@@ -39,6 +39,7 @@ export type GenerationKind =
   | "mask"
   | "layer"
   | "reskin"
+  | "resize"
   | "external";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";

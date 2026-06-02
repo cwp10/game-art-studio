@@ -100,25 +100,28 @@ export function tailProgress(opts: {
   function tick(): void {
     if (stopped) return;
 
-    if (!foundJobId) {
-      try {
-        const row = getDb()
-          .prepare(
-            "SELECT id FROM jobs WHERE kind = 'codex_image' AND started_at > ? " +
-              "ORDER BY started_at DESC LIMIT 1",
-          )
-          .get(opts.turnStartTime) as { id: string } | undefined;
-        if (row) foundJobId = row.id;
-        // 정상 조회 — 카운터/경고 리셋 (복구 시 다시 경고 가능하도록).
-        dbFailStreak = 0;
-        dbFailWarned = false;
-      } catch (e) {
-        // DB busy / locked — 다음 tick 에서 다시 시도. 연속 실패가 임계를 넘으면 1회만 경고.
-        dbFailStreak += 1;
-        if (dbFailStreak >= DB_FAIL_WARN_THRESHOLD && !dbFailWarned) {
-          dbFailWarned = true;
-          console.warn(`[progress-tail] jobs lookup failed ${dbFailStreak}x in a row`, e);
-        }
+    try {
+      const row = getDb()
+        .prepare(
+          "SELECT id FROM jobs WHERE kind = 'codex_image' AND started_at > ? " +
+            "ORDER BY started_at DESC LIMIT 1",
+        )
+        .get(opts.turnStartTime) as { id: string } | undefined;
+      // retry 마다 새 codex_image job 이 생기므로 매 tick 갱신. job 이 바뀌면 offset/buf 리셋.
+      if (row?.id && row.id !== foundJobId) {
+        foundJobId = row.id;
+        readOffset = 0;
+        lineBuf = "";
+      }
+      // 정상 조회 — 카운터/경고 리셋 (복구 시 다시 경고 가능하도록).
+      dbFailStreak = 0;
+      dbFailWarned = false;
+    } catch (e) {
+      // DB busy / locked — 다음 tick 에서 다시 시도. 연속 실패가 임계를 넘으면 1회만 경고.
+      dbFailStreak += 1;
+      if (dbFailStreak >= DB_FAIL_WARN_THRESHOLD && !dbFailWarned) {
+        dbFailWarned = true;
+        console.warn(`[progress-tail] jobs lookup failed ${dbFailStreak}x in a row`, e);
       }
     }
 
