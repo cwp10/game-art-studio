@@ -156,7 +156,7 @@ export function SpriteGenPanel({
   onClose,
 }: Props) {
   // contextMode: 캐릭터 모드 or 오브젝트 모드
-  const [contextMode, setContextMode] = useState<ContextMode>(initialSubjectMode ?? "character");
+  const [contextMode, setContextMode] = useState<ContextMode>("character");
   // tab: "subject"(캐릭터 또는 오브젝트) or "effect"
   const [tab, setTab] = useState<"subject" | "effect">("subject");
 
@@ -319,15 +319,30 @@ export function SpriteGenPanel({
           </div>
         </div>
 
-        {/* 옵션 줄 — 캐릭터 토글 + 방향(캐릭터 탭만) + 프레임 + 스타일 + 루프 */}
+        {/* 옵션 줄 — 캐릭터/오브젝트 전환 + 방향(캐릭터 탭만) + 프레임 + 스타일 + 루프 */}
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            disabled
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs text-text-muted/40 cursor-not-allowed"
-            title="오브젝트 모드 (준비 중)"
-          >
-            오브젝트
-          </button>
+          <div className="flex rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+            <button
+              onClick={() => setContextMode("character")}
+              className={`flex h-7 items-center px-3 rounded-md transition-colors ${
+                contextMode === "character"
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              캐릭터
+            </button>
+            <button
+              onClick={() => setContextMode("object")}
+              className={`flex h-7 items-center px-3 rounded-md transition-colors ${
+                contextMode === "object"
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              오브젝트
+            </button>
+          </div>
           {subjectType === "character" && (
             <div className="relative">
               <button
