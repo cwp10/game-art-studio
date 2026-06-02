@@ -127,8 +127,8 @@ const SCHEMAS = {
       },
       subjectType: {
         type: "string",
-        enum: ["character", "effect"],
-        description: "(선택) 시트 종류. 미지정 시 프롬프트 키워드로 추론.",
+        enum: ["character", "effect", "object"],
+        description: "(선택) 시트 종류. character=캐릭터, object=아이템/무기, effect=VFX. 미지정 시 프롬프트 키워드로 추론.",
       },
       anchorStrategy: {
         type: "string",
@@ -421,8 +421,8 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 모델이 직접 알파를 그리면 흰색 fringe / 회색 잔재가 남음.
         const bgInstruction = wantsTransparent
           ? chromaKeyColor === "magenta"
-            ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
-            : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the character — no gradients, no shadows, no anti-aliasing fringe, crisp character silhouette. The post-processing pipeline will key out the green to produce true transparency."
+            ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
+            : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the green to produce true transparency."
           : "White background.";
 
         const isWalk = isLocomotion(userPrompt);
@@ -445,10 +445,11 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         const anchorStrategy: AnchorStrategy = args.anchorStrategy ?? "auto";
         // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
         const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
-          anchorStrategy !== "auto" ? anchorStrategy : subjectType === "effect" ? "center" : "feet";
+          anchorStrategy !== "auto" ? anchorStrategy : (subjectType === "effect" || subjectType === "object") ? "center" : "feet";
         // 가드·콘텐츠 열거·캐릭터 프레이밍은 subjectType 로 게이팅(앵커 전략과 무관).
         // 배치(placement)만 resolvedAnchor 로 분기 — character+center 도 캐릭터 프레이밍/가드 유지.
         const isCharacter = subjectType === "character";
+        const isObject = subjectType === "object";
         const cx = Math.round(cellW / 2);
         const cy = Math.round(cellH / 2);
         // (5) 배치 규칙 — 5전략별. character 의 center 는 "수직 중앙"(접지 언급 X),
@@ -464,6 +465,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
             case "center":
               return isCharacter
                 ? `place the WHOLE character vertically centered so its visual center sits at the cell center X=${cx}, Y=${cy} in EVERY cell, identical character height; only limbs and body parts move between frames. `
+                : isObject
+                ? `center the object so its visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
+                  `Keep the object at a CONSISTENT scale across all frames — only the animated aspect (rotation angle, deformation, etc.) changes between frames. ` +
+                  `The object's complete bounding box must be vertically and horizontally centered; do NOT rest it on the bottom edge or use any ground line. `
                 : `this is a visual effect / VFX, NOT a grounded character. ` +
                   `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
                   `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
@@ -472,15 +477,19 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                   `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `;
           }
         })();
-        const anchorRule = `(5) ${isCharacter ? "CHARACTER" : "EFFECT"} ANCHOR — ${placementRule}`;
+        const anchorRule = `(5) ${isCharacter ? "CHARACTER" : isObject ? "OBJECT" : "EFFECT"} ANCHOR — ${placementRule}`;
 
         // rule (1)/(3) 의 콘텐츠 열거는 시트 종류에 따라 분기.
         // character 시트는 발산 VFX 를 콘텐츠로 전제하면 안 됨(③) — 몸·무기·천만 나열.
         const containedContent = isCharacter
           ? "the character's body, weapon, and any flowing cape or robe"
+          : isObject
+          ? "the complete object, including its texture, decorations, materials, and any intrinsic glow or inset effects"
           : "the subject and ALL of its effects, trails, particles, projectiles, beams, weapons, auras, and flowing capes/robes";
         const oversizeContent = isCharacter
           ? "especially a large pose or a wide weapon swing"
+          : isObject
+          ? "especially the object at an extreme angle or with a wide decorative extension"
           : "especially a sweeping effect like a slash, blast, beam, or trail";
 
         // ③ 캐릭터 시트 이펙트 가드 — subjectType=character 면 anchor 무관하게 항상 주입.

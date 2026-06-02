@@ -21,6 +21,23 @@ const CHAR_WORDS = [
   "가드", "guard", "승리", "victory", "도발", "taunt", "인사", "wave", "웅크", "crouch",
 ];
 
+// 오브젝트/아이템 전용 단어 — 캐릭터 단어가 없고 이펙트 단어도 없을 때 object 로 판정.
+const OBJECT_WORDS = [
+  // 한국어
+  "무기", "아이템", "오브젝트", "도구", "물건", "장비", "아이콘",
+  "창", "검", "칼", "도끼", "해머", "망치", "활", "지팡이", "봉", "단검",
+  "방패", "투구", "보석", "크리스탈", "수정", "동전", "코인",
+  "포션", "열쇠", "스크롤", "책", "상자", "보물", "총", "권총", "소총",
+  "폭탄", "화살", "탄환", "반지", "목걸이", "부적",
+  // English
+  "weapon", "item", "object", "tool", "equipment", "icon",
+  "sword", "dagger", "spear", "lance", "axe", "mace", "hammer",
+  "bow", "staff", "wand", "shield", "helmet", "armor",
+  "gem", "crystal", "coin", "potion", "key", "scroll", "chest", "treasure",
+  "gun", "pistol", "rifle", "bomb", "arrow", "bullet",
+  "ring", "amulet", "necklace", "orb",
+];
+
 // 명백한 VFX/이펙트(외부 발산) 단어 — 캐릭터 단어가 없을 때만 effect 로 판정.
 const EFFECT_WORDS = [
   "이펙트", "이팩트", "effect", "vfx", "슬래시", "slash", "베기", "참격", "검기",
@@ -54,6 +71,11 @@ export function classifyAnchor(prompt: string, hasRef: boolean): "effect" | "cha
 
 /** classifyAnchor 의 SubjectType 래퍼 — 단위 테스트·호출부 편의용. */
 export function inferSubjectType(prompt: string, hasRef: boolean): SubjectType {
+  const p = prompt.toLowerCase();
+  const hasCharWord = CHAR_WORDS.some(w => p.includes(w));
+  const hasObjWord = OBJECT_WORDS.some(w => p.includes(w));
+  // 참조 이미지 없고, 캐릭터 키워드 없고, 오브젝트 키워드만 있으면 object.
+  if (!hasRef && hasObjWord && !hasCharWord) return "object";
   return classifyAnchor(prompt, hasRef) === "effect" ? "effect" : "character";
 }
 

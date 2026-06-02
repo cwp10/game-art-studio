@@ -13,7 +13,7 @@ import fs from "node:fs";
 import sharp from "sharp";
 
 export type AnchorStrategy = "auto" | "feet" | "hip" | "center" | "top";
-export type SubjectType = "character" | "effect";
+export type SubjectType = "character" | "effect" | "object";
 export type ChromaKeyColor = "green" | "magenta";
 
 type Logger = (line: string) => void;
@@ -68,9 +68,11 @@ export async function chromaKeyFile(
   if (strong.length > N * 0.02) {
     strong.sort((a, b) => a - b);
     const median = strong[Math.floor(strong.length / 2)];
-    // 키 톤이 어둡게(낮은 keyness) 그려졌으면 임계값을 약간 낮춰 잔재를 더 잡되,
-    // 캐릭터를 먹지 않도록 [30,50] 으로 클램프.
-    hardThresh = Math.max(30, Math.min(50, Math.round(median * 0.5)));
+    // magenta 키는 배경이 순수 #ff00ff(keyness≈255)이므로 임계값을 높게 유지해야
+    // 자주색/보라색 캐릭터 픽셀(keyness 80-130)을 실수로 키아웃하지 않는다.
+    // green 키는 기존 [30,50] 유지.
+    const [thMin, thMax] = keyColor === "magenta" ? [120, 200] : [30, 50];
+    hardThresh = Math.max(thMin, Math.min(thMax, Math.round(median * 0.5)));
   }
   const fringeFloor = 2;
   const fringeSpan = Math.max(8, Math.round((hardThresh - fringeFloor) * 0.6));
@@ -193,10 +195,13 @@ export async function chromaKeyFile(
     // fringe 는 배경(bgKey)에서 반경 이내일 때만 처리 — 내부 깊은 키색 보존.
     if (bgDist[p] > DESPILL_RADIUS) continue;
     // despill: 키 채널을 반대 채널 쪽으로 끌어내림(green→g=max(r,b), magenta→r,b=g).
+    // magenta despill: G 채널이 높으면 진짜 자주색/보라색 캐릭터 픽셀이므로 스킵.
+    // 마젠타 스필은 G≈0-20, 자주색 캐릭터는 G≈30-80 으로 구분 가능.
     if (keyColor === "green") {
       data[i + 1] = Math.max(data[i], data[i + 2]);
       if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 2);
     } else {
+      if (data[i + 1] > 40) continue; // G 높음 → 자주색 캐릭터, despill 스킵
       data[i] = data[i + 1];
       data[i + 2] = data[i + 1];
     }

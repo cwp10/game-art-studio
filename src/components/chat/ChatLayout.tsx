@@ -998,6 +998,7 @@ export function ChatLayout() {
         open={galleryOpen}
         onClose={() => setGalleryOpen(false)}
         onInsert={handleGalleryInsert}
+        generating={state.generating}
       />
       {comparing && (
         <CompareSheet

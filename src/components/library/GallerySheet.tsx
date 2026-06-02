@@ -28,9 +28,10 @@ type Props = {
   onClose: () => void;
   /** [첨부] → 부모(ChatLayout)가 이 이미지를 현재 대화에 결과 카드로 삽입(모든 기능 버튼 사용 가능). 갤러리는 자동 close. */
   onInsert?: (payload: { prompt?: string; generationId: string; width: number; height: number; kind?: string }) => void;
+  generating?: boolean;
 };
 
-export function GallerySheet({ open, onClose, onInsert }: Props) {
+export function GallerySheet({ open, onClose, onInsert, generating }: Props) {
   const [items, setItems] = useState<Generation[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -164,8 +165,9 @@ export function GallerySheet({ open, onClose, onInsert }: Props) {
                     <div className="mt-0.5 flex gap-1">
                       <button
                         onClick={() => attach(g)}
-                        className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                        title="현재 대화에 카드로 추가 — 편집·리스킨·시트 등 기능 사용"
+                        disabled={generating}
+                        className="flex h-7 flex-1 items-center justify-center gap-1 rounded border border-border text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                        title={generating ? "생성 중에는 첨부할 수 없습니다" : "현재 대화에 카드로 추가 — 편집·리스킨·시트 등 기능 사용"}
                       >
                         <Paperclip size={12} /> 첨부
                       </button>
