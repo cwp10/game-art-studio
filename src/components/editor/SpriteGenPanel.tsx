@@ -93,6 +93,20 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 16, rows: 4, cols: 4 },
 ];
 
+// 애니메이션 타입 프리셋 — frames 자동 설정 + 비어 있을 때 동작 힌트 채움 (로컬 UI 전용)
+const ANIM_PRESETS = [
+  { key: "custom", label: "커스텀",  frames: null,        hint: "" },
+  { key: "idle",   label: "대기",    frames: 4 as const,  hint: "idle breathing animation, subtle movement" },
+  { key: "walk",   label: "걷기",    frames: 8 as const,  hint: "walking cycle animation" },
+  { key: "run",    label: "달리기",  frames: 8 as const,  hint: "running cycle animation, fast movement" },
+  { key: "attack", label: "공격",    frames: 6 as const,  hint: "attack animation, swing motion" },
+  { key: "jump",   label: "점프",    frames: 6 as const,  hint: "jump arc animation" },
+  { key: "death",  label: "사망",    frames: 6 as const,  hint: "death animation, falling down" },
+  { key: "cast",   label: "시전",    frames: 8 as const,  hint: "spell casting animation, magical gesture" },
+] as const;
+
+type AnimType = (typeof ANIM_PRESETS)[number]["key"];
+
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
 // 실측 built-in tool 한계: 한 변 최대 1536px(CELL_PX=384 × 4). MCP server.ts 검증과 동일.
 const SPRITE_CELL_PX = 384;
@@ -197,6 +211,7 @@ export function SpriteGenPanel({
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
+  const [animType, setAnimType] = useState<AnimType>("custom");
 
   // 참조 이미지 연결·해제 시 방향 자동 전환 — 함수형 업데이트로 stale closure 방지
   useEffect(() => {
@@ -453,6 +468,31 @@ export function SpriteGenPanel({
             </p>
           );
         })()}
+
+        {/* 애니메이션 타입 프리셋 */}
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-xs text-text-muted">애니메이션</span>
+          <select
+            value={animType}
+            onChange={e => {
+              const key = e.target.value as AnimType;
+              setAnimType(key);
+              const preset = ANIM_PRESETS.find(p => p.key === key);
+              if (!preset) return;
+              if (preset.frames !== null) setFrames(preset.frames);
+              if (preset.hint && actionPrompt.trim().length === 0) {
+                setActionPrompt(preset.hint);
+              }
+            }}
+            className="h-7 rounded-md border border-border bg-bg-card px-2 text-xs text-text-primary outline-none focus:border-[color:var(--accent)]/60"
+          >
+            {ANIM_PRESETS.map(p => (
+              <option key={p.key} value={p.key}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {/* 시점 선택 */}
         <div className="flex shrink-0 items-center gap-2">

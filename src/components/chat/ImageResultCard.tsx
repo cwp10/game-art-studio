@@ -13,7 +13,6 @@ import {
   Map,
   Palette,
   RotateCw,
-  Smile,
   UserPlus,
   X,
 } from "lucide-react";
@@ -32,7 +31,6 @@ type Action =
   | "reskin"
   | "overlay"
   | "make_sheet"
-  | "make_emote_sheet"
   | "make_normal_map"
   | "reference"
   | "compare";
@@ -216,15 +214,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Palette size={12} /> 리스킨
             </button>
-            {["text2img", "img2img", "upscale", "reskin", "external"].includes(kind ?? "") && (
-              <button
-                onClick={() => onAction?.("make_emote_sheet")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="표정 시트 — 이 캐릭터의 다양한 표정 시트를 생성"
-              >
-                <Smile size={12} /> 표정 시트
-              </button>
-            )}
             {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
               <button
                 onClick={() => onAction?.("make_normal_map")}

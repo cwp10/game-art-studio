@@ -77,6 +77,7 @@ export type StylePreset = {
   updated_at: number;
 };
 
+
 export type PromptLibraryItem = {
   id: string;
   title: string;

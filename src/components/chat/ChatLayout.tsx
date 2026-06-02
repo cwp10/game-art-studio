@@ -419,7 +419,6 @@ export function ChatLayout() {
         | "reskin"
         | "overlay"
         | "make_sheet"
-        | "make_emote_sheet"
         | "make_normal_map"
         | "reference"
         | "compare",
@@ -451,10 +450,6 @@ export function ChatLayout() {
         });
       } else if (action === "remove_bg" && payload.generationId) {
         handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
-          attachmentGenerationIds: [payload.generationId],
-        });
-      } else if (action === "make_emote_sheet" && payload.generationId) {
-        handleSend("이 이미지로 표정 시트 만들어줘.", {
           attachmentGenerationIds: [payload.generationId],
         });
       } else if (action === "make_normal_map" && payload.generationId) {
