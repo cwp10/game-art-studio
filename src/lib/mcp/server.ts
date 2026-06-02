@@ -1173,9 +1173,12 @@ async function buildSpritePrompt(
   const parsedWalkDir = isSingleDirection ? ((): string | null => {
     if (/facing left|face left|to the left|왼쪽|left[\s-]facing/i.test(userPrompt)) return "LEFT";
     if (/facing right|face right|to the right|오른쪽|right[\s-]facing/i.test(userPrompt)) return "RIGHT";
+    if (/facing down-left/i.test(userPrompt)) return "DOWN-LEFT";
+    if (/facing down-right/i.test(userPrompt)) return "DOWN-RIGHT";
+    if (/facing up-left/i.test(userPrompt)) return "UP-LEFT";
+    if (/facing up-right/i.test(userPrompt)) return "UP-RIGHT";
     if (/facing down(?!-)|face down|front.?view|정면/i.test(userPrompt)) return "DOWN";
     if (/facing up(?!-)|face up|back.?view|후면/i.test(userPrompt)) return "UP";
-    if (/facing (down-|up-)/i.test(userPrompt)) return "DIAGONAL";
     return "RIGHT";
   })() : null;
   // side walk gait rules(toe direction)은 LEFT/RIGHT에만 적용
@@ -1266,7 +1269,12 @@ async function buildSpritePrompt(
   let poseRefPath: string | null = null;
   let poseFrameAnglesText = "";
   if (isWalk && isCharacter && isSingleDirection) {
-    const dirIndex = /facing left|face left|to the left|왼쪽|left.facing/i.test(userPrompt) ? 2 : 6;
+    // directionLabels(8) 순서: 0:DOWN 1:DOWN-LEFT 2:LEFT 3:UP-LEFT 4:UP 5:UP-RIGHT 6:RIGHT 7:DOWN-RIGHT
+    const DIR_INDEX: Record<string, number> = {
+      "DOWN": 0, "DOWN-LEFT": 1, "LEFT": 2, "UP-LEFT": 3,
+      "UP": 4, "UP-RIGHT": 5, "RIGHT": 6, "DOWN-RIGHT": 7,
+    };
+    const dirIndex = DIR_INDEX[parsedWalkDir ?? "RIGHT"] ?? 6;
     const toAngleText = (
       angles: { col: number; leftDeg: number; rightDeg: number; label: string }[],
       r: number,
