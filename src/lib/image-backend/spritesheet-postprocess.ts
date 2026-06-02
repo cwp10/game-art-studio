@@ -272,6 +272,42 @@ export type FillStats = {
 };
 
 /**
+ * 4-connectivity BFS 연결 컴포넌트 라벨링.
+ * mask[p]=1 인 픽셀을 그룹화해 labels(1-based 컴포넌트 번호)와 sizes(컴포넌트별 픽셀 수)를 반환.
+ * detectFill / normalizeSpritesheetCells 공통 BFS 코어.
+ */
+function labelConnectedComponents(
+  mask: Uint8Array,
+  W: number,
+  H: number,
+): { labels: Int32Array; sizes: number[] } {
+  const N = W * H;
+  const labels = new Int32Array(N);
+  const sizes: number[] = [0]; // index 0 = 배경(라벨 없음) placeholder
+  const stack: number[] = [];
+  let next = 1;
+  for (let start = 0; start < N; start++) {
+    if (mask[start] === 0 || labels[start] !== 0) continue;
+    labels[start] = next;
+    let size = 0;
+    stack.push(start);
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      size++;
+      const x = p % W;
+      const y = (p - x) / W;
+      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) { labels[p - 1] = next; stack.push(p - 1); }
+      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) { labels[p + 1] = next; stack.push(p + 1); }
+      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) { labels[p - W] = next; stack.push(p - W); }
+      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) { labels[p + W] = next; stack.push(p + W); }
+    }
+    sizes.push(size);
+    next++;
+  }
+  return { labels, sizes };
+}
+
+/**
  * 빈 셀 감지 — chroma-key 후(투명 배경) 시트에서 모델이 실제로 그린 행/열 밴드를 측정한다.
  *
  * WHY: rowCountRule/colCountRule + 적응형 후처리가 있어도 모델이 가끔 그리드를 덜 채운다
@@ -311,38 +347,21 @@ export async function detectFill(
   const isContent = (i: number) =>
     data[i + 3] > 10 && !(data[i] > 240 && data[i + 1] > 240 && data[i + 2] > 240);
 
-  // 1. 비배경 마스크 → 4-connectivity 컴포넌트 라벨링(normalize 패스2 와 동일 구조).
+  // 1. 비배경 마스크 → 4-connectivity 컴포넌트 라벨링.
   const mask = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
     if (isContent(i * ch)) mask[i] = 1;
   }
-  const labels = new Int32Array(N);
-  const sizes: number[] = [0];
-  const sumX: number[] = [0];
-  const sumY: number[] = [0];
-  let next = 1;
-  const stack: number[] = [];
-  for (let start = 0; start < N; start++) {
-    if (mask[start] === 0 || labels[start] !== 0) continue;
-    labels[start] = next;
-    let size = 0, sx = 0, sy = 0;
-    stack.push(start);
-    while (stack.length > 0) {
-      const p = stack.pop()!;
-      const x = p % W;
-      const y = (p - x) / W;
-      size++;
-      sx += x;
-      sy += y;
-      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) { labels[p - 1] = next; stack.push(p - 1); }
-      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) { labels[p + 1] = next; stack.push(p + 1); }
-      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) { labels[p - W] = next; stack.push(p - W); }
-      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) { labels[p + W] = next; stack.push(p + W); }
-    }
-    sizes.push(size);
-    sumX.push(sx);
-    sumY.push(sy);
-    next++;
+  const { labels, sizes } = labelConnectedComponents(mask, W, H);
+
+  // centroid(sumX/sumY) 집계 — 라벨링 후 O(N) post-pass.
+  const sumX: number[] = new Array(sizes.length).fill(0);
+  const sumY: number[] = new Array(sizes.length).fill(0);
+  for (let p = 0; p < N; p++) {
+    const l = labels[p];
+    if (l === 0) continue;
+    sumX[l] += p % W;
+    sumY[l] += Math.floor(p / W);
   }
 
   // 유의미 컴포넌트(셀 면적의 1% 이상)만 — normalizeSpritesheetCells 4a 의 substantialPx 와 동일.
@@ -445,40 +464,7 @@ export async function normalizeSpritesheetCells(
   }
 
   // 2. 글로벌 4-connectivity 라벨링
-  const labels = new Int32Array(N);
-  const sizes: number[] = [0];
-  let next = 1;
-  const stack: number[] = [];
-  for (let start = 0; start < N; start++) {
-    if (mask[start] === 0 || labels[start] !== 0) continue;
-    labels[start] = next;
-    let size = 0;
-    stack.push(start);
-    while (stack.length > 0) {
-      const p = stack.pop()!;
-      size++;
-      const x = p % W;
-      const y = (p - x) / W;
-      if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
-        labels[p - 1] = next;
-        stack.push(p - 1);
-      }
-      if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
-        labels[p + 1] = next;
-        stack.push(p + 1);
-      }
-      if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
-        labels[p - W] = next;
-        stack.push(p - W);
-      }
-      if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
-        labels[p + W] = next;
-        stack.push(p + W);
-      }
-    }
-    sizes.push(size);
-    next++;
-  }
+  const { labels, sizes } = labelConnectedComponents(mask, W, H);
   if (sizes.length <= 1) {
     log(`normalizeSpritesheetCells: empty sheet, skipping`);
     return;
