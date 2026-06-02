@@ -29,6 +29,9 @@ import type {
  *  5. 우리는 `./output.png` 를 `data/images/{generationId}.png` 로 이동
  */
 
+const BUF_MAX = 500_000;       // stdout/stderr 로그 최대 유지 바이트 (디버깅용)
+const KILL_DELAY_MS = 5_000;   // SIGTERM 후 SIGKILL 까지 대기 시간
+
 const PROMPT_HEADER =
   "Use the imagegen skill. " +
   "Save the result as a PNG file at the path ./output.png in your current working directory. " +
@@ -367,7 +370,7 @@ export class CodexExecBackend implements ImageBackend {
         "abort",
         () => {
           child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), 5000).unref();
+          setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
         },
         { once: true },
       );
@@ -379,8 +382,7 @@ export class CodexExecBackend implements ImageBackend {
     let lineBuf = "";
     let stderrLineBuf = "";
     // codex 는 SKILL.md(~6KB) + 실행 로그를 stderr 에 쏟아내므로 메모리 누적 방지.
-    // 로그 저장용 버퍼는 최신 500KB 만 유지 (디버깅에 충분).
-    const BUF_MAX = 500_000;
+    // 로그 저장용 버퍼는 최신 BUF_MAX 만 유지 (디버깅에 충분).
 
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
