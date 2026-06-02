@@ -148,7 +148,7 @@ export function GallerySheet({ open, onClose, onInsert }: Props) {
                     src={`/api/thumbnails/${g.id}`}
                     alt={g.prompt ?? "generation"}
                     title={g.prompt ?? ""}
-                    className="block aspect-square w-full object-cover"
+                    className="checkerboard block aspect-square w-full object-cover"
                     loading="lazy"
                   />
                   <div className="flex flex-1 flex-col gap-1 border-t border-border px-2 py-1.5 text-[10px] text-text-muted">

@@ -122,14 +122,14 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
       {/* 카드 1개가 viewport 안에 들어가도록 height cap (60vh).
           가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 클릭 시 라이트박스. */}
       <div
-        className="block cursor-zoom-in overflow-hidden rounded-t-xl bg-black/10"
+        className="checkerboard block cursor-zoom-in overflow-hidden rounded-t-xl"
         onClick={openLightbox}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageUrl}
           alt={prompt ?? "generated image"}
-          className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full bg-black/30"
+          className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full"
           width={width || undefined}
           height={height || undefined}
         />

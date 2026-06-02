@@ -778,7 +778,7 @@ export function SpriteCanvas({
         </p>
 
         <div
-          className="relative mx-auto shrink-0 select-none rounded-lg border border-border bg-bg-card"
+          className="checkerboard relative mx-auto shrink-0 select-none rounded-lg border border-border"
           style={{ width: displayW, height: displayH }}
         >
           <canvas ref={baseRef} className="absolute inset-0" width={displayW} height={displayH} />
