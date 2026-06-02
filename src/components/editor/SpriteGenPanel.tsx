@@ -324,13 +324,13 @@ export function SpriteGenPanel({
           <button
             onClick={() => setContextMode(m => m === "character" ? "object" : "character")}
             className={`flex h-8 items-center gap-1.5 rounded-lg border px-3 text-xs transition-colors ${
-              contextMode === "character"
+              contextMode === "object"
                 ? "border-[color:var(--accent)]/60 bg-[color:var(--accent)]/15 text-text-primary"
                 : "border-border text-text-muted hover:text-text-primary"
             }`}
-            title={contextMode === "character" ? "오브젝트 모드로 전환" : "캐릭터 모드로 전환"}
+            title={contextMode === "object" ? "캐릭터 모드로 전환" : "오브젝트 모드로 전환"}
           >
-            캐릭터
+            오브젝트
           </button>
           {subjectType === "character" && (
             <div className="relative">

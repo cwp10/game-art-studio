@@ -318,14 +318,51 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
         // 사용자가 배경을 명시하지 않으면 기본 투명 배경.
         // 오케스트레이터가 빠뜨려도 서버 측에서 한 번 더 보장.
         const rawPrompt = requireString(args.prompt, "prompt");
-        const prompt = ensureTransparentDefault(rawPrompt);
-        return await runImageTool({
+
+        // 투명 배경 여부 판단: 흰/컬러 배경 명시가 없으면 transparent.
+        const wantsTransparentGen =
+          !/white\s*(bg|background)|흰\s*배경/.test(rawPrompt.toLowerCase()) &&
+          ((/transparent|투명/i.test(rawPrompt)) || !(/배경|background/i.test(rawPrompt)));
+
+        // 녹색 피사체 감지 → magenta key, 아니면 green key.
+        const genGreenSubject = /녹색|초록|연두|green|슬라임|slime|leaf|이끼|moss/.test(
+          rawPrompt.toLowerCase(),
+        );
+        const genChromaKey: ChromaKeyColor = genGreenSubject ? "magenta" : "green";
+
+        // 투명 배경이면 chroma-key 배경 주입 (모델이 직접 알파를 그리면 edge fringe가 남음).
+        const genBgInstruction = wantsTransparentGen
+          ? genChromaKey === "magenta"
+            ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
+            : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency."
+          : "";
+
+        const prompt = ensureTransparentDefault(rawPrompt) + genBgInstruction;
+        const genResult = await runImageTool({
           name,
           kind: "text2img",
           prompt,
           inputGenerationIds: [],
           sessionId,
         });
+
+        // 투명 배경 후처리: chroma-key 제거 → fallback flood-fill
+        if (wantsTransparentGen) {
+          const genId: string | undefined = genResult?.structuredContent?.generationId;
+          if (genId) {
+            const filePath = imagePathFor(genId);
+            try {
+              const ckOut = await chromaKeyFile(filePath, genChromaKey, log);
+              log(`generate_image chroma-keyed gen=${genId} key=${genChromaKey} keyedOut=${ckOut}`);
+              if (ckOut === 0) {
+                await fallbackBgRemove(filePath, log);
+              }
+            } catch (e) {
+              log(`generate_image post-process fail: ${(e as Error).message}`);
+            }
+          }
+        }
+        return genResult;
       }
 
       case "make_spritesheet": {
@@ -603,7 +640,15 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                 `STRIDE DEPTH (CRITICAL): The forward/leading leg is always drawn IN FRONT OF the trailing leg — the leading boot visibly overlaps the back boot. ` +
                 `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
                 `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
-                `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. `
+                `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. ` +
+                `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
+                `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
+                `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — ` +
+                `when LEFT leg is forward (+angle), RIGHT leg MUST be back (-angle) at equal magnitude, and vice versa. ` +
+                `Typical contact stride: one leg at approximately +25° to +35°, the other at -25° to -35°. ` +
+                `MID-STANCE/CROSSOVER frames: both legs are near vertical (0°) but STILL at slightly different positions — ` +
+                `e.g. LEFT at +5°, RIGHT at -5° — they are crossing, NOT both at 0° simultaneously. ` +
+                `NEVER draw both legs at the same angle in any frame. Symmetric leg poses (both legs identical) indicate a static T-pose, NOT a walk cycle — this is a critical error. `
               : "")
           : "";
 

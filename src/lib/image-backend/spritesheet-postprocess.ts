@@ -616,14 +616,12 @@ export async function normalizeSpritesheetCells(
       }
       if (!interiorEmptyCol) continue; // 이 행은 well-behaved → 기존 col 유지
 
-      // 갭 분할로 col 밴드 → col 0..n-1 재배정(밴드 수<cols 면 끝 열을 빈 채로, >cols 면 클램프).
-      let cband = 0;
+      // 순위 기반 col 재배정: cx 순으로 정렬 후 0..n-1 직접 배정.
+      // 갭 분할 대신 순위를 쓰는 이유: 모델이 두 캐릭터를 같은 열 영역에 드리프트해도
+      // (갭=0) cx 순서만 보존되면 올바른 열로 배정 가능. 갭 임계 초과 여부와 무관.
       const bandColByCx: { cx: number; col: number }[] = [];
-      sortedByCx[0].col = 0;
-      bandColByCx.push({ cx: sortedByCx[0].cx, col: 0 });
-      for (let i = 1; i < sortedByCx.length; i++) {
-        if (sortedByCx[i].cx - sortedByCx[i - 1].cx > colGap) cband++;
-        const col = Math.min(cols - 1, cband);
+      for (let i = 0; i < sortedByCx.length; i++) {
+        const col = Math.min(cols - 1, i);
         sortedByCx[i].col = col;
         bandColByCx.push({ cx: sortedByCx[i].cx, col });
       }
@@ -639,7 +637,7 @@ export async function normalizeSpritesheetCells(
         c.col = best;
       }
       firedAnyCol = true;
-      totalColBands += cband + 1;
+      totalColBands += sortedByCx.length;
     }
     if (firedAnyCol) {
       log(
