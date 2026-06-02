@@ -12,10 +12,11 @@ import { spawn } from "node:child_process";
 import { mkdtemp, stat, readdir, copyFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 import sharp from "sharp";
 
-const ROOT = "/Users/wonpyoung/Developer/workspace/image-generator";
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "../..");
 const FINAL = path.join(ROOT, "icon-source-foreground.png");
 const CANVAS = 1024;
 const CONTENT_FRACTION = 0.8; // ~10% padding each side
