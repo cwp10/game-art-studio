@@ -4,34 +4,59 @@
 import type { ChatEvent, ChatRequest } from "@/types/chat";
 import type { Generation, Message, PromptLibraryItem, Session, StylePreset } from "@/types/db";
 
-export async function listSessions(opts?: { search?: string }): Promise<Session[]> {
+// ─── 내부 헬퍼 ───────────────────────────────────────────────────────────────
+
+/** POST/PATCH/DELETE + JSON body init 보일러플레이트 축약. */
+function jsonFetch(
+  url: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
+  return fetch(url, {
+    method,
+    ...(body !== undefined && {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    ...(signal !== undefined && { signal }),
+  });
+}
+
+/** not-ok Response 에서 에러 메시지 추출. json 파싱 실패 시 statusText 로 폴백. */
+async function extractError(r: Response): Promise<string> {
+  const body = await r.json().catch(() => ({})) as { error?: string };
+  return body.error ?? r.statusText;
+}
+
+/** URLSearchParams 를 URL 에 붙이는 헬퍼. undefined 값은 자동 제외. */
+function buildUrl(base: string, params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
-  if (opts?.search) sp.set("search", opts.search);
-  const r = await fetch(`/api/sessions${sp.toString() ? "?" + sp.toString() : ""}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined) sp.set(k, String(v));
+  }
+  const q = sp.toString();
+  return q ? `${base}?${q}` : base;
+}
+
+export async function listSessions(opts?: { search?: string }): Promise<Session[]> {
+  const r = await fetch(buildUrl("/api/sessions", { search: opts?.search }));
   const { sessions } = (await r.json()) as { sessions: Session[] };
   return sessions;
 }
 
 export async function createSession(title?: string): Promise<Session> {
-  const r = await fetch("/api/sessions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
+  const r = await jsonFetch("/api/sessions", "POST", { title });
   const { session } = (await r.json()) as { session: Session };
   return session;
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  await fetch(`/api/sessions/${id}`, { method: "DELETE" });
+  await jsonFetch(`/api/sessions/${id}`, "DELETE");
 }
 
 export async function renameSession(id: string, title: string): Promise<void> {
-  await fetch(`/api/sessions/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
+  await jsonFetch(`/api/sessions/${id}`, "PATCH", { title });
 }
 
 export async function listMessages(sessionId: string, signal?: AbortSignal): Promise<Message[]> {
@@ -45,15 +70,8 @@ export async function listMessages(sessionId: string, signal?: AbortSignal): Pro
  * dataUrl 은 `canvas.toDataURL("image/png")` 결과 그대로.
  */
 export async function uploadMask(parentGenerationId: string, dataUrl: string): Promise<string> {
-  const r = await fetch("/api/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ kind: "mask", parentGenerationId, dataUrl }),
-  });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(`uploadMask failed: ${error ?? r.statusText}`);
-  }
+  const r = await jsonFetch("/api/upload", "POST", { kind: "mask", parentGenerationId, dataUrl });
+  if (!r.ok) throw new Error(`uploadMask failed: ${await extractError(r)}`);
   const { generationId } = (await r.json()) as { generationId: string };
   return generationId;
 }
@@ -67,20 +85,13 @@ export async function uploadImage(args: {
   sessionId?: string | null;
   filename?: string;
 }): Promise<{ generationId: string; width: number; height: number }> {
-  const r = await fetch("/api/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      kind: "image",
-      dataUrl: args.dataUrl,
-      sessionId: args.sessionId ?? undefined,
-      filename: args.filename,
-    }),
+  const r = await jsonFetch("/api/upload", "POST", {
+    kind: "image",
+    dataUrl: args.dataUrl,
+    sessionId: args.sessionId ?? undefined,
+    filename: args.filename,
   });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(`uploadImage failed: ${error ?? r.statusText}`);
-  }
+  if (!r.ok) throw new Error(`uploadImage failed: ${await extractError(r)}`);
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
@@ -94,23 +105,10 @@ export async function uploadLayers(
 ): Promise<
   Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>
 > {
-  const r = await fetch("/api/layers", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ parentGenerationId, layers }),
-  });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(`uploadLayers failed: ${error ?? r.statusText}`);
-  }
+  const r = await jsonFetch("/api/layers", "POST", { parentGenerationId, layers });
+  if (!r.ok) throw new Error(`uploadLayers failed: ${await extractError(r)}`);
   const { layers: out } = (await r.json()) as {
-    layers: Array<{
-      generationId: string;
-      colorLabel: string;
-      name?: string;
-      width: number;
-      height: number;
-    }>;
+    layers: Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>;
   };
   return out;
 }
@@ -124,15 +122,8 @@ export async function recolorImage(args: {
   mappings: Array<{ from: string; to: string; tolerance?: number }>;
   includeGrays?: boolean;
 }): Promise<{ generationId: string; width: number; height: number }> {
-  const r = await fetch("/api/reskin/recolor", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(args),
-  });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(`recolorImage failed: ${error ?? r.statusText}`);
-  }
+  const r = await jsonFetch("/api/reskin/recolor", "POST", args);
+  if (!r.ok) throw new Error(`recolorImage failed: ${await extractError(r)}`);
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
@@ -145,16 +136,8 @@ export type Suggestion = { label: string; body: string };
  * 본문은 스타일/방향/첨부 미포함 — 사용자가 카드 선택 후 별도 picker 로 결합.
  */
 export async function suggestPrompts(input: string, signal?: AbortSignal): Promise<Suggestion[]> {
-  const r = await fetch("/api/suggest", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ input }),
-    signal,
-  });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(error ?? r.statusText);
-  }
+  const r = await jsonFetch("/api/suggest", "POST", { input }, signal);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { suggestions: Suggestion[] }).suggestions;
 }
 
@@ -163,16 +146,8 @@ export async function suggestPrompts(input: string, signal?: AbortSignal): Promi
  * 저장된 원본 프롬프트와 무관하게 픽셀에서 뽑으므로 업로드 이미지에도 동작. 수 초~수십 초 소요.
  */
 export async function describePrompt(generationId: string, signal?: AbortSignal): Promise<string> {
-  const r = await fetch("/api/describe", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ generationId }),
-    signal,
-  });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(error ?? r.statusText);
-  }
+  const r = await jsonFetch("/api/describe", "POST", { generationId }, signal);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { prompt: string }).prompt;
 }
 
@@ -184,12 +159,7 @@ export async function describePrompt(generationId: string, signal?: AbortSignal)
  */
 export async function suggestLayerParts(generationId: string, signal?: AbortSignal): Promise<string[]> {
   try {
-    const r = await fetch("/api/layer-parts", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ generationId }),
-      signal,
-    });
+    const r = await jsonFetch("/api/layer-parts", "POST", { generationId }, signal);
     if (!r.ok) return [];
     return ((await r.json()) as { parts?: string[] }).parts ?? [];
   } catch {
@@ -210,47 +180,32 @@ export async function createPreset(input: {
   prompt_suffix: string;
   negative_suffix?: string;
 }): Promise<StylePreset> {
-  const r = await fetch("/api/presets", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch("/api/presets", "POST", input);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { preset: StylePreset }).preset;
 }
 
 export async function updatePreset(id: string, patch: Partial<StylePreset>): Promise<StylePreset> {
-  const r = await fetch(`/api/presets/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch(`/api/presets/${id}`, "PATCH", patch);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { preset: StylePreset }).preset;
 }
 
 export async function deletePreset(id: string): Promise<void> {
-  const r = await fetch(`/api/presets/${id}`, { method: "DELETE" });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch(`/api/presets/${id}`, "DELETE");
+  if (!r.ok) throw new Error(await extractError(r));
 }
 
 // ── prompt library ──────────────────────────────────────────────────────────
 export async function listPrompts(opts?: { search?: string; tag?: string }): Promise<PromptLibraryItem[]> {
-  const sp = new URLSearchParams();
-  if (opts?.search) sp.set("search", opts.search);
-  if (opts?.tag) sp.set("tag", opts.tag);
-  const r = await fetch(`/api/prompts${sp.toString() ? "?" + sp.toString() : ""}`);
+  const r = await fetch(buildUrl("/api/prompts", { search: opts?.search, tag: opts?.tag }));
   const { prompts } = (await r.json()) as { prompts: PromptLibraryItem[] };
   return prompts;
 }
 
 export async function createPrompt(input: { title: string; body: string; tags?: string[] }): Promise<PromptLibraryItem> {
-  const r = await fetch("/api/prompts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch("/api/prompts", "POST", input);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { prompt: PromptLibraryItem }).prompt;
 }
 
@@ -258,27 +213,19 @@ export async function updatePrompt(
   id: string,
   patch: { title?: string; body?: string; tags?: string[] },
 ): Promise<PromptLibraryItem> {
-  const r = await fetch(`/api/prompts/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch),
-  });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch(`/api/prompts/${id}`, "PATCH", patch);
+  if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { prompt: PromptLibraryItem }).prompt;
 }
 
 export async function deletePrompt(id: string): Promise<void> {
-  const r = await fetch(`/api/prompts/${id}`, { method: "DELETE" });
-  if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? r.statusText);
+  const r = await jsonFetch(`/api/prompts/${id}`, "DELETE");
+  if (!r.ok) throw new Error(await extractError(r));
 }
 
 /** "사용" 액션 — use_count++, last_used_at=now. */
 export async function bumpPromptUse(id: string): Promise<void> {
-  await fetch(`/api/prompts/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ use: true }),
-  });
+  await jsonFetch(`/api/prompts/${id}`, "PATCH", { use: true });
 }
 
 /** 단일 generation 조회 — params(스프라이트 그리드/방향/앵커 등) 포함. 없으면 null. */
@@ -313,43 +260,32 @@ export async function uploadSpritesheet(args: {
   sessionId?: string | null;
   params?: Record<string, unknown>;
 }): Promise<{ generationId: string; width: number; height: number }> {
-  const r = await fetch("/api/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      kind: "spritesheet",
-      dataUrl: args.dataUrl,
-      parentGenerationId: args.parentGenerationId,
-      sessionId: args.sessionId ?? undefined,
-      params: args.params,
-    }),
+  const r = await jsonFetch("/api/upload", "POST", {
+    kind: "spritesheet",
+    dataUrl: args.dataUrl,
+    parentGenerationId: args.parentGenerationId,
+    sessionId: args.sessionId ?? undefined,
+    params: args.params,
   });
-  if (!r.ok) {
-    const { error } = (await r.json().catch(() => ({ error: r.statusText }))) as { error?: string };
-    throw new Error(`uploadSpritesheet failed: ${error ?? r.statusText}`);
-  }
+  if (!r.ok) throw new Error(`uploadSpritesheet failed: ${await extractError(r)}`);
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
 export async function removeGeneration(id: string): Promise<void> {
-  await fetch(`/api/generations/${id}`, { method: "DELETE" });
+  await jsonFetch(`/api/generations/${id}`, "DELETE");
 }
 
 export async function galleryInsert(sessionId: string, generationId: string): Promise<void> {
-  await fetch(`/api/sessions/${sessionId}/gallery-insert`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ generationId }),
-  });
+  await jsonFetch(`/api/sessions/${sessionId}/gallery-insert`, "POST", { generationId });
 }
 
 export async function listGenerations(opts?: { sessionId?: string; kind?: string; search?: string; limit?: number }): Promise<Generation[]> {
-  const sp = new URLSearchParams();
-  if (opts?.sessionId) sp.set("sessionId", opts.sessionId);
-  if (opts?.kind) sp.set("kind", opts.kind);
-  if (opts?.search) sp.set("search", opts.search);
-  if (opts?.limit) sp.set("limit", String(opts.limit));
-  const r = await fetch(`/api/generations${sp.toString() ? "?" + sp.toString() : ""}`);
+  const r = await fetch(buildUrl("/api/generations", {
+    sessionId: opts?.sessionId,
+    kind: opts?.kind,
+    search: opts?.search,
+    limit: opts?.limit,
+  }));
   const { generations } = (await r.json()) as { generations: Generation[] };
   return generations;
 }
@@ -364,12 +300,7 @@ export async function streamChat(
   onEvent: (event: ChatEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const response = await jsonFetch("/api/chat", "POST", body, signal);
   if (!response.body) throw new Error("no response body");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
