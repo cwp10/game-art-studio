@@ -111,6 +111,7 @@ export function ImageToolsPanel({
     Object.fromEntries(Object.entries(PARAM_SLIDERS).map(([id, c]) => [id, c.neutral]))
   );
   const filterParamsRef = useRef(filterParams);
+  const pixelCanvasRef = useRef<{ canvas: HTMLCanvasElement; pw: number; ph: number; img: HTMLImageElement } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -173,7 +174,7 @@ export function ImageToolsPanel({
       // CSS 필터 조합 (슬라이더는 neutral 이 아닐 때만)
       const cssF: string[] = [];
       if (sel.has("invert")) cssF.push("invert(1)");
-      if (sel.has("median")) cssF.push("blur(0.5px)");
+      if (sel.has("median")) cssF.push("blur(0.5px)"); // Canvas API에 median 없음 — 근사 미리보기
       if ((p.grayscale ?? 0) > 0)             cssF.push(`grayscale(${p.grayscale}%)`);
       if ((p.blur ?? 0) > 0)                  cssF.push(`blur(${p.blur}px)`);
       if ((p.sharpen ?? 0) > 0)               cssF.push(`contrast(${1 + (p.sharpen ?? 0) * 0.2}) saturate(1.1)`);
@@ -181,16 +182,20 @@ export function ImageToolsPanel({
       if (cssF.length) ctx.filter = cssF.join(" ");
       ctx.globalAlpha = opacityRef.current / 100;
 
-      // 픽셀화 소스 생성 (neutral=1 이면 skip)
+      // 픽셀화 소스 생성 (neutral=1 이면 skip) — 오프스크린 캔버스 재사용
       let src: HTMLCanvasElement | HTMLImageElement = img;
       const pixelBlock = Math.round(p.pixelate ?? 1);
       if (pixelBlock > 1) {
         const pw = Math.max(1, Math.round(dw / pixelBlock));
         const ph = Math.max(1, Math.round(dh / pixelBlock));
-        const pc = document.createElement("canvas");
-        pc.width = pw; pc.height = ph;
-        pc.getContext("2d")!.drawImage(img, 0, 0, pw, ph);
-        src = pc;
+        const cached = pixelCanvasRef.current;
+        if (!cached || cached.pw !== pw || cached.ph !== ph || cached.img !== img) {
+          const pc = document.createElement("canvas");
+          pc.width = pw; pc.height = ph;
+          pc.getContext("2d")!.drawImage(img, 0, 0, pw, ph);
+          pixelCanvasRef.current = { canvas: pc, pw, ph, img };
+        }
+        src = pixelCanvasRef.current!.canvas;
       }
 
       // 중심 기준 transform
@@ -380,7 +385,7 @@ export function ImageToolsPanel({
     } finally {
       setIsCropping(false);
     }
-  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, onCrop]);
+  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, filterParams, onCrop]);
 
   const disabled = isCropping || !!busy;
 

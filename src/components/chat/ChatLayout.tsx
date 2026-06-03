@@ -786,6 +786,9 @@ export function ChatLayout() {
                 kind: "resize",
               });
               lastId = r.generationId;
+            } else {
+              const err = await fr.json().catch(() => ({ error: `HTTP ${fr.status}` })) as { error?: string };
+              throw new Error(`필터 적용 실패 (${f.label}): ${err.error ?? fr.status}`);
             }
           } else if (f.prompt) {
             // AI 처리
