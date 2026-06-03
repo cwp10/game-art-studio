@@ -88,6 +88,8 @@ export function MaskCanvas({
   const sizerRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLDivElement>(null);
+  // 뷰박스 아래 모든 콘텐츠(toolbar+prompt+참조+리사이즈)를 한 번에 측정 — reserved 정확도 보장.
+  const belowRef = useRef<HTMLDivElement>(null);
   const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   const [tool, setTool] = useState<Tool>("brush");
   const [brushSize, setBrushSize] = useState(40);
@@ -132,15 +134,12 @@ export function MaskCanvas({
       if (strokesLenRef.current > 0 || drawingRef.current) return;
       // 폭: 패딩 고려 24px 빼기. (p-3 좌우 합)
       const w = Math.max(200, sizer.clientWidth - 24);
-      // 높이: sizer.clientHeight 에서 toolbar / prompt 의 실제 height + gap(12px × 3) +
-      // 안내 텍스트(~20px) 빼고 캔버스 가능 공간. 첫 render 시 canvas 가 maxDisplayPx=1200 로
-      // 그려져도 toolbar/prompt 는 정상 layout 됨 (sizer 가 overflow-y-auto).
-      const tb = toolbarRef.current?.getBoundingClientRect().height ?? 130;
-      const pr = promptRef.current?.getBoundingClientRect().height ?? 120;
-      // 빼야 할 것: toolbar + prompt + (gap-3 × 3 children = 36) + 안내 텍스트(~20) + 안전 마진(~36).
-      const reserved = tb + pr + 36 + 20 + 36;
-      const h = Math.max(200, sizer.clientHeight - reserved);
-      setAvail({ w, h });
+      // 높이: sizer.clientHeight 에서 뷰박스 아래 전체(belowRef)를 한 번에 측정해 뺀다.
+      // belowRef 는 toolbar·prompt·참조이미지·리사이즈 섹션을 모두 포함 → reserved 정확도 보장.
+      // 80 = p-3 상하 패딩(24) + 안내 텍스트(20) + gap-3 × 2(24) + 안전 마진(12).
+      const below = belowRef.current?.getBoundingClientRect().height ?? 400;
+      const h = Math.max(200, sizer.clientHeight - below - 80);
+      setAvail(prev => (prev?.w === w && prev?.h === h ? prev : { w, h }));
     };
 
     measure();
@@ -150,8 +149,19 @@ export function MaskCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // 16:10 뷰박스 + contain-fit. fitScale 은 export 의 scale 로 재사용(inv=1/fitScale).
+  // 휠 줌: canvas 위에서 스크롤로 줌인/줌아웃. non-passive 리스너를 직접 등록.
   const zp = useZoomPan();
+  useEffect(() => {
+    const el = maskRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.deltaY < 0) zp.zoomIn();
+      else zp.zoomOut();
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [zp.zoomIn, zp.zoomOut]);
   const { viewW, viewH, fitScale, displayW, displayH } = fitBox(
     avail?.w ?? maxDisplayPx,
     avail?.h ?? (maxDisplayPx * 10) / 16,
@@ -400,6 +410,9 @@ export function MaskCanvas({
           <ZoomPanControls zp={zp} />
         </div>
 
+        {/* 뷰박스 아래 콘텐츠 전체 — belowRef 로 한 번에 높이 측정 */}
+        <div ref={belowRef} className="flex flex-col gap-3">
+
         {/* 도구 toolbar */}
         <div
           ref={toolbarRef}
@@ -582,6 +595,8 @@ export function MaskCanvas({
             <Scissors size={12} /> 배경 제거 {removeBg ? "ON" : "OFF"}
           </button>
         </div>
+
+        </div>{/* /belowRef */}
       </div>
 
       <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">

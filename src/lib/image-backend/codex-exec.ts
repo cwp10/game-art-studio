@@ -31,6 +31,7 @@ import type {
 
 const BUF_MAX = 500_000;       // stdout/stderr 로그 최대 유지 바이트 (디버깅용)
 const KILL_DELAY_MS = 5_000;   // SIGTERM 후 SIGKILL 까지 대기 시간
+const CODEX_TIMEOUT_MS = 360_000; // Codex 실행 최대 대기 시간 (6분). 초과 시 SIGTERM → 에러.
 
 const PROMPT_HEADER =
   "Use the imagegen skill. " +
@@ -80,24 +81,15 @@ function buildNaturalPrompt(job: ImageJob): string {
         if (isEraseIntent(job.prompt)) {
           return (
             PROMPT_HEADER +
-            `OBJECT REMOVAL TASK. I am attaching TWO images: ` +
-            `(1) the original image, and (2) a mask where the RED region marks an ` +
-            `unwanted object that must be ERASED.\n\n` +
-            `Produce an output image where:\n` +
-            `- The unwanted object (red-marked region in image 2) is COMPLETELY REMOVED ` +
-            `from image 1.\n` +
-            `- The empty space is filled ONLY with the simplest, flattest continuation ` +
-            `of the immediately adjacent background pixels.\n` +
-            `- ABSOLUTELY NO new objects, clouds, trees, grass tufts, flowers, rocks, ` +
-            `animals, people, or any other features may appear in the previously-masked ` +
-            `area — even if similar objects exist nearby.\n` +
-            `- Example: if the masked area is in the sky and surrounding sky has clouds, ` +
-            `the masked area must be filled with PLAIN BLUE SKY ONLY (no clouds).\n` +
-            `- Example: if the masked area is on grass with nearby flowers, fill with ` +
-            `UNIFORM PLAIN GRASS ONLY (no flowers).\n` +
-            `- Everything OUTSIDE the red-marked region must be IDENTICAL to image 1.\n` +
-            `- The result must look natural, as if the unwanted object never existed.\n` +
-            `- Do not include the red color or the mask in the output.`
+            `OBJECT REMOVAL. I am attaching TWO images: ` +
+            `(1) the original image, and (2) a mask where the RED region marks an element to remove.\n\n` +
+            `Remove the red-masked element and fill the vacated area with whatever is naturally behind it: ` +
+            `body parts or clothing if the element was in front of the character, ` +
+            `background scenery if it was in front of the background, ` +
+            `or transparent pixels if it was in front of empty space. ` +
+            `Preserve the character's art style, colors, and anatomy as seen outside the red region. ` +
+            `Everything outside the red-masked region must be pixel-identical to image 1. ` +
+            `Do not include the red color or the mask in the output.`
           );
         }
         return (
@@ -342,6 +334,28 @@ async function chromaKeyGreen(filePath: string): Promise<void> {
   await fs.rename(tmpPath, filePath);
 }
 
+/**
+ * 원본 이미지가 투명 배경(PNG alpha)인지 판정.
+ * Codex image_gen 은 투명 입력을 받으면 결과를 #00ff00 chroma-key 위에 그리는
+ * 경향이 있어, inpaint 결과에도 chromaKeyGreen 을 적용할지 결정하는 데 쓴다.
+ *
+ * 전체 픽셀 스캔은 큰 이미지에서 느리므로 100×100 으로 다운샘플 후 판정한다.
+ * 다운샘플은 알파의 부분 투명을 평균내므로 alpha<255 임계는 보수적으로 동작
+ * (완전 불투명 시트만 false 가 됨).
+ */
+async function hasTransparentBackground(imagePath: string): Promise<boolean> {
+  const { data, info } = await sharp(imagePath, { limitInputPixels: false })
+    .resize(100, 100, { fit: "inside" })
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  if (info.channels < 4) return false;
+  for (let i = 3; i < data.length; i += info.channels) {
+    if (data[i] < 255) return true;
+  }
+  return false;
+}
+
 export class CodexExecBackend implements ImageBackend {
   readonly kind: ImageBackendKind = "codex_exec";
 
@@ -449,7 +463,18 @@ export class CodexExecBackend implements ImageBackend {
     });
 
     const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      resolve => child.once("exit", (code, sig) => resolve({ code, signal: sig })),
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGTERM");
+          setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
+          reject(new Error(`Codex timed out after ${CODEX_TIMEOUT_MS / 1000}s`));
+        }, CODEX_TIMEOUT_MS);
+        timer.unref();
+        child.once("exit", (code, sig) => {
+          clearTimeout(timer);
+          resolve({ code, signal: sig });
+        });
+      },
     );
 
     // 로그 덤프 (디버깅용. data/logs/{jobId}.log)
@@ -497,6 +522,17 @@ export class CodexExecBackend implements ImageBackend {
     if (job.kind === "remove_bg") {
       onProgress("recovering", "chroma key post-process");
       await chromaKeyGreen(destPath);
+    }
+
+    // inpaint 후처리: 원본이 투명 배경이면 Codex 가 결과를 #00ff00 위에 그려버리므로
+    // (remove_bg 와 동일한 이유) 같은 chroma-key 로 배경을 다시 투명화한다.
+    // 원본이 불투명이면 inpaint 결과도 불투명이라 키아웃하지 않는다.
+    if (job.kind === "inpaint" && job.inputImagePaths?.[0]) {
+      const parentHasAlpha = await hasTransparentBackground(job.inputImagePaths[0]);
+      if (parentHasAlpha) {
+        onProgress("recovering", "chroma key post-process (transparent parent)");
+        await chromaKeyGreen(destPath);
+      }
     }
 
     // 메타데이터

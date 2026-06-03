@@ -159,11 +159,22 @@ export function LayerCanvas({
     const tb = toolbarRef.current?.getBoundingClientRect().height ?? 160;
     const reserved = tb + 36 + 20 + 36;
     const h = Math.max(200, sizer.clientHeight - reserved);
-    setAvail({ w, h });
+    setAvail(prev => (prev?.w === w && prev?.h === h ? prev : { w, h }));
   }, []);
 
   // 16:10 뷰박스 + contain-fit. fitScale 은 export(buildColorMask) 의 scale 로 재사용.
   const zp = useZoomPan();
+  useEffect(() => {
+    const el = maskRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.deltaY < 0) zp.zoomIn();
+      else zp.zoomOut();
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [zp.zoomIn, zp.zoomOut]);
   const { viewW, viewH, fitScale, displayW, displayH } = fitBox(
     avail?.w ?? maxDisplayPx,
     avail?.h ?? maxDisplayPx,
