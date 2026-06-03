@@ -3,14 +3,33 @@
 import { Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type FilterArg = { id: string; prompt: string };
+export type FilterArg = { id: string; prompt: string; param?: number };
 
+// 순서: 서버 적용 순서와 동일
 export const POST_FILTER_DEFS = [
-  { id: "removeBg", label: "배경제거", prompt: "이 이미지의 배경을 투명하게 제거해줘." },
-  { id: "sharpen",  label: "샤프닝",   prompt: "이 이미지를 더 선명하게 샤프닝 처리해줘." },
-  { id: "blur",     label: "블러",     prompt: "이 이미지를 부드럽게 블러 처리해줘." },
-  { id: "pixelate", label: "픽셀",     prompt: "이 이미지를 픽셀아트 스타일로 픽셀화해줘." },
+  { id: "median",    label: "노이즈제거", prompt: "", sharp: true  }, // 토글 (맨앞)
+  { id: "invert",    label: "반전",      prompt: "", sharp: true  }, // 토글
+  { id: "flop",      label: "좌우반전",  prompt: "", sharp: true  }, // 토글
+  { id: "flip",      label: "상하반전",  prompt: "", sharp: true  }, // 토글
+  { id: "rotate",    label: "회전",      prompt: "", sharp: true  }, // 슬라이더
+  { id: "pixelate",  label: "픽셀화",    prompt: "", sharp: true  }, // 슬라이더
+  { id: "sharpen",   label: "샤프닝",    prompt: "", sharp: true  }, // 슬라이더
+  { id: "blur",      label: "블러",      prompt: "", sharp: true  }, // 슬라이더
+  { id: "gamma",     label: "감마",      prompt: "", sharp: true  }, // 슬라이더
+  { id: "grayscale", label: "흑백",      prompt: "", sharp: true  }, // 슬라이더 (맨뒤)
+  { id: "trim",      label: "여백제거",  prompt: "", sharp: true  }, // 푸터
+  { id: "removeBg",  label: "배경제거",  prompt: "이 이미지의 배경을 투명하게 제거해줘.", sharp: false }, // 푸터
 ] as const;
+
+// 슬라이더 필터: neutral 값이면 적용 안 함
+const PARAM_SLIDERS: Record<string, { min: number; max: number; step: number; unit: string; neutral: number; defaultVal: number }> = {
+  rotate:   { min: 0,   max: 360, step: 1,   unit: "°",  neutral: 0,   defaultVal: 0   },
+  pixelate: { min: 1,   max: 32,  step: 1,   unit: "px", neutral: 1,   defaultVal: 1   },
+  sharpen:  { min: 0,   max: 5,   step: 0.5, unit: "",   neutral: 0,   defaultVal: 0   },
+  blur:     { min: 0,   max: 20,  step: 0.5, unit: "px", neutral: 0,   defaultVal: 0   },
+  gamma:    { min: 0.5, max: 3,   step: 0.1, unit: "",   neutral: 1.0, defaultVal: 1.0 },
+  grayscale:{ min: 0,   max: 100, step: 5,   unit: "%",  neutral: 0,   defaultVal: 0   },
+};
 
 type Props = {
   generationId: string;
@@ -86,6 +105,13 @@ export function ImageToolsPanel({
     });
   }, []);
 
+  const selectedFiltersRef = useRef(selectedFilters);
+
+  const [filterParams, setFilterParams] = useState<Record<string, number>>(() =>
+    Object.fromEntries(Object.entries(PARAM_SLIDERS).map(([id, c]) => [id, c.neutral]))
+  );
+  const filterParamsRef = useRef(filterParams);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef(computeFrame(imageWidth, imageHeight));
@@ -136,11 +162,55 @@ export function ImageToolsPanel({
       ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
     }
 
-    // Image (globalAlpha 로 투명도 실시간 미리보기)
+    // Image — CSS 필터 + transform + 투명도 실시간 미리보기
     if (img) {
+      ctx.save();
+      const sel = selectedFiltersRef.current;
+      const p = filterParamsRef.current;
+      const dw = imageWidth * s;
+      const dh = imageHeight * s;
+
+      // CSS 필터 조합 (슬라이더는 neutral 이 아닐 때만)
+      const cssF: string[] = [];
+      if (sel.has("invert")) cssF.push("invert(1)");
+      if (sel.has("median")) cssF.push("blur(0.5px)");
+      if ((p.grayscale ?? 0) > 0)             cssF.push(`grayscale(${p.grayscale}%)`);
+      if ((p.blur ?? 0) > 0)                  cssF.push(`blur(${p.blur}px)`);
+      if ((p.sharpen ?? 0) > 0)               cssF.push(`contrast(${1 + (p.sharpen ?? 0) * 0.2}) saturate(1.1)`);
+      if (Math.abs((p.gamma ?? 1) - 1) > 0.05) cssF.push(`brightness(${p.gamma})`);
+      if (cssF.length) ctx.filter = cssF.join(" ");
       ctx.globalAlpha = opacityRef.current / 100;
-      ctx.drawImage(img, ox, oy, imageWidth * s, imageHeight * s);
+
+      // 픽셀화 소스 생성 (neutral=1 이면 skip)
+      let src: HTMLCanvasElement | HTMLImageElement = img;
+      const pixelBlock = Math.round(p.pixelate ?? 1);
+      if (pixelBlock > 1) {
+        const pw = Math.max(1, Math.round(dw / pixelBlock));
+        const ph = Math.max(1, Math.round(dh / pixelBlock));
+        const pc = document.createElement("canvas");
+        pc.width = pw; pc.height = ph;
+        pc.getContext("2d")!.drawImage(img, 0, 0, pw, ph);
+        src = pc;
+      }
+
+      // 중심 기준 transform
+      ctx.translate(ox + dw / 2, oy + dh / 2);
+      if (sel.has("flop")) ctx.scale(-1, 1);
+      if (sel.has("flip")) ctx.scale(1, -1);
+      const angle = p.rotate ?? 0;
+      if (angle !== 0) ctx.rotate((angle * Math.PI) / 180);
+
+      if (sel.has("pixelate")) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+        ctx.imageSmoothingEnabled = true;
+      } else {
+        ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
+      }
+
       ctx.globalAlpha = 1;
+      ctx.filter = "none";
+      ctx.restore();
     }
 
     // Dark overlay outside frame (4 rects)
@@ -188,9 +258,11 @@ export function ImageToolsPanel({
     ctx.fillText(label, fr.x + 6, fr.y + 14);
   }, [imageWidth, imageHeight, targetW, targetH]);
 
-  // Init transform: 캔버스 위치/스케일 + 투명도 초기화
+  // Init transform: 캔버스 위치/스케일 + 투명도 + 필터 슬라이더 초기화
   const initTransform = useCallback(() => {
     setOpacity(initialOpacityRef.current);
+    setSelectedFilters(new Set());
+    setFilterParams(Object.fromEntries(Object.entries(PARAM_SLIDERS).map(([id, c]) => [id, c.neutral])));
     frameRef.current = frame;
     const s = Math.min(frame.w / imageWidth, frame.h / imageHeight);
     scaleRef.current = s;
@@ -206,11 +278,10 @@ export function ImageToolsPanel({
     initTransform();
   }, [initTransform]);
 
-  // opacity 변경 시 ref 업데이트 + 즉시 재렌더
-  useEffect(() => {
-    opacityRef.current = opacity;
-    draw();
-  }, [opacity, draw]);
+  // opacity / selectedFilters 변경 시 ref 업데이트 + 즉시 재렌더
+  useEffect(() => { opacityRef.current = opacity; draw(); }, [opacity, draw]);
+  useEffect(() => { selectedFiltersRef.current = selectedFilters; draw(); }, [selectedFilters, draw]);
+  useEffect(() => { filterParamsRef.current = filterParams; draw(); }, [filterParams, draw]);
 
   // Load image once
   useEffect(() => {
@@ -296,8 +367,15 @@ export function ImageToolsPanel({
     setIsCropping(true);
     try {
       const filters: FilterArg[] = POST_FILTER_DEFS
-        .filter(f => selectedFilters.has(f.id))
-        .map(f => ({ id: f.id, prompt: f.prompt }));
+        .filter(f => {
+          if (selectedFilters.has(f.id)) return true;
+          if (f.id in PARAM_SLIDERS) {
+            const cfg = PARAM_SLIDERS[f.id];
+            return Math.abs((filterParams[f.id] ?? cfg.neutral) - cfg.neutral) > 0.01;
+          }
+          return false;
+        })
+        .map(f => ({ id: f.id, prompt: f.prompt, param: filterParams[f.id] }));
       await onCrop({ srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters });
     } finally {
       setIsCropping(false);
@@ -324,8 +402,8 @@ export function ImageToolsPanel({
 
       {/* Body */}
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
-        {/* Size inputs + toggle buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* 너비 × 높이 + 초기화 */}
+        <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 text-xs text-text-muted">
             너비
             <input
@@ -347,15 +425,6 @@ export function ImageToolsPanel({
               className="w-20 rounded border border-border bg-bg-card px-2 py-1 text-xs text-text-primary"
             />
           </label>
-          {POST_FILTER_DEFS.map(f => (
-            <button
-              key={f.id}
-              onClick={() => toggleFilter(f.id)}
-              className={`rounded border px-2 py-1 text-xs transition-colors ${selectedFilters.has(f.id) ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
-            >
-              {f.label}
-            </button>
-          ))}
           <button
             onClick={initTransform}
             className="ml-auto flex items-center gap-1 rounded border border-border px-2 py-1 text-xs text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -364,20 +433,6 @@ export function ImageToolsPanel({
             <RefreshCw size={12} />
             초기화
           </button>
-        </div>
-
-        {/* Opacity slider */}
-        <div className="flex items-center gap-3">
-          <span className="w-12 shrink-0 text-xs text-text-muted">투명도</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={opacity}
-            onChange={e => setOpacity(Number(e.target.value))}
-            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-accent"
-          />
-          <span className="w-9 text-right text-xs tabular-nums text-text-muted">{opacity}%</span>
         </div>
 
         {/* Crop canvas */}
@@ -393,11 +448,82 @@ export function ImageToolsPanel({
             onMouseLeave={onMouseUp}
           />
         </div>
+
+        {/* 드래그·휠 힌트 */}
         <p className="text-center text-xs text-text-muted/60">드래그로 이동 · 휠로 확대/축소</p>
+
+        {/* 토글 버튼 (슬라이더 없는 필터) */}
+        <div className="flex flex-wrap gap-1.5">
+          {POST_FILTER_DEFS
+            .filter(f => !(f.id in PARAM_SLIDERS) && f.id !== "trim" && f.id !== "removeBg")
+            .map(f => (
+              <button
+                key={f.id}
+                onClick={() => toggleFilter(f.id)}
+                className={`rounded border px-2 py-1 text-xs transition-colors ${selectedFilters.has(f.id) ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+              >
+                {f.label}
+              </button>
+            ))}
+        </div>
+
+        {/* 슬라이더 필터 (항상 표시) */}
+        {POST_FILTER_DEFS
+          .filter(f => f.id in PARAM_SLIDERS)
+          .map(f => {
+            const cfg = PARAM_SLIDERS[f.id];
+            const val = filterParams[f.id] ?? cfg.neutral;
+            const active = Math.abs(val - cfg.neutral) > 0.01;
+            return (
+              <div key={f.id} className="flex items-center gap-2">
+                <span className={`w-14 shrink-0 text-xs ${active ? "text-accent font-medium" : "text-text-muted"}`}>
+                  {f.label}
+                </span>
+                <input
+                  type="range"
+                  min={cfg.min}
+                  max={cfg.max}
+                  step={cfg.step}
+                  value={val}
+                  onChange={e => setFilterParams(prev => ({ ...prev, [f.id]: Number(e.target.value) }))}
+                  className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-accent"
+                />
+                <span className={`w-12 text-right text-xs tabular-nums ${active ? "text-accent" : "text-text-muted"}`}>
+                  {val}{cfg.unit}
+                </span>
+              </div>
+            );
+          })}
+
+        {/* 투명도 슬라이더 */}
+        <div className="flex items-center gap-3">
+          <span className="w-12 shrink-0 text-xs text-text-muted">투명도</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={opacity}
+            onChange={e => setOpacity(Number(e.target.value))}
+            className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-accent"
+          />
+          <span className="w-9 text-right text-xs tabular-nums text-text-muted">{opacity}%</span>
+        </div>
       </div>
 
       {/* Footer */}
       <div className="flex gap-2 border-t border-border p-3">
+        <button
+          onClick={() => toggleFilter("trim")}
+          className={`rounded border px-3 py-2 text-sm transition-colors ${selectedFilters.has("trim") ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+        >
+          여백제거
+        </button>
+        <button
+          onClick={() => toggleFilter("removeBg")}
+          className={`rounded border px-3 py-2 text-sm transition-colors ${selectedFilters.has("removeBg") ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+        >
+          배경제거
+        </button>
         <button
           disabled={disabled}
           onClick={handleSubmit}

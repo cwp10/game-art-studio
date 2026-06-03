@@ -766,8 +766,30 @@ export function ChatLayout() {
         let lastId = result.generationId;
         for (const f of POST_FILTER_DEFS) {
           const arg = filters.find(x => x.id === f.id);
-          if (arg?.prompt) {
-            const r = await handleSend(arg.prompt, { attachmentGenerationIds: [lastId] });
+          if (!arg) continue;
+          if (f.sharp) {
+            // sharp 서버 처리 — 알파채널 완전 보존
+            const fr = await fetch("/api/filter", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ generationId: lastId, filter: f.id, param: arg.param }),
+            });
+            if (fr.ok) {
+              const r = await fr.json() as { generationId: string; width: number; height: number };
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: `✨ ${f.label}`,
+                generationId: r.generationId,
+                width: r.width,
+                height: r.height,
+                kind: "resize",
+              });
+              lastId = r.generationId;
+            }
+          } else if (f.prompt) {
+            // AI 처리
+            const r = await handleSend(f.prompt, { attachmentGenerationIds: [lastId] });
             if (r) lastId = r.generationId;
           }
         }
