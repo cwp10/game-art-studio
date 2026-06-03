@@ -46,7 +46,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, type FrameAngle } from "../image-backend/pose-reference.js";
+import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, DIR_NAMES, type FrameAngle } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -1266,10 +1266,8 @@ async function buildSpritePrompt(
     : "";
 
   // ── 포즈 가이드 로딩 (걷기 캐릭터) ─────────────────────────────────────
-  // dirIndex(0~7) → 짧은 방향명. buildPoseSvg / directionLabels(8) 순서와 일치.
-  const DIR_NAME = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"];
   // 셀 하나의 각도 텍스트. foreAft(정면/후면)면 깊이 문구, 측면/대각선이면 L/R 각도.
-  // (B 수정: 단일방향 DOWN/UP은 leftDeg=rightDeg=0이라 각도 포맷이 "L+0°/R+0°" degenerate.)
+  // (DOWN/UP은 leftDeg/rightDeg=0이지만 foreAft가 설정돼 각도 대신 전후 깊이 텍스트로 표시 → "L+0°/R+0°" 미출력.)
   const fmtCell = (a: FrameAngle) =>
     a.foreAft
       ? `${a.foreAft}(${a.label})`
@@ -1328,7 +1326,7 @@ async function buildSpritePrompt(
       poseFrameAnglesText = guideRows
         .map((row, r) =>
           row.angles
-            .map((a, c) => `row${r + 1}(${DIR_NAME[row.dirIndex]}) col${c + 1}: ${fmtCell(a)}`)
+            .map((a, c) => `row${r + 1}(${DIR_NAMES[row.dirIndex]}) col${c + 1}: ${fmtCell(a)}`)
             .join(", "),
         )
         .join("; ");

@@ -48,6 +48,9 @@ function circle(cx: number, cy: number, r: number, color: string) {
  */
 const DIR_WALK_ANGLE = [90, 135, 180, 225, 270, 315, 0, 45];
 
+/** dirIndex(0~7) → 짧은 방향명. DIR_WALK_ANGLE / directionLabels(8) 순서와 1:1. server.ts 라벨링과 공용. */
+export const DIR_NAMES = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"];
+
 /** 방향별 스크린 투영 성분. walkX 양수=오른쪽, walkY 양수=아래쪽(전면/시청자 쪽). */
 function walkComponents(dirIndex: number) {
   const theta = deg2rad(DIR_WALK_ANGLE[dirIndex] ?? 0);
@@ -57,6 +60,8 @@ function walkComponents(dirIndex: number) {
 // 연속 포즈 모델 상수
 const STEP_W = 18;   // 정면/후면 최대 좌우 벌림(px). 순수 측면=0.
 const DEPTH = 26;    // 정면/후면 전후(깊이) 발 오프셋 최대(px). 순수 측면=0.
+// |walkX|이 이 값보다 크면 측면/대각선(swingAngle·발끝 회전·facing 코 사용), 작으면 정면/후면(depthY 사용). ≈cos(73°).
+const SIDE_WALKX_THRESHOLD = 0.3;
 
 /**
  * 한쪽 다리의 기하 + 각도 데이터. side=+1(왼/파랑), -1(오/빨강).
@@ -135,7 +140,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     const cosp = Math.cos(phase);
     const isContact = Math.abs(cosp) > 0.85;
     const isCrossover = Math.abs(cosp) < 0.15;
-    const dirName = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"][dirIndex] ?? "?";
+    const dirName = DIR_NAMES[dirIndex] ?? "?";
     const phaseLabel = isContact ? "CONTACT" : isCrossover ? "PASSING" : `f${frame}`;
     elements.push(`<text x="${W/2}" y="16" text-anchor="middle" fill="#aaaaff" font-family="monospace" font-size="11">${dirName} ${phaseLabel}</text>`);
   }
@@ -147,7 +152,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   // facing 단서(코): 후면이 아니고 좌우 진행 성분이 있으면 머리에서 진행방향으로 짧게 돌출.
   // 순수 측면(LEFT↔RIGHT)·전면 대각은 머리·몸통이 대칭이라 발끝만으론 좌우 구분이 약함 →
   // 모델이 facing을 안정적으로 읽도록 코를 추가. 정면/후면(walkX≈0)은 머리색으로 이미 구분.
-  if (!isBack && Math.abs(walkX) > 0.3) {
+  if (!isBack && Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
     const nz = walkX >= 0 ? 1 : -1;
     elements.push(line(CX + nz * HEAD_R * 0.4, HEAD_Y, CX + nz * (HEAD_R + 8), HEAD_Y, headColor, 6));
   }
@@ -202,7 +207,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     // 발끝: 진행방향(walkX,walkY)의 스크린 방향으로 꺾는다 — 측면=수평, 대각선=대각
     // (예: DOWN-RIGHT는 우하향). endpoint 각도(수직 기준): RIGHT=90°, DOWN-RIGHT=45°.
     // walkY를 무시한 수평 발끝이 "대각으로 걷는데 발은 옆" 방향 불일치를 일으키던 문제 수정.
-    if (Math.abs(walkX) > 0.3) {
+    if (Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
       const faceDeg = (Math.atan2(walkX, walkY) * 180) / Math.PI;
       const tip = endpoint(foot.x, footY, faceDeg + leg.swingAngle * 0.2, 14);
       elements.push(line(foot.x, footY, tip.x, tip.y, color, 4));
@@ -225,14 +230,23 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
 }
 
 /**
+ * depthY → 전후(fore/aft) 분류. depthY>0=화면 아래=전진(fwd). |depthY|<2px=중립(mid).
+ * verbose=true면 화면 높이 단서(lower/higher) 병기. legAngleText·poseToFrameAngle 공용 소스.
+ */
+function classifyForeAft(depthY: number, verbose: boolean): string {
+  if (Math.abs(depthY) < 2) return "mid";
+  if (verbose) return depthY > 0 ? "fwd(lower)" : "back(higher)";
+  return depthY > 0 ? "fwd" : "back";
+}
+
+/**
  * 두 다리 → 셀 내 디버그 각도 텍스트(이미지 라벨용).
  * 측면/대각선(walkX 유의): 스윙각. 정면/후면(walkX≈0): 전후(fwd/back) 오프셋 언어.
  */
 function legAngleText(left: LegPose, right: LegPose, walkX: number) {
-  if (Math.abs(walkX) < 0.3) {
-    // 정면/후면: 깊이(depthY) 부호로 fore/aft. depthY>0=화면 아래=전진(fwd).
-    const fa = (d: number) => (Math.abs(d) < 2 ? "mid" : d > 0 ? "fwd" : "back");
-    return { l: fa(left.depthY), r: fa(right.depthY) };
+  if (Math.abs(walkX) < SIDE_WALKX_THRESHOLD) {
+    // 정면/후면: 깊이(depthY) 부호로 fore/aft.
+    return { l: classifyForeAft(left.depthY, false), r: classifyForeAft(right.depthY, false) };
   }
   return {
     l: `${left.swingAngle >= 0 ? "+" : ""}${left.swingAngle.toFixed(0)}°`,
@@ -258,10 +272,9 @@ function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, is
   const cosP = Math.cos(phase);
   const absC = Math.abs(cosP);
   // 정면/후면(walkX≈0): 스윙각 0이라 degenerate → 전후(fore/aft) 오프셋 언어로.
-  if (Math.abs(walkX) < 0.3) {
-    const fa = (leg: typeof left) => (Math.abs(leg.depthY) < 2 ? "mid" : leg.depthY > 0 ? "fwd(lower)" : "back(higher)");
+  if (Math.abs(walkX) < SIDE_WALKX_THRESHOLD) {
     const label = absC > 0.85 ? (left.depthY > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
-    return { col, leftDeg, rightDeg, label, foreAft: `L foot ${fa(left)}/R foot ${fa(right)}` };
+    return { col, leftDeg, rightDeg, label, foreAft: `L foot ${classifyForeAft(left.depthY, true)}/R foot ${classifyForeAft(right.depthY, true)}` };
   }
   const label = absC > 0.85 ? (leftDeg > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
   return { col, leftDeg, rightDeg, label, foreAft: null };
@@ -422,7 +435,8 @@ export async function getMultiDirPoseGuide(
 ): Promise<{ path: string; rows: { dirIndex: number; angles: FrameAngle[] }[] }> {
   const type = isRun ? "run" : "walk";
   const rows = dirIndices.length;
-  const cacheFile = `${templatesDir}/pose-${type}-multidir${rows}-c${cols}.png`;
+  // dirIndices(0~7 각 한 자리)를 키에 포함 — 같은 행 수의 다른 방향셋이 캐시 충돌하지 않게.
+  const cacheFile = `${templatesDir}/pose-${type}-multidir${dirIndices.join("")}-c${cols}.png`;
 
   const rowsData = dirIndices.map(dirIndex => ({
     dirIndex,
