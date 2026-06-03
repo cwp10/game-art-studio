@@ -124,7 +124,7 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
         if (it.kind === "batch") {
           return (
             <div key={`${it.id}-${i}`} className="space-y-2">
-              <div className="font-mono text-[11px] leading-relaxed text-text-muted">
+              <div className="line-clamp-2 font-mono text-[11px] leading-relaxed text-text-muted" title={it.prompt}>
                 ×{it.total} 배치 · {it.prompt}
               </div>
               <div className="grid grid-cols-2 gap-3">

@@ -147,7 +147,10 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               {analyzing ? <Loader2 size={12} className="animate-spin" /> : <Copy size={12} />}
             </button>
-            <p className="flex-1 font-mono text-[11px] leading-relaxed text-text-muted">
+            <p
+              className="line-clamp-2 flex-1 font-mono text-[11px] leading-relaxed text-text-muted"
+              title={prompt}
+            >
               {analyzing
                 ? "분석 중… (이미지 → 영어 프롬프트)"
                 : failed
