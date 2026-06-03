@@ -1377,6 +1377,7 @@ async function buildSpritePrompt(
   const poseRefInstruction = poseRefPath
     ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
       `CRITICAL COLOR CODING — Blue skeleton line = LEFT leg (character's own left); Red skeleton line = RIGHT leg (character's own right). ` +
+      `FACING CUE — the short nub protruding from the head marks the FACING direction: orient the character to face the way the nub points (this disambiguates left-facing vs right-facing side views). A dark/filled head with no nub = back view (facing away). Do NOT draw the nub itself as a spike or feature — it only indicates which way the character looks. ` +
       `Each skeleton shows the EXACT per-leg angle required for that cell. ` +
       `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
       `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +

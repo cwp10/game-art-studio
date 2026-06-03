@@ -144,6 +144,14 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   const headColor = isBack ? "#7a6038" : "#f0c080";
   elements.push(circle(CX, HEAD_Y, HEAD_R, headColor));
 
+  // facing 단서(코): 후면이 아니고 좌우 진행 성분이 있으면 머리에서 진행방향으로 짧게 돌출.
+  // 순수 측면(LEFT↔RIGHT)·전면 대각은 머리·몸통이 대칭이라 발끝만으론 좌우 구분이 약함 →
+  // 모델이 facing을 안정적으로 읽도록 코를 추가. 정면/후면(walkX≈0)은 머리색으로 이미 구분.
+  if (!isBack && Math.abs(walkX) > 0.3) {
+    const nz = walkX >= 0 ? 1 : -1;
+    elements.push(line(CX + nz * HEAD_R * 0.4, HEAD_Y, CX + nz * (HEAD_R + 8), HEAD_Y, headColor, 6));
+  }
+
   // 목 + 어깨 가로선
   elements.push(line(CX, NECK_Y, CX, SHOULDER_Y, "#f0c080", 4));
   elements.push(line(CX - 20, SHOULDER_Y, CX + 20, SHOULDER_Y, "#f0c080", 4));
