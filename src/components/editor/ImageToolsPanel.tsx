@@ -60,13 +60,20 @@ export function ImageToolsPanel({
   const [targetW, setTargetW] = useState(imageWidth);
   const [targetH, setTargetH] = useState(imageHeight);
   const [opacity, setOpacity] = useState(100);
+  const initialOpacityRef = useRef(100);
 
   // 패널 열릴 때 원본 이미지의 실제 평균 알파값으로 초기화
   useEffect(() => {
     fetch(`/api/images/${generationId}/opacity`)
       .then(r => r.json())
-      .then((d: { opacity: number }) => setOpacity(d.opacity))
-      .catch(() => setOpacity(100));
+      .then((d: { opacity: number }) => {
+        initialOpacityRef.current = d.opacity;
+        setOpacity(d.opacity);
+      })
+      .catch(() => {
+        initialOpacityRef.current = 100;
+        setOpacity(100);
+      });
   }, [generationId]);
   const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set());
   const [isCropping, setIsCropping] = useState(false);
@@ -84,6 +91,7 @@ export function ImageToolsPanel({
   const frameRef = useRef(computeFrame(imageWidth, imageHeight));
   const offsetRef = useRef({ x: 0, y: 0 });
   const scaleRef = useRef(1);
+  const opacityRef = useRef(opacity);
   const draggingRef = useRef(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
   const patternRef = useRef<CanvasPattern | null>(null);
@@ -122,9 +130,17 @@ export function ImageToolsPanel({
     ctx.fillStyle = "#111";
     ctx.fillRect(0, 0, CW, CH);
 
-    // Image
+    // 프레임 내부 체커보드 (이미지 투명 영역 / 빈 letterbox 표시)
+    if (patternRef.current) {
+      ctx.fillStyle = patternRef.current;
+      ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
+    }
+
+    // Image (globalAlpha 로 투명도 실시간 미리보기)
     if (img) {
+      ctx.globalAlpha = opacityRef.current / 100;
       ctx.drawImage(img, ox, oy, imageWidth * s, imageHeight * s);
+      ctx.globalAlpha = 1;
     }
 
     // Dark overlay outside frame (4 rects)
@@ -172,10 +188,11 @@ export function ImageToolsPanel({
     ctx.fillText(label, fr.x + 6, fr.y + 14);
   }, [imageWidth, imageHeight, targetW, targetH]);
 
-  // Init transform: scale image to cover the frame, center it
+  // Init transform: 캔버스 위치/스케일 + 투명도 초기화
   const initTransform = useCallback(() => {
+    setOpacity(initialOpacityRef.current);
     frameRef.current = frame;
-    const s = Math.max(frame.w / imageWidth, frame.h / imageHeight);
+    const s = Math.min(frame.w / imageWidth, frame.h / imageHeight);
     scaleRef.current = s;
     offsetRef.current = {
       x: frame.x + (frame.w - imageWidth * s) / 2,
@@ -188,6 +205,12 @@ export function ImageToolsPanel({
   useEffect(() => {
     initTransform();
   }, [initTransform]);
+
+  // opacity 변경 시 ref 업데이트 + 즉시 재렌더
+  useEffect(() => {
+    opacityRef.current = opacity;
+    draw();
+  }, [opacity, draw]);
 
   // Load image once
   useEffect(() => {
@@ -257,10 +280,19 @@ export function ImageToolsPanel({
     const fr = frameRef.current;
     const s = scaleRef.current;
     const { x: ox, y: oy } = offsetRef.current;
-    const srcX = (fr.x - ox) / s;
-    const srcY = (fr.y - oy) / s;
-    const srcW = fr.w / s;
-    const srcH = fr.h / s;
+    // 프레임이 이미지 경계를 벗어나는 경우(축소 등) 이미지 범위로 clamp
+    const rawX = (fr.x - ox) / s;
+    const rawY = (fr.y - oy) / s;
+    const rawW = fr.w / s;
+    const rawH = fr.h / s;
+    const x1 = Math.max(0, rawX);
+    const y1 = Math.max(0, rawY);
+    const x2 = Math.min(imageWidth, rawX + rawW);
+    const y2 = Math.min(imageHeight, rawY + rawH);
+    const srcX = x1;
+    const srcY = y1;
+    const srcW = Math.max(1, x2 - x1);
+    const srcH = Math.max(1, y2 - y1);
     setIsCropping(true);
     try {
       const filters: FilterArg[] = POST_FILTER_DEFS

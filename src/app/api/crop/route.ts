@@ -28,45 +28,23 @@ export async function POST(req: NextRequest) {
   const imgW = srcMeta.width ?? 1;
   const imgH = srcMeta.height ?? 1;
 
-  const frameW = Math.max(1, Math.round(srcW));
-  const frameH = Math.max(1, Math.round(srcH));
   const outW = Math.max(1, targetW);
   const outH = Math.max(1, targetH);
 
-  // Region of the source image that intersects with the frame
-  const pasteX = Math.round(Math.max(0, -srcX));
-  const pasteY = Math.round(Math.max(0, -srcY));
-  const clipLeft = Math.max(0, Math.round(srcX));
-  const clipTop = Math.max(0, Math.round(srcY));
-  const clipRight = Math.min(Math.round(srcX + srcW), imgW);
-  const clipBottom = Math.min(Math.round(srcY + srcH), imgH);
-  const clipW = Math.max(0, clipRight - clipLeft);
-  const clipH = Math.max(0, clipBottom - clipTop);
+  // 클라이언트에서 이미 [0, imgW] × [0, imgH] 로 clamping 되어 오므로 단순 extract + resize
+  const left = Math.max(0, Math.min(Math.round(srcX), imgW - 1));
+  const top  = Math.max(0, Math.min(Math.round(srcY), imgH - 1));
+  const extractW = Math.max(1, Math.min(Math.round(srcW), imgW - left));
+  const extractH = Math.max(1, Math.min(Math.round(srcH), imgH - top));
 
   const newId = newGenerationId();
   const outPath = path.join(IMAGES_DIR, `${newId}.png`);
 
-  if (clipW <= 0 || clipH <= 0) {
-    // Frame entirely outside image — blank transparent canvas
-    await sharp({
-      create: { width: frameW, height: frameH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-    })
-      .resize(outW, outH, { fit: "fill" })
-      .png()
-      .toFile(outPath);
-  } else {
-    const clipped = await sharp(srcPath)
-      .extract({ left: clipLeft, top: clipTop, width: clipW, height: clipH })
-      .toBuffer();
-
-    await sharp({
-      create: { width: frameW, height: frameH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-    })
-      .composite([{ input: clipped, left: pasteX, top: pasteY }])
-      .resize(outW, outH, { fit: "fill" })
-      .png()
-      .toFile(outPath);
-  }
+  await sharp(srcPath)
+    .extract({ left, top, width: extractW, height: extractH })
+    .resize(outW, outH, { fit: "fill" })
+    .png()
+    .toFile(outPath);
 
   // Apply opacity as absolute target: normalize current average alpha → target %.
   // factor = targetAvg / currentAvg → no change when slider matches current state.

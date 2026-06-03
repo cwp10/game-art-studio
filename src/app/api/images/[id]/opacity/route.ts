@@ -22,11 +22,17 @@ export async function GET(
       .toBuffer({ resolveWithObject: true });
 
     let totalAlpha = 0;
-    const pixelCount = info.width * info.height;
+    let visibleCount = 0;
     for (let i = 3; i < data.length; i += 4) {
-      totalAlpha += data[i];
+      if (data[i] > 10) { // 투명 배경(anti-aliasing 포함) 제외
+        totalAlpha += data[i];
+        visibleCount++;
+      }
     }
-    const opacity = Math.round((totalAlpha / pixelCount / 255) * 100);
+    // 불투명 픽셀이 없으면(완전 투명 이미지) 100% 반환
+    const opacity = visibleCount > 0
+      ? Math.round((totalAlpha / visibleCount / 255) * 100)
+      : 100;
     return NextResponse.json({ opacity });
   } catch {
     return NextResponse.json({ opacity: 100 });
