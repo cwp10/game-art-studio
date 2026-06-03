@@ -10,10 +10,10 @@
 - **이미지 엔진** — `codex exec` spawn → imagegen 스킬 자동 발동 → gpt-image (imagegen 2.0)
 - **오케스트레이션** — `claude -p --output-format stream-json` + MCP stdio 서버. 채팅 한 줄이
   Claude CLI → MCP 도구 → Codex CLI 체인을 타고 이미지를 만든다.
-- **도구 8종** — generate / spritesheet / edit / upscale / resize / remove_bg / inpaint / reskin
-  (MCP 도구로 노출, Claude 가 라우팅)
-- **에디터** — 마스크 인페인트 · 레이어 분리 · 스프라이트시트(방향/onion/anchor/atlas) · 리스킨,
-  16:10 viewbox + zoom/pan 캔버스
+- **도구 11종** — generate / spritesheet / emote_sheet / tileset / normal_map / edit / upscale /
+  resize / remove_bg / inpaint / reskin (MCP 도구로 노출, Claude 가 라우팅)
+- **에디터** — 마스크 인페인트 · 레이어 분리 · 스프라이트시트(방향/onion/anchor/atlas) · 리스킨 ·
+  노멀맵 · 이미지 도구(크롭·투명도·실시간 필터 슬라이더), 16:10 viewbox + zoom/pan 캔버스
 - **라이브러리** — 스타일 프리셋, 프롬프트 라이브러리, 갤러리(검색·필터), 비교 시트
 - **저장** — 이미지는 `./data/images/`, 썸네일은 `./data/thumbnails/`(on-demand), 메타는
   SQLite (`./data/app.db`, WAL 모드). 세션 삭제 시 그 세션 이미지 정리, `pnpm cleanup` 으로 누적 정리.
@@ -63,14 +63,15 @@ pnpm cleanup --days=30     # 보존 기간 조절
 src/
 ├── app/                  # Next.js App Router
 │   ├── api/              # chat, sessions, generations, images, thumbnails,
-│   │                     #   layers, layer-parts, presets, prompts, reskin,
-│   │                     #   suggest, upload, logs
+│   │                     #   layers, layer-parts, presets, prompts, reskin, reskin-suggest,
+│   │                     #   suggest, sprite-suggest, sprite-frame, normal-map,
+│   │                     #   crop, filter, describe, export, upload, logs, status, cleanup
 │   ├── page.tsx          # ChatLayout
 │   └── globals.css       # 다크 팔레트
 ├── proxy.ts              # 로컬 전용 host 가드 (/api/*)
 ├── components/
-│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList
-│   ├── editor/           # MaskCanvas / LayerCanvas / SpriteCanvas / SpriteGenPanel / ReskinPanel / useZoomPan
+│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList / StatusButton
+│   ├── editor/           # MaskCanvas / LayerCanvas / SpriteCanvas / SpriteGenPanel / ReskinPanel / NormalMapPanel / ImageToolsPanel / useZoomPan
 │   └── library/          # GallerySheet / CompareSheet / PromptLibrarySheet / StylePresetPicker / LogsPanel
 ├── lib/
 │   ├── db/               # better-sqlite3 클라이언트 + repo + schema.sql + migrate
@@ -106,26 +107,6 @@ data/                     # gitignored 런타임
 └── logs/{claude,codex,mcp}-*.log
 ```
 
-## 진행 상태
-
-```
-✅ M0  Codex imagegen probe        — `codex exec` 자동 발동 검증 (66s, 1254×1254)
-✅ M1  ImageBackend 단독 검증       — scripts/gen.ts 동작
-✅ M2  최소 채팅 UI (Claude 미도입)  — SSE 이벤트 시퀀스 정확, E2E 통과
-✅ M3  Claude CLI + MCP 오케스트레이션 — stream-json 파싱 / 도구 라우팅 / 세션 resume
-✅ M4  편집·스프라이트 도구 확장      — edit/upscale/resize/remove_bg/inpaint/spritesheet/reskin
-✅ M5  프롬프트 라이브러리 / 스타일 프리셋
-✅ M6  갤러리·검색 + 에디터(마스크·레이어·스프라이트시트·리스킨)·비교
-```
-
-추가 작업:
-
-```
-✅ 스프라이트시트 후처리 개편 (셀 정규화 · chroma-key green/magenta · 방향/gait/onion/atlas)
-✅ data 누적 정리 (세션 삭제 cascade · on-demand 썸네일 · pnpm cleanup)
-```
-
-자세한 설계는 `~/.claude/plans/https-www-aetherforgeai-com-ko-tutorial-breezy-puffin.md` 참고.
 
 ## 의식적 트레이드오프
 
