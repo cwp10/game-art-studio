@@ -822,7 +822,8 @@ export function ChatLayout() {
       dispatch({
         type: "add_result_card",
         tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-        userText: payload.prompt || "🖼 갤러리에서 추가",
+        // gallery-insert API(route.ts)의 영속화와 동일하게 80자 요약 — 라이브/리로드 일관.
+        userText: payload.prompt?.slice(0, 80) || "🖼 갤러리에서 추가",
         generationId: payload.generationId,
         width: payload.width,
         height: payload.height,
