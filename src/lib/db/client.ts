@@ -36,6 +36,10 @@ function init(): DbInstance {
   db.exec(schemaSql);
   // 스키마 보장 후 버전 마이그레이션 (user_version 가드 + 백업).
   runMigrations(db);
+  // 마이그레이션 후 스키마 버전 확인으로 캐시 무효화 — 다른 프로세스가 테이블을
+  // 재생성(CHECK enum 확장)한 경우 better-sqlite3 의 stale 한 prepared statement /
+  // 스키마 캐시가 오래된 CHECK constraint 를 참조하지 않도록 강제로 재로드한다.
+  db.pragma("data_version");
   // builtin style preset seed — name UNIQUE + INSERT OR IGNORE 라 멱등.
   // 사용자가 builtin 의 prompt_suffix 를 수정하면 보존됨.
   seedBuiltinPresets(db);

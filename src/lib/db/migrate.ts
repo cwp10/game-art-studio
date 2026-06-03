@@ -12,23 +12,32 @@ import { DB_PATH } from "@/lib/util/paths";
  * 되돌리기 어려운 스키마 변경이므로 v1 실행 전 data/app.db 를 .bak-v1 로 백업한다.
  */
 export function runMigrations(db: Database.Database): void {
-  const v = db.pragma("user_version", { simple: true }) as number;
-
-  if (v < 1) {
+  // 각 단계마다 user_version 을 다시 읽는다. 별도 프로세스(Next/MCP)가 WAL 로 같은
+  // DB 를 공유하므로, 한 프로세스가 이미 마이그레이션을 끝낸 뒤 다른 프로세스가
+  // 시작 시점의 stale 한 version 으로 불필요하게 재실행하는 것을 방지한다.
+  if ((db.pragma("user_version", { simple: true }) as number) < 1) {
     migrateV1(db);
     db.pragma("user_version = 1");
   }
-  if (v < 2) {
+  if ((db.pragma("user_version", { simple: true }) as number) < 2) {
     migrateV2(db);
     db.pragma("user_version = 2");
   }
-  if (v < 3) {
+  if ((db.pragma("user_version", { simple: true }) as number) < 3) {
     migrateV3(db);
     db.pragma("user_version = 3");
   }
-  if (v < 4) {
+  if ((db.pragma("user_version", { simple: true }) as number) < 4) {
     migrateV4(db);
     db.pragma("user_version = 4");
+  }
+  if ((db.pragma("user_version", { simple: true }) as number) < 5) {
+    migrateV5(db);
+    db.pragma("user_version = 5");
+  }
+  if ((db.pragma("user_version", { simple: true }) as number) < 6) {
+    migrateV6(db);
+    db.pragma("user_version = 6");
   }
 }
 
@@ -178,6 +187,110 @@ function migrateV3(db: Database.Database): void {
         message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
         kind              TEXT NOT NULL
                           CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','external','reskin','resize')),
+        prompt            TEXT,
+        negative_prompt   TEXT,
+        preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,
+        input_image_ids   TEXT,
+        params            TEXT,
+        image_path        TEXT NOT NULL,
+        thumbnail_path    TEXT,
+        width             INTEGER,
+        height            INTEGER,
+        backend           TEXT NOT NULL DEFAULT 'codex_exec'
+                          CHECK(backend IN ('codex_exec','codex_pty','external','direct')),
+        created_at        INTEGER NOT NULL
+      );
+
+      INSERT INTO generations_new
+      SELECT id, session_id, message_id, kind, prompt, negative_prompt, preset_id,
+        input_image_ids, params, image_path, thumbnail_path, width, height, backend, created_at
+      FROM generations;
+
+      DROP TABLE generations;
+      ALTER TABLE generations_new RENAME TO generations;
+
+      CREATE INDEX IF NOT EXISTS idx_generations_session ON generations(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_generations_kind ON generations(kind, created_at DESC);
+
+      COMMIT;
+    `);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+/**
+ * v6: generations.kind CHECK 에 'layer_extract' 추가 (v5 가 layer_extract 없이 실행된 DB 수정).
+ */
+function migrateV6(db: Database.Database): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE generations_new (
+        id                TEXT PRIMARY KEY,
+        session_id        TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        kind              TEXT NOT NULL
+                          CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','layer_extract','external','reskin','resize','emote_sheet','tileset','normal_map')),
+        prompt            TEXT,
+        negative_prompt   TEXT,
+        preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,
+        input_image_ids   TEXT,
+        params            TEXT,
+        image_path        TEXT NOT NULL,
+        thumbnail_path    TEXT,
+        width             INTEGER,
+        height            INTEGER,
+        backend           TEXT NOT NULL DEFAULT 'codex_exec'
+                          CHECK(backend IN ('codex_exec','codex_pty','external','direct')),
+        created_at        INTEGER NOT NULL
+      );
+
+      INSERT INTO generations_new
+      SELECT id, session_id, message_id, kind, prompt, negative_prompt, preset_id,
+        input_image_ids, params, image_path, thumbnail_path, width, height, backend, created_at
+      FROM generations;
+
+      DROP TABLE generations;
+      ALTER TABLE generations_new RENAME TO generations;
+
+      CREATE INDEX IF NOT EXISTS idx_generations_session ON generations(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_generations_kind ON generations(kind, created_at DESC);
+
+      COMMIT;
+    `);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+/**
+ * v5: generations.kind CHECK 에 'layer_extract' 추가
+ * (inpaint_image 의 extractObject=true 경로 — 마스크 영역 오브젝트를 투명 배경으로 추출).
+ *
+ * SQLite 는 CHECK 변경에 ALTER 가 불가하므로 테이블 재생성 방식. 데이터 변형은
+ * 없고 CHECK 제약만 확장하므로 straight copy 한다.
+ */
+function migrateV5(db: Database.Database): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE generations_new (
+        id                TEXT PRIMARY KEY,
+        session_id        TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        kind              TEXT NOT NULL
+                          CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','layer_extract','external','reskin','resize','emote_sheet','tileset','normal_map')),
         prompt            TEXT,
         negative_prompt   TEXT,
         preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,

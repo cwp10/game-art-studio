@@ -4,7 +4,7 @@ import { Brush, ChevronDown, Edit3, Eraser, Loader2, Maximize2, RotateCcw, Sciss
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listGenerations } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
-import { fitBox, rectRatioPoint, useZoomPan, ZoomPanControls } from "./useZoomPan";
+import { rectRatioPoint, useZoomPan, ZoomPanControls } from "./useZoomPan";
 
 /**
  * MaskCanvas — 인페인트 마스크를 그리는 작은 캔버스 + 컨트롤.
@@ -134,11 +134,11 @@ export function MaskCanvas({
       if (strokesLenRef.current > 0 || drawingRef.current) return;
       // 폭: 패딩 고려 24px 빼기. (p-3 좌우 합)
       const w = Math.max(200, sizer.clientWidth - 24);
-      // 높이: sizer.clientHeight 에서 뷰박스 아래 전체(belowRef)를 한 번에 측정해 뺀다.
-      // belowRef 는 toolbar·prompt·참조이미지·리사이즈 섹션을 모두 포함 → reserved 정확도 보장.
-      // 80 = p-3 상하 패딩(24) + 안내 텍스트(20) + gap-3 × 2(24) + 안전 마진(12).
-      const below = belowRef.current?.getBoundingClientRect().height ?? 400;
-      const h = Math.max(200, sizer.clientHeight - below - 80);
+      // 높이: LayerCanvas 와 동일한 640px 기준 공식 (16:10 제약 제거).
+      // 폭(w)이 아닌 640px 을 기준으로 비율 계산 → 높이 일치.
+      const h = imageWidth >= imageHeight
+        ? Math.round((640 * imageHeight) / imageWidth)
+        : 640;
       setAvail(prev => (prev?.w === w && prev?.h === h ? prev : { w, h }));
     };
 
@@ -162,12 +162,12 @@ export function MaskCanvas({
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
   }, [zp.zoomIn, zp.zoomOut]);
-  const { viewW, viewH, fitScale, displayW, displayH } = fitBox(
-    avail?.w ?? maxDisplayPx,
-    avail?.h ?? (maxDisplayPx * 10) / 16,
-    imageWidth,
-    imageHeight,
-  );
+  // fitBox 의 16:10 비율 제한 없이 직접 계산 — LayerCanvas 와 높이 일치.
+  const viewW = avail?.w ?? maxDisplayPx;
+  const viewH = avail?.h ?? Math.round((640 * imageHeight) / imageWidth);
+  const fitScale = Math.min(viewW / imageWidth, viewH / imageHeight);
+  const displayW = Math.max(1, Math.round(imageWidth * fitScale));
+  const displayH = Math.max(1, Math.round(imageHeight * fitScale));
   const scale = fitScale;
 
   // 1-a. 원본 이미지 load — imageUrl 변경 시만. (displayW/H 변경에 따른 redraw 와 분리해
@@ -199,9 +199,6 @@ export function MaskCanvas({
     const ctx = c.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, displayW, displayH);
-    // 투명 영역이 어두운 배경색으로 보이는 것을 방지: 이미지 아래 흰 배경을 깔아 투명 픽셀을 흰색으로 표시.
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, displayW, displayH);
     ctx.drawImage(img, 0, 0, displayW, displayH);
   }, [imgLoaded, displayW, displayH]);
 
@@ -334,7 +331,7 @@ export function MaskCanvas({
 
         {/* 16:10 뷰박스 — 이미지를 contain-fit + 줌/팬. overflow-hidden 으로 줌 넘침 클립. */}
         <div
-          className="relative mx-auto shrink-0 select-none overflow-hidden rounded-lg border border-border bg-bg-app"
+          className="relative mx-auto shrink-0 select-none overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#3a3a3a_0%_50%)_50%/14px_14px]"
           style={{ width: viewW, height: viewH }}
         >
           {/* 캔버스 스택 — 뷰박스 중앙에 두고 translate+scale 로 줌/팬. */}
@@ -351,7 +348,7 @@ export function MaskCanvas({
           >
             <canvas
               ref={baseRef}
-              className="pointer-events-none absolute inset-0 bg-bg-card"
+              className="pointer-events-none absolute inset-0"
               width={displayW}
               height={displayH}
             />

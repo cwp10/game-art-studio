@@ -118,6 +118,35 @@ function buildNaturalPrompt(job: ImageJob): string {
         `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
         `the post-processing pipeline will key out the green. ${job.prompt}`
       );
+    case "layer_extract": {
+      // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
+      const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
+      if (hasMask) {
+        return (
+          PROMPT_HEADER +
+          `OBJECT EXTRACTION. I am attaching TWO images: ` +
+          `(1) the original image, and (2) a mask where the RED region marks the object to extract.\n\n` +
+          `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background. ` +
+          `Show ONLY the extracted object — infer its complete and accurate boundary ` +
+          `(the brush stroke is approximate; use visual context to find the true edges). ` +
+          `Preserve the object's original colors, shading, and art style exactly. ` +
+          `Everything outside the extracted object must be solid #00ff00 green with no gradients or shadows. ` +
+          `After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+        );
+      }
+      // 마스크 없음: job.prompt 가 부위명 (예: "머리띠", "눈", "몸통")
+      return (
+        PROMPT_HEADER +
+        `OBJECT EXTRACTION. From the attached image, extract "${job.prompt}"` +
+        ` and place it on a flat solid #00ff00 chroma-key background.\n\n` +
+        `Find and extract ONLY the "${job.prompt}" — identify its exact location and boundaries in the image.` +
+        ` If any part of "${job.prompt}" is hidden or occluded by other elements,` +
+        ` naturally recreate those hidden parts so the extracted result looks complete.` +
+        ` Preserve the original art style, colors, shading, and details exactly.` +
+        ` Everything outside the extracted "${job.prompt}" must be solid #00ff00 green with no gradients or shadows.` +
+        ` After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+      );
+    }
     case "spritesheet": {
       // 이미지 첨부 순서 (server.ts overrideInputPaths 기준):
       //   inputCount === 1 → [0] 그리드 템플릿만
@@ -517,9 +546,9 @@ export class CodexExecBackend implements ImageBackend {
     await fs.mkdir(IMAGES_DIR, { recursive: true });
     await fs.rename(pickedPath, destPath);
 
-    // remove_bg 후처리: prompt 에서 #00ff00 chroma-key 위에 다시 그리도록 지시했으므로
-    // 그 픽셀들을 투명화. anti-aliased fringe 까지 잡으려고 넉넉한 threshold 사용.
-    if (job.kind === "remove_bg") {
+    // remove_bg/layer_extract 후처리: prompt 에서 #00ff00 chroma-key 위에 다시 그리도록
+    // 지시했으므로 그 픽셀들을 투명화. anti-aliased fringe 까지 잡으려고 넉넉한 threshold 사용.
+    if (job.kind === "remove_bg" || job.kind === "layer_extract") {
       onProgress("recovering", "chroma key post-process");
       await chromaKeyGreen(destPath);
     }

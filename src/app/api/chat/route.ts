@@ -139,6 +139,9 @@ async function runChat(
   const markers: string[] = [];
   for (const id of attachIds) markers.push(`[reference: ${id}]`);
   if (maskId) markers.push(`[mask: ${maskId}]`);
+  // extractObject — Claude 가 inpaint_image 의 extractObject=true 로 사용.
+  // 마스크가 있으면 마스크 영역 오브젝트를, 없으면 prompt 의 부위 이름을 투명 배경으로 추출.
+  if (body.extractObject === true) markers.push(`[extract]`);
   const messageText = markers.length ? markers.join(" ") + "\n" + body.message : body.message;
   const userMsg = createMessage({
     session_id: sessionId,

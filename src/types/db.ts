@@ -38,6 +38,7 @@ export type GenerationKind =
   | "spritesheet"
   | "mask"
   | "layer"
+  | "layer_extract"
   | "reskin"
   | "resize"
   | "external"

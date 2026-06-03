@@ -29,7 +29,6 @@ import {
   streamChat,
   suggestPrompts,
   uploadImage,
-  uploadLayers,
   uploadMask,
 } from "@/lib/api/client";
 import type { StylePreset } from "@/types/db";
@@ -47,12 +46,6 @@ function inferSubjectModeFromPrompt(prompt?: string): "character" | "object" | u
   if (/캐릭터|character|캐릭|인물|전사|마법사|궁수|기사|영웅|hero|warrior|knight|mage|wizard|archer/.test(p)) return "character";
   return undefined;
 }
-
-const COLOR_KO: Record<string, string> = {
-  red: "빨강", green: "초록", blue: "파랑", yellow: "노랑",
-  cyan: "청록", magenta: "자홍", orange: "주황", purple: "보라",
-};
-function colorKo(k: string): string { return COLOR_KO[k] ?? k; }
 
 type EditTarget = {
   generationId: string;
@@ -86,6 +79,8 @@ export function ChatLayout() {
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
   // Composer attachment — 업로드/카드 액션 직후 set. seq 카운터로 동일 generationId 도 새로 trigger.
   const [composerAttachment, setComposerAttachment] = useState<ComposerAttachment | null>(null);
+  // 레이어 분리 패널의 누적 추출 결과 — LayerCanvas 결과 그리드에 표시. layer 편집 진입 시 초기화.
+  const [layerResults, setLayerResults] = useState<Array<{ id: string; url: string; prompt: string }>>([]);
   // preset cache — handleSend 가 suffix 결합에 사용.
   const presetCache = useRef<Map<string, StylePreset>>(new Map());
   // 항상 최신 activeSessionId 를 가리킴 — handleSend 클로저 스테일 방지.
@@ -289,6 +284,7 @@ export function ChatLayout() {
       opts?: {
         attachmentGenerationIds?: string[];
         maskGenerationId?: string;
+        extractObject?: boolean;
         presetId?: string;
         count?: number;
       },
@@ -338,6 +334,7 @@ export function ChatLayout() {
             message: finalText,
             attachmentGenerationIds: opts?.attachmentGenerationIds,
             maskGenerationId: opts?.maskGenerationId,
+            extractObject: opts?.extractObject,
           },
           event => {
             // 세션이 전환됐거나 새 전송이 시작됐으면 이 스트림은 더 이상 화면 주인이 아님 — 무시.
@@ -518,6 +515,7 @@ export function ChatLayout() {
           height: payload.height,
           kind: payload.kind,
         });
+        if (mode === "layer") setLayerResults([]);
       }
     },
     [handleSend],
@@ -661,43 +659,64 @@ export function ChatLayout() {
     [handleSend],
   );
 
-  // LayerCanvas 가 submit 한 결과 처리.
-  //  - mode='crop': N개 색별 PNG → /api/layers → N개 generation 행. result list 를 그대로
-  //    돌려주면 LayerCanvas 가 result view 로 표시.
-  //  - mode='inpaint': N개 색별 binary mask PNG → 색별 1회씩 /api/upload + /api/chat 직렬
-  //    호출 (codex inpaint_image 가 가려진 영역을 자연스럽게 복원). LayerCanvas 즉시 닫히고
-  //    결과 카드는 chat 에 순차 누적.
+  // LayerCanvas 가 submit 한 부위 이름들 → 부위별로 텍스트 기반 추출을 직렬 호출.
+  // 각 부위마다 handleSend(extractObject:true, 마스크 없음) → 라우트가 [extract] 마커 주입 →
+  // Claude 가 inpaint_image(extractObject=true, prompt=부위명) 호출 → 투명 배경 PNG 추출.
+  // 처리 중 LayerCanvas 는 busy 상태로 유지. 완료 후 사용자가 직접 닫는다.
   const handleLayerSplit = useCallback(
-    async ({
-      mode,
-      layers,
-    }: {
-      mode: "crop" | "inpaint";
-      layers: Array<{ colorLabel: string; name: string; dataUrl: string }>;
-    }) => {
-      if (!editing || editing.mode !== "layer") return [];
-      if (mode === "crop") {
-        return uploadLayers(editing.generationId, layers);
-      }
+    async ({ parts }: { parts: string[] }) => {
+      if (!editing || editing.mode !== "layer") return;
       const parentId = editing.generationId;
-      setEditing(null); // 패널 닫고 chat 으로 시선 이동
-      for (const layer of layers) {
-        const part = layer.name?.trim() || colorKo(layer.colorLabel);
+      for (const part of parts) {
         try {
-          const maskId = await uploadMask(parentId, layer.dataUrl);
-          await handleSend(
-            `${part} 영역만 남기고 빨간색으로 표시된 다른 부위 영역을 ${part}의 자연스러운 연속(같은 색·질감)으로 복원해줘.`,
-            { attachmentGenerationIds: [parentId], maskGenerationId: maskId },
+          const r = await handleSend(
+            `${part} 레이어 추출`,
+            {
+              attachmentGenerationIds: [parentId],
+              extractObject: true,
+              // maskGenerationId 없음 — 텍스트 기반 추출
+            },
           );
+          if (r) {
+            setLayerResults(prev => [
+              ...prev,
+              { id: r.generationId, url: `/api/images/${r.generationId}`, prompt: part },
+            ]);
+          }
         } catch (e) {
-          console.error("[layer-inpaint]", layer.colorLabel, e);
+          console.error("[layer-extract]", part, e);
           dispatch({
             type: "sse",
-            event: { type: "error", message: `${layer.colorLabel}: ${(e as Error).message}` },
+            event: { type: "error", message: `${part}: ${(e as Error).message}` },
           });
         }
       }
-      return [];
+    },
+    [editing, handleSend],
+  );
+
+  // LayerCanvas "브러쉬로 분리" — 사용자가 칠한 마스크를 업로드한 뒤 부위명과 함께 추출.
+  // 마스크 기반(maskGenerationId)이라는 점만 handleLayerSplit 과 다르며, 결과 수집은 동일.
+  const handleLayerBrush = useCallback(
+    async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
+      if (!editing || editing.mode !== "layer") return;
+      const parentId = editing.generationId;
+      try {
+        const maskId = await uploadMask(parentId, maskDataUrl);
+        const r = await handleSend(
+          `${prompt} 레이어 추출`,
+          { attachmentGenerationIds: [parentId], maskGenerationId: maskId, extractObject: true },
+        );
+        if (r) {
+          setLayerResults(prev => [
+            ...prev,
+            { id: r.generationId, url: `/api/images/${r.generationId}`, prompt },
+          ]);
+        }
+      } catch (e) {
+        console.error("[layer-brush]", e);
+        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+      }
     },
     [editing, handleSend],
   );
@@ -946,7 +965,9 @@ export function ChatLayout() {
             imageWidth={editing.width}
             imageHeight={editing.height}
             busy={state.generating}
+            results={layerResults}
             onSubmit={handleLayerSplit}
+            onBrushSubmit={handleLayerBrush}
             onCancel={() => setEditing(null)}
           />
         </div>
