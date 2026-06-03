@@ -1074,12 +1074,37 @@ export function ChatLayout() {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-// 카테고리별 예시 1개씩: 캐릭터 / 배경 / 이펙트 / 아이템.
-const SEED_PROMPTS = [
-  "픽셀 아트 여전사, 걷기 스프라이트시트 8프레임, 측면, 투명 배경",
-  "슬라임 몬스터 점프 애니메이션 6프레임, 도트 아트, 루프, 투명 배경",
-  "던전 지하 석조 배경 타일셋, 도트 아트, 횡스크롤 플랫포머",
-  "판타지 RPG 아이템 아이콘 8종, 검·방패·물약·열쇠·반지·왕관·코인·두루마리, 픽셀 아트",
+// 칸 순서 고정: [캐릭터, 배경, 이펙트, 오브젝트]. 각 칸 내용은 새 세션 진입마다
+// 해당 카테고리 풀에서 랜덤 1개씩 제시(고퀄 일러스트 톤). EmptyState 참고.
+const SEED_POOLS: string[][] = [
+  // 캐릭터
+  [
+    "달빛 아래 은빛 머리 엘프 검사, 고퀄리티 판타지 캐릭터 일러스트, 부드러운 조명",
+    "붉은 망토를 두른 여마법사, 디테일한 캐릭터 일러스트, 신비로운 분위기",
+    "기계 의수를 단 사이버펑크 현상금 사냥꾼, 고퀄 일러스트, 네온 조명",
+    "꽃밭에 앉은 동양풍 소녀, 부드러운 수채 일러스트, 따뜻한 햇살",
+  ],
+  // 배경
+  [
+    "노을 지는 해안 절벽의 외딴 등대, 시네마틱 디지털 페인팅, 따뜻한 색감",
+    "안개 낀 고대 숲속 폐허, 판타지 풍경 일러스트, 신비로운 빛줄기",
+    "비 내리는 네온 사이버펑크 도시 거리, 시네마틱 일러스트, 젖은 노면 반사광",
+    "구름 위에 떠 있는 천공의 성, 장엄한 판타지 풍경, 황금빛 노을",
+  ],
+  // 이펙트
+  [
+    "화염 폭발 마법 이펙트, 역동적인 일러스트, 강렬한 빛과 불티",
+    "푸른 회복 마법 오라, 빛나는 입자 이펙트, 환상적인 일러스트",
+    "번개 마법 임팩트, 역동적인 전기 이펙트, 시네마틱 일러스트",
+    "흩날리는 벚꽃잎과 바람 이펙트, 부드러운 일러스트, 봄 감성",
+  ],
+  // 오브젝트
+  [
+    "빛나는 고대 마법 검, 디테일한 판타지 오브젝트 일러스트, 어두운 배경",
+    "보석이 박힌 황금 왕관, 정교한 일러스트, 부드러운 스튜디오 조명",
+    "낡은 가죽 표지의 마법서, 분위기 있는 오브젝트 일러스트, 촛불 조명",
+    "신비로운 빛을 내는 마법 물약 병, 디테일한 일러스트, 어두운 배경",
+  ],
 ];
 
 function EmptyState({
@@ -1090,6 +1115,11 @@ function EmptyState({
   onUploadImage: (file: File) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  // 서버/첫 렌더는 결정적(각 카테고리 첫 항목)으로 두고, 마운트 후 랜덤 교체 — hydration mismatch 방지.
+  const [picks, setPicks] = useState<string[]>(() => SEED_POOLS.map(pool => pool[0]));
+  useEffect(() => {
+    setPicks(SEED_POOLS.map(pool => pool[Math.floor(Math.random() * pool.length)]));
+  }, []);
   return (
     <div className="mx-auto flex h-full max-w-[680px] flex-col items-center justify-center gap-6 px-8 text-center">
       <div className="text-5xl">🎨</div>
@@ -1123,7 +1153,7 @@ function EmptyState({
       </button>
 
       <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
-        {SEED_PROMPTS.map(p => (
+        {picks.map(p => (
           <button
             key={p}
             onClick={() => onPick(p)}
