@@ -491,7 +491,7 @@ export function SpriteGenPanel({
                     onClick={() => { setDirOpen(o => !o); setFrameOpen(false); }}
                     className="flex h-7 items-center gap-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
                   >
-                    ↻ {DIRECTION_LABELS[direction]}
+                    {DIRECTION_LABELS[direction]}
                   </button>
                   {dirOpen && (
                     <DirectionPopover
