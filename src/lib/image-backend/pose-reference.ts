@@ -199,9 +199,12 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     elements.push(line(hipX, HIP_Y, knee.x, knee.y, color, 6));
     elements.push(line(knee.x, knee.y, foot.x, footY, color, 5));
     elements.push(circle(knee.x, knee.y, 5, jointColor));
-    // 발끝: 측면은 진행방향(walkX 부호)으로, 정면/후면(walkX≈0)은 좌우 바깥으로.
+    // 발끝: 진행방향(walkX,walkY)의 스크린 방향으로 꺾는다 — 측면=수평, 대각선=대각
+    // (예: DOWN-RIGHT는 우하향). endpoint 각도(수직 기준): RIGHT=90°, DOWN-RIGHT=45°.
+    // walkY를 무시한 수평 발끝이 "대각으로 걷는데 발은 옆" 방향 불일치를 일으키던 문제 수정.
     if (Math.abs(walkX) > 0.3) {
-      const tip = endpoint(foot.x, footY, 90 + leg.swingAngle * 0.2, 14 * (walkX >= 0 ? 1 : -1));
+      const faceDeg = (Math.atan2(walkX, walkY) * 180) / Math.PI;
+      const tip = endpoint(foot.x, footY, faceDeg + leg.swingAngle * 0.2, 14);
       elements.push(line(foot.x, footY, tip.x, tip.y, color, 4));
     } else {
       // 발끝을 바깥쪽으로(왼발 왼쪽, 오른발 오른쪽) — 정면/후면 자연스러운 발 방향.
