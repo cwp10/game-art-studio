@@ -7,6 +7,7 @@ import {
   Edit3,
   Film,
   Grid3x3,
+  Image,
   Layers,
   Link2,
   Loader2,
@@ -26,6 +27,7 @@ type Action =
   | "resize"
   | "remove_bg"
   | "edit"
+  | "image_tools"
   | "layer_split"
   | "sprite_split"
   | "reskin"
@@ -176,6 +178,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               title="인페인트 — 영역을 brush 로 칠해서 부분 편집"
             >
               <Edit3 size={12} /> 편집
+            </button>
+            <button
+              onClick={() => onAction?.("image_tools")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="업스케일 · 크롭 · 배경 제거"
+            >
+              <Image size={12} /> 이미지
             </button>
             <button
               onClick={() => onAction?.("layer_split")}

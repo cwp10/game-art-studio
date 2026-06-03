@@ -16,6 +16,7 @@ type Props = {
       | "resize"
       | "remove_bg"
       | "edit"
+      | "image_tools"
       | "layer_split"
       | "sprite_split"
       | "reskin"

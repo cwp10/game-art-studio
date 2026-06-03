@@ -7,6 +7,7 @@ import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
+import { ImageToolsPanel, POST_FILTER_DEFS, type FilterArg } from "@/components/editor/ImageToolsPanel";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
@@ -61,6 +62,7 @@ type Editing =
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "a" | "b" | "c" } & EditTarget)
   | ({ mode: "normal_map" } & EditTarget)
+  | ({ mode: "image_tools" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -413,6 +415,7 @@ export function ChatLayout() {
         | "resize"
         | "remove_bg"
         | "edit"
+        | "image_tools"
         | "layer_split"
         | "sprite_split"
         | "reskin"
@@ -488,6 +491,16 @@ export function ChatLayout() {
           initialSubjectMode:
             payload.subjectMode ??
             inferSubjectModeFromPrompt(payload.prompt),
+        });
+      } else if (action === "image_tools" && payload.generationId && payload.width && payload.height) {
+        setSpriteGen(null);
+        setEditing({
+          mode: "image_tools",
+          generationId: payload.generationId,
+          imageUrl: `/api/images/${payload.generationId}`,
+          width: payload.width,
+          height: payload.height,
+          kind: payload.kind,
         });
       } else if (
         (action === "edit" ||
@@ -715,6 +728,51 @@ export function ChatLayout() {
         }
       } catch (e) {
         console.error("[layer-brush]", e);
+        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+      }
+    },
+    [editing, handleSend],
+  );
+
+  const handleImageCrop = useCallback(
+    async ({
+      srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters,
+    }: {
+      srcX: number; srcY: number; srcW: number; srcH: number;
+      targetW: number; targetH: number;
+      opacity: number;
+      filters: FilterArg[];
+    }) => {
+      if (!editing || editing.mode !== "image_tools") return;
+      const genId = editing.generationId;
+      try {
+        const resp = await fetch("/api/crop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ generationId: genId, srcX, srcY, srcW, srcH, targetW, targetH, opacity }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const result = await resp.json() as { generationId: string; width: number; height: number };
+        dispatch({
+          type: "add_result_card",
+          tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+          userText: "✂️ 크롭",
+          generationId: result.generationId,
+          width: result.width,
+          height: result.height,
+          kind: "resize",
+        });
+        // 선택된 필터를 POST_FILTER_DEFS 순서대로 순차 적용
+        let lastId = result.generationId;
+        for (const f of POST_FILTER_DEFS) {
+          const arg = filters.find(x => x.id === f.id);
+          if (arg?.prompt) {
+            const r = await handleSend(arg.prompt, { attachmentGenerationIds: [lastId] });
+            if (r) lastId = r.generationId;
+          }
+        }
+      } catch (e) {
+        console.error("[crop]", e);
         dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
       }
     },
@@ -968,6 +1026,20 @@ export function ChatLayout() {
             results={layerResults}
             onSubmit={handleLayerSplit}
             onBrushSubmit={handleLayerBrush}
+            onCancel={() => setEditing(null)}
+          />
+        </div>
+      )}
+      {editing?.mode === "image_tools" && (
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+          <ImageToolsPanel
+            key={editing.generationId}
+            generationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            imageWidth={editing.width}
+            imageHeight={editing.height}
+            busy={state.generating}
+            onCrop={handleImageCrop}
             onCancel={() => setEditing(null)}
           />
         </div>
