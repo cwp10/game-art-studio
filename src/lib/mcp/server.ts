@@ -46,7 +46,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { extractPoseGuideGrid, getCachedPoseRow } from "../image-backend/pose-reference.js";
+import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, type FrameAngle } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -1265,7 +1265,16 @@ async function buildSpritePrompt(
       `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. `
     : "";
 
-  // ── 포즈 가이드 로딩 (걷기 캐릭터 단일 방향만) ─────────────────────────
+  // ── 포즈 가이드 로딩 (걷기 캐릭터) ─────────────────────────────────────
+  // dirIndex(0~7) → 짧은 방향명. buildPoseSvg / directionLabels(8) 순서와 일치.
+  const DIR_NAME = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"];
+  // 셀 하나의 각도 텍스트. foreAft(정면/후면)면 깊이 문구, 측면/대각선이면 L/R 각도.
+  // (B 수정: 단일방향 DOWN/UP은 leftDeg=rightDeg=0이라 각도 포맷이 "L+0°/R+0°" degenerate.)
+  const fmtCell = (a: FrameAngle) =>
+    a.foreAft
+      ? `${a.foreAft}(${a.label})`
+      : `L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`;
+
   let poseRefPath: string | null = null;
   let poseFrameAnglesText = "";
   if (isWalk && isCharacter && isSingleDirection) {
@@ -1275,14 +1284,12 @@ async function buildSpritePrompt(
       "UP": 4, "UP-RIGHT": 5, "RIGHT": 6, "DOWN-RIGHT": 7,
     };
     const dirIndex = DIR_INDEX[parsedWalkDir ?? "RIGHT"] ?? 6;
-    const toAngleText = (
-      angles: { col: number; leftDeg: number; rightDeg: number; label: string }[],
-      r: number,
-    ) =>
+    // 단일방향: 평탄 배열을 rows에 따라 셀 위치 라벨링.
+    const toAngleText = (angles: FrameAngle[], r: number) =>
       angles
         .map((a, i) =>
           (r > 1 ? `row${Math.floor(i / cols) + 1}col${(i % cols) + 1}` : `col${a.col + 1}`) +
-          `: L${a.leftDeg >= 0 ? "+" : ""}${a.leftDeg}°/R${a.rightDeg >= 0 ? "+" : ""}${a.rightDeg}°(${a.label})`,
+          `: ${fmtCell(a)}`,
         )
         .join(", ");
     try {
@@ -1302,6 +1309,32 @@ async function buildSpritePrompt(
       } catch (e2) {
         log(`make_spritesheet: pose guide failed (non-fatal): ${(e2 as Error).message}`);
       }
+    }
+  } else if (isWalk && isCharacter && !isSingleDirection && directions) {
+    // T3: 다중방향(2/4/8) 가이드. dirIndices는 directionLabels(n) 순서와 1:1 대응.
+    //   2 → [LEFT, RIGHT] / 4 → [DOWN, LEFT, RIGHT, UP] / 8 → [DOWN..DN-RIGHT].
+    const dirIndices: number[] =
+      directions === 2 ? [2, 6]
+      : directions === 4 ? [0, 2, 6, 4]
+      // directions===8 → 8행×384px=3072px가 캔버스 한계(1536px)를 넘어 상류 검증(~488줄)에서
+      // 이미 throw → 이 분기는 도달 불가. 향후 8방향 분할 생성(4×2) 대비 매핑만 보존.
+      : [0, 1, 2, 3, 4, 5, 6, 7];
+    try {
+      const { path: guidePath, rows: guideRows } = await getMultiDirPoseGuide(
+        dirIndices, cols, cellW, TEMPLATES_DIR, isRun,
+      );
+      poseRefPath = guidePath;
+      // 구조화된 행(행=방향)을 방향명 포함 라벨로 직렬화. row.dirIndex로 이름 조회(행 위치 아님).
+      poseFrameAnglesText = guideRows
+        .map((row, r) =>
+          row.angles
+            .map((a, c) => `row${r + 1}(${DIR_NAME[row.dirIndex]}) col${c + 1}: ${fmtCell(a)}`)
+            .join(", "),
+        )
+        .join("; ");
+      log(`make_spritesheet: multidir pose guide → ${path.basename(guidePath)}`);
+    } catch (e) {
+      log(`make_spritesheet: multidir pose guide failed (non-fatal): ${(e as Error).message}`);
     }
   }
 
@@ -1355,7 +1388,9 @@ async function buildSpritePrompt(
           `, negative = back. ` +
           `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
           `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
-          `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. `
+          `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. ` +
+          `Some cells (front/back-facing rows) use a 'foot fwd(lower)/back(higher)' depth note instead of an angle, because their legs swing toward/away from the camera, not sideways. ` +
+          `For those cells, draw the 'fwd' foot lower on screen (stepping toward the viewer) and the 'back' foot higher (stepping away), with the two feet at clearly different heights. `
         : "")
     : "";
 

@@ -1,6 +1,10 @@
 /**
  * 보행 사이클 스틱 피겨 레퍼런스 이미지 생성.
  * sharp SVG 렌더링으로 각 프레임의 정확한 다리/팔 각도를 PNG로 출력.
+ *
+ * 레퍼런스 PNG(data/reference/pose-guided-{walk,run}-8dir.png)는
+ * `pnpm gen:poses`(scripts/gen-pose-guides.ts)로 재생성한다 — buildPoseSvg/computePose 기하를
+ * 바꾸면 반드시 재실행해야 프로덕션(extractPoseGuideGrid)에 반영된다.
  */
 import sharp from "sharp";
 
@@ -44,22 +48,79 @@ function circle(cx: number, cy: number, r: number, color: string) {
  */
 const DIR_WALK_ANGLE = [90, 135, 180, 225, 270, 315, 0, 45];
 
-/** 방향별 스크린 투영 성분. walkX 양수=오른쪽, walkY 양수=아래쪽. */
+/** 방향별 스크린 투영 성분. walkX 양수=오른쪽, walkY 양수=아래쪽(전면/시청자 쪽). */
 function walkComponents(dirIndex: number) {
   const theta = deg2rad(DIR_WALK_ANGLE[dirIndex] ?? 0);
   return { walkX: Math.cos(theta), walkY: Math.sin(theta) };
+}
+
+// 연속 포즈 모델 상수
+const STEP_W = 18;   // 정면/후면 최대 좌우 벌림(px). 순수 측면=0.
+const DEPTH = 26;    // 정면/후면 전후(깊이) 발 오프셋 최대(px). 순수 측면=0.
+
+/**
+ * 한쪽 다리의 기하 + 각도 데이터. side=+1(왼/파랑), -1(오/빨강).
+ * swingX = 화면 x 스윙각(수직 기준, 측면), lateral = 좌우 벌림(정면), depth = 전후(깊이).
+ */
+type LegPose = {
+  side: 1 | -1;
+  swingAngle: number;  // 수직 기준 스윙각(도). +면 화면 전진방향.
+  lateral: number;     // 엉덩이 x 오프셋(px). 정면/후면에서 좌우 벌림.
+  depthY: number;      // 발 y 오프셋(px). 전진발 아래(전면)/위(후면).
+  isSwing: boolean;    // 공중(전진 중) 다리면 true → 무릎 굽힘.
+};
+
+/** 한 다리의 포즈 성분 계산. side: +1=왼(파랑), -1=오(빨강). */
+function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A: number): LegPose {
+  const cosp = Math.cos(phase);
+  // swingAngle: walkY=0(측면)에서 OLD 사이드뷰 공식과 정확히 동일.
+  const swingAngle = side * A * walkX * cosp;
+  // lateral: 정면/후면 최대(±STEP_W), 순수 측면 0. side로 좌우 벌림.
+  const lateral = side * STEP_W * Math.abs(walkY);
+  // depthY: 전진 중인 발이 전면(walkY>0)이면 아래로, 후면(walkY<0)이면 위로.
+  const depthY = side * DEPTH * walkY * cosp;
+  // swing(공중) 다리 = 전진 중(각도 증가, d/dφ>0). d(swingAngle)/dφ ∝ -side*walkX*sin(φ).
+  // walkX≈0(정면/후면)이면 swingAngle은 항상 0이므로 깊이 진행으로 판정: -side*walkY*sin(φ).
+  const motion = Math.abs(walkX) > 1e-6 ? walkX : walkY;
+  const isSwing = -side * motion * Math.sin(phase) > 0;
+  return { side, swingAngle, lateral, depthY, isSwing };
+}
+
+/**
+ * frame/totalFrames/dirIndex/isRun → 두 다리 + 위상 데이터를 동시에 산출.
+ * 이미지 렌더(buildPoseSvg)와 각도 텍스트(computeFrameAngles/extractPoseGuideGrid)의 단일 소스.
+ */
+export function computePose(frame: number, totalFrames: number, dirIndex: number, isRun: boolean) {
+  const A = isRun ? 48 : 32;
+  const phase = (2 * Math.PI * frame) / totalFrames;
+  const { walkX, walkY } = walkComponents(dirIndex);
+  const left = computeLeg(1, phase, walkX, walkY, A);
+  const right = computeLeg(-1, phase, walkX, walkY, A);
+  return { phase, walkX, walkY, A, left, right };
+}
+
+/** 정강이(lower leg) 각도. swing(공중) 다리는 굽혀 정강이 들어올림, stance는 곧게. */
+function lowerLegAngle(leg: LegPose, isRun: boolean): number {
+  if (isRun) {
+    // 기존 힐킥 동작 보존: 앞 다리는 발 앞으로 차올림(0.5×), 뒷 다리는 뒤꿈치 킥(-0.9×).
+    return leg.swingAngle > 0 ? leg.swingAngle * 0.5 : leg.swingAngle * -0.9;
+  }
+  // walk: swing 다리는 정강이를 안쪽으로 굽혀 stance와 분리(passing 겹침 해소), stance는 곧게.
+  return leg.isSwing ? leg.swingAngle - leg.side * 26 : leg.swingAngle * 0.15;
 }
 
 /**
  * 8프레임 보행 사이클의 frame 번호(0~7)에 해당하는 스틱 피겨 SVG 생성.
  * transparent=true 이면 배경 없이 투명 — 그리드 셀 합성용.
  * dirIndex(0~7)는 8방향 순서(directionLabels(8)). 기본값 6 = RIGHT(기존 사이드뷰).
+ *
+ * 연속 포즈 모델: 측면/대각선/정면/후면을 하나의 computePose 경로로 통합.
+ * walkY=0(측면)이면 OLD 사이드뷰와 동일(무릎 굽힘 차등 외), walkX=0(정면/후면)이면
+ * 좌우로 벌린 다리 + 전진발 깊이, 대각선은 셋 모두 부분 적용(진짜 3/4).
  */
 function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIndex = 6, isRun = false): string {
-  // 달리기: 보폭 각도 크게, 무릎 높이 들어올림, 팔 펌핑 강하게, 몸통 앞으로 기울음
-  const A = isRun ? 48 : 32;
-  const phase = (2 * Math.PI * frame) / totalFrames;
-  const { walkX } = walkComponents(dirIndex);
+  const pose = computePose(frame, totalFrames, dirIndex, isRun);
+  const { phase, walkX, walkY, left, right } = pose;
 
   const elements: string[] = [];
 
@@ -67,10 +128,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     elements.push(`<rect width="${W}" height="${H}" fill="#1a1a2e"/>`);
   }
 
-  // 정면/후면 모드: 순수 DOWN(0)/UP(4)만. 대각선(1/3/5/7)은 |walkX|==|walkY| 라
-  // 부동소수 비교에 의존하지 않고 인덱스로 직접 게이트 → 항상 사이드뷰로 빠진다.
-  const isFrontBack = dirIndex === 0 || dirIndex === 4;
-  const isBack = dirIndex === 4; // UP — 후면 표현
+  const isBack = walkY < -0.5; // 후면 우세 → 등(뒤통수) 어둡게.
 
   // 레이블 (불투명 모드에서만)
   if (!transparent) {
@@ -78,7 +136,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     const isContact = Math.abs(cosp) > 0.85;
     const isCrossover = Math.abs(cosp) < 0.15;
     const dirName = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"][dirIndex] ?? "?";
-    const phaseLabel = isContact ? "CONTACT" : isCrossover ? "CROSSOVER" : `f${frame}`;
+    const phaseLabel = isContact ? "CONTACT" : isCrossover ? "PASSING" : `f${frame}`;
     elements.push(`<text x="${W/2}" y="16" text-anchor="middle" fill="#aaaaff" font-family="monospace" font-size="11">${dirName} ${phaseLabel}</text>`);
   }
 
@@ -86,145 +144,124 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   const headColor = isBack ? "#7a6038" : "#f0c080";
   elements.push(circle(CX, HEAD_Y, HEAD_R, headColor));
 
-  // 목
+  // 목 + 어깨 가로선
   elements.push(line(CX, NECK_Y, CX, SHOULDER_Y, "#f0c080", 4));
-
-  // 어깨 가로선
   elements.push(line(CX - 20, SHOULDER_Y, CX + 20, SHOULDER_Y, "#f0c080", 4));
 
-  if (isFrontBack) {
-    // ── 정면/후면 모드 (DOWN/UP) ──
-    // 다리가 수직으로 내려오되 좌우 발 위치가 교차. leftLegPhase=cos(phase).
-    const leftLegPhase = Math.cos(phase);
-    const LEG_TOTAL = UPPER_LEG + LOWER_LEG;
-    const STEP_W = 18;          // 좌우 발 기본 벌림
-    const forwardOffset = leftLegPhase * 8; // 앞 발이 약간 안쪽으로
-    const DEPTH = 6;            // 앞 발이 더 아래로(깊이) — 가시적 px
-
-    // 팔: 정면/후면도 좌우로 약간 흔들림(수직 기준 좌우 스윙)
-    const armSwing = leftLegPhase * 10;
-    const lShoulderF = { x: CX - 20, y: SHOULDER_Y };
-    const rShoulderF = { x: CX + 20, y: SHOULDER_Y };
-    const lHandF = { x: lShoulderF.x - 2 + armSwing, y: SHOULDER_Y + UPPER_ARM + LOWER_ARM * 0.7 };
-    const rHandF = { x: rShoulderF.x + 2 - armSwing, y: SHOULDER_Y + UPPER_ARM + LOWER_ARM * 0.7 };
-    elements.push(line(lShoulderF.x, lShoulderF.y, lHandF.x, lHandF.y, "#80c0f0", 4));
-    elements.push(line(rShoulderF.x, rShoulderF.y, rHandF.x, rHandF.y, "#f08080", 4));
-
-    // 몸통
-    elements.push(line(CX, SHOULDER_Y, CX, HIP_Y, "#f0c080", 5));
-    elements.push(circle(CX, HIP_Y, 5, "#f0c080"));
-
-    // 왼발(파랑): leftLegPhase>0 이면 앞으로 → 약간 아래(깊이)
-    const lFootX = CX - STEP_W + forwardOffset;
-    const lFootY = HIP_Y + LEG_TOTAL + Math.abs(leftLegPhase) * (leftLegPhase > 0 ? DEPTH : 0);
-    const lKneeF = { x: CX - STEP_W * 0.6, y: HIP_Y + UPPER_LEG };
-    elements.push(line(CX, HIP_Y, lKneeF.x, lKneeF.y, "#4fc3f7", 6));
-    elements.push(line(lKneeF.x, lKneeF.y, lFootX, lFootY, "#4fc3f7", 5));
-    elements.push(circle(lKneeF.x, lKneeF.y, 5, "#4fc3f7"));
-    elements.push(line(lFootX, lFootY, lFootX - 7, lFootY, "#4fc3f7", 4)); // 발끝
-
-    // 오른발(빨강): rightLegPhase = -leftLegPhase
-    const rFootX = CX + STEP_W - forwardOffset;
-    const rFootY = HIP_Y + LEG_TOTAL + Math.abs(leftLegPhase) * (leftLegPhase < 0 ? DEPTH : 0);
-    const rKneeF = { x: CX + STEP_W * 0.6, y: HIP_Y + UPPER_LEG };
-    elements.push(line(CX, HIP_Y, rKneeF.x, rKneeF.y, "#ef5350", 6));
-    elements.push(line(rKneeF.x, rKneeF.y, rFootX, rFootY, "#ef5350", 5));
-    elements.push(circle(rKneeF.x, rKneeF.y, 5, "#ef5350"));
-    elements.push(line(rFootX, rFootY, rFootX + 7, rFootY, "#ef5350", 4)); // 발끝
-
-    if (!transparent) {
-      elements.push(`<text x="4" y="${H - 20}" fill="#4fc3f7" font-family="monospace" font-size="10">L</text>`);
-      elements.push(`<text x="${W - 20}" y="${H - 20}" fill="#ef5350" font-family="monospace" font-size="10">R</text>`);
-    }
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${elements.join("")}</svg>`;
-  }
-
-  // ── 사이드뷰 모드 (LEFT/RIGHT + 대각선) ──
-  const leftLegAngle  =  A * walkX * Math.cos(phase);
-  const rightLegAngle = -A * walkX * Math.cos(phase);
+  // 팔: 다리와 반대 위상으로 스윙(측면). 정면/후면은 좌우 약하게 흔들림.
+  const A = pose.A;
   const armMult = isRun ? 0.85 : 0.6;
-  const leftArmAngle  = -A * armMult * walkX * Math.cos(phase);
-  const rightArmAngle =  A * armMult * walkX * Math.cos(phase);
+  const cosp = Math.cos(phase);
+  const leftArmAngle  = -A * armMult * walkX * cosp;
+  const rightArmAngle =  A * armMult * walkX * cosp;
+  // 정면/후면 팔 좌우 흔들림(swingAngle이 0이라 별도 성분).
+  const armLateral = STEP_W * 0.55 * Math.abs(walkY) * cosp;
 
-  // 달리기: 몸통 앞으로 10° 기울음 (어깨가 엉덩이보다 앞으로)
+  // 달리기: 몸통 앞으로 기울음 (어깨가 엉덩이보다 진행방향 앞으로).
   const leanX = isRun ? 10 * Math.sign(walkX) : 0;
   const shoulderX = CX + leanX;
 
-  // 왼팔
+  // 왼팔(파랑)
   const lShoulder = { x: shoulderX - 20, y: SHOULDER_Y };
-  const lElbow = endpoint(lShoulder.x, lShoulder.y, leftArmAngle, UPPER_ARM);
+  const lElbow = endpoint(lShoulder.x + armLateral, lShoulder.y, leftArmAngle, UPPER_ARM);
   const lHand  = endpoint(lElbow.x, lElbow.y, leftArmAngle * (isRun ? 0.8 : 0.5), LOWER_ARM);
   elements.push(line(lShoulder.x, lShoulder.y, lElbow.x, lElbow.y, "#80c0f0", 4));
   elements.push(line(lElbow.x, lElbow.y, lHand.x, lHand.y, "#80c0f0", 3));
 
-  // 오른팔
+  // 오른팔(빨강)
   const rShoulder = { x: shoulderX + 20, y: SHOULDER_Y };
-  const rElbow = endpoint(rShoulder.x, rShoulder.y, rightArmAngle, UPPER_ARM);
+  const rElbow = endpoint(rShoulder.x - armLateral, rShoulder.y, rightArmAngle, UPPER_ARM);
   const rHand  = endpoint(rElbow.x, rElbow.y, rightArmAngle * (isRun ? 0.8 : 0.5), LOWER_ARM);
   elements.push(line(rShoulder.x, rShoulder.y, rElbow.x, rElbow.y, "#f08080", 4));
   elements.push(line(rElbow.x, rElbow.y, rHand.x, rHand.y, "#f08080", 3));
 
-  // 몸통 (달리기: 기울어진 어깨 → 엉덩이)
+  // 몸통
   elements.push(line(shoulderX, SHOULDER_Y, CX, HIP_Y, "#f0c080", 5));
   elements.push(circle(CX, HIP_Y, 5, "#f0c080"));
 
-  // 달리기 무릎/발 각도:
-  // 앞 다리(leg angle > 0): 발을 앞으로 강하게 차올림 (lower leg 0.5×)
-  // 뒷 다리(leg angle < 0): 뒤꿈치 킥 — lower leg 가 위/뒤로 접힘 (-0.9×)
-  function lowerLegAngle(legAngle: number): number {
-    if (!isRun) return legAngle * 0.3;
-    return legAngle > 0 ? legAngle * 0.5 : legAngle * -0.9;
+  // 다리 한쪽 렌더 헬퍼. hipX는 좌우 벌림(lateral) 적용된 엉덩이 x.
+  // walkY=0(측면)이면 lateral=depthY=0 → OLD 사이드뷰와 동일.
+  function renderLeg(leg: LegPose, color: string, jointColor: string) {
+    const hipX = CX + leg.lateral;
+    const knee = endpoint(hipX, HIP_Y, leg.swingAngle, UPPER_LEG);
+    const shin = lowerLegAngle(leg, isRun);
+    const foot = endpoint(knee.x, knee.y, shin, LOWER_LEG);
+    // 깊이: 전진발(전면)은 아래로, 후면은 위로. 발 + 발끝 y 동시 이동.
+    const footY = foot.y + leg.depthY;
+    elements.push(line(hipX, HIP_Y, knee.x, knee.y, color, 6));
+    elements.push(line(knee.x, knee.y, foot.x, footY, color, 5));
+    elements.push(circle(knee.x, knee.y, 5, jointColor));
+    // 발끝: 측면은 진행방향(walkX 부호)으로, 정면/후면(walkX≈0)은 좌우 바깥으로.
+    if (Math.abs(walkX) > 0.3) {
+      const tip = endpoint(foot.x, footY, 90 + leg.swingAngle * 0.2, 14 * (walkX >= 0 ? 1 : -1));
+      elements.push(line(foot.x, footY, tip.x, tip.y, color, 4));
+    } else {
+      // 발끝을 바깥쪽으로(왼발 왼쪽, 오른발 오른쪽) — 정면/후면 자연스러운 발 방향.
+      elements.push(line(foot.x, footY, foot.x + leg.side * 9, footY, color, 4));
+    }
   }
 
-  // 왼쪽 다리 (파란색)
-  const lKnee = endpoint(CX, HIP_Y, leftLegAngle, UPPER_LEG);
-  const lFoot = endpoint(lKnee.x, lKnee.y, lowerLegAngle(leftLegAngle), LOWER_LEG);
-  elements.push(line(CX, HIP_Y, lKnee.x, lKnee.y, "#4fc3f7", 6));
-  elements.push(line(lKnee.x, lKnee.y, lFoot.x, lFoot.y, "#4fc3f7", 5));
-  elements.push(circle(lKnee.x, lKnee.y, 5, "#4fc3f7"));
-  const lFootTip = endpoint(lFoot.x, lFoot.y, 90 + leftLegAngle * 0.2, 14 * (walkX >= 0 ? 1 : -1));
-  elements.push(line(lFoot.x, lFoot.y, lFootTip.x, lFootTip.y, "#4fc3f7", 4));
-
-  // 오른쪽 다리 (빨간색)
-  const rKnee = endpoint(CX, HIP_Y, rightLegAngle, UPPER_LEG);
-  const rFoot = endpoint(rKnee.x, rKnee.y, lowerLegAngle(rightLegAngle), LOWER_LEG);
-  elements.push(line(CX, HIP_Y, rKnee.x, rKnee.y, "#ef5350", 6));
-  elements.push(line(rKnee.x, rKnee.y, rFoot.x, rFoot.y, "#ef5350", 5));
-  elements.push(circle(rKnee.x, rKnee.y, 5, "#ef5350"));
-  const rFootTip = endpoint(rFoot.x, rFoot.y, 90 + rightLegAngle * 0.2, 14 * (walkX >= 0 ? 1 : -1));
-  elements.push(line(rFoot.x, rFoot.y, rFootTip.x, rFootTip.y, "#ef5350", 4));
+  renderLeg(left,  "#4fc3f7", "#4fc3f7");
+  renderLeg(right, "#ef5350", "#ef5350");
 
   if (!transparent) {
-    elements.push(`<text x="4" y="${H - 20}" fill="#4fc3f7" font-family="monospace" font-size="10">L:${leftLegAngle.toFixed(0)}°</text>`);
-    elements.push(`<text x="${W - 50}" y="${H - 20}" fill="#ef5350" font-family="monospace" font-size="10">R:${rightLegAngle.toFixed(0)}°</text>`);
+    const txt = legAngleText(left, right, walkX);
+    elements.push(`<text x="4" y="${H - 20}" fill="#4fc3f7" font-family="monospace" font-size="10">L:${txt.l}</text>`);
+    elements.push(`<text x="${W - 64}" y="${H - 20}" fill="#ef5350" font-family="monospace" font-size="10">R:${txt.r}</text>`);
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${elements.join("")}</svg>`;
 }
 
-/** 프레임 하나의 다리 각도 데이터. */
+/**
+ * 두 다리 → 셀 내 디버그 각도 텍스트(이미지 라벨용).
+ * 측면/대각선(walkX 유의): 스윙각. 정면/후면(walkX≈0): 전후(fwd/back) 오프셋 언어.
+ */
+function legAngleText(left: LegPose, right: LegPose, walkX: number) {
+  if (Math.abs(walkX) < 0.3) {
+    // 정면/후면: 깊이(depthY) 부호로 fore/aft. depthY>0=화면 아래=전진(fwd).
+    const fa = (d: number) => (Math.abs(d) < 2 ? "mid" : d > 0 ? "fwd" : "back");
+    return { l: fa(left.depthY), r: fa(right.depthY) };
+  }
+  return {
+    l: `${left.swingAngle >= 0 ? "+" : ""}${left.swingAngle.toFixed(0)}°`,
+    r: `${right.swingAngle >= 0 ? "+" : ""}${right.swingAngle.toFixed(0)}°`,
+  };
+}
+
+/** 프레임 하나의 다리 각도/위상 데이터. */
 export type FrameAngle = {
   col: number;          // 0-based 컬럼 인덱스
-  leftDeg: number;      // 왼발 각도 (양수=앞, 음수=뒤)
-  rightDeg: number;     // 오른발 각도
-  label: string;        // "L-CONTACT" | "CROSSOVER" | "R-CONTACT" | "f{n}"
+  leftDeg: number;      // 왼발 스윙각(양수=전진, 음수=후진). 정면/후면은 0이라 무의미.
+  rightDeg: number;     // 오른발 스윙각
+  label: string;        // "L-CONTACT" | "PASSING" | "R-CONTACT" | "f{n}"
+  /** 정면/후면 전후 오프셋 텍스트(예 "L foot fwd(lower)/R foot back(higher)"). 측면이면 null. */
+  foreAft: string | null;
 };
 
-/** cols 프레임 사이클의 각도 배열을 계산. buildPoseSvg와 동일한 공식. */
-export function computeFrameAngles(cols: number, isRun = false): FrameAngle[] {
-  const A = isRun ? 48 : 32;
-  return Array.from({ length: cols }, (_, c) => {
-    const phase = (2 * Math.PI * c) / cols;
-    const cosP = Math.cos(phase);
-    const leftDeg  = Math.round(A * cosP);
-    const rightDeg = Math.round(-A * cosP);
-    const absC = Math.abs(cosP);
-    const label = absC > 0.85
-      ? (leftDeg > 0 ? "L-CONTACT" : "R-CONTACT")
-      : absC < 0.15 ? "CROSSOVER" : `f${c}`;
-    return { col: c, leftDeg, rightDeg, label };
-  });
+/** 한 프레임의 computePose 결과 → FrameAngle(각도 텍스트의 단일 소스). */
+function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, isRun: boolean): FrameAngle {
+  const { walkX, left, right, phase } = computePose(col, totalFrames, dirIndex, isRun);
+  const leftDeg = Math.round(left.swingAngle);
+  const rightDeg = Math.round(right.swingAngle);
+  const cosP = Math.cos(phase);
+  const absC = Math.abs(cosP);
+  // 정면/후면(walkX≈0): 스윙각 0이라 degenerate → 전후(fore/aft) 오프셋 언어로.
+  if (Math.abs(walkX) < 0.3) {
+    const fa = (leg: typeof left) => (Math.abs(leg.depthY) < 2 ? "mid" : leg.depthY > 0 ? "fwd(lower)" : "back(higher)");
+    const label = absC > 0.85 ? (left.depthY > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
+    return { col, leftDeg, rightDeg, label, foreAft: `L foot ${fa(left)}/R foot ${fa(right)}` };
+  }
+  const label = absC > 0.85 ? (leftDeg > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
+  return { col, leftDeg, rightDeg, label, foreAft: null };
+}
+
+/**
+ * cols 프레임 사이클의 각도 배열을 계산. computePose와 동일 소스(이미지와 영원히 일치).
+ * dirIndex 기본값 6=RIGHT(기존 단일행 fallback 동작 유지).
+ */
+export function computeFrameAngles(cols: number, isRun = false, dirIndex = 6): FrameAngle[] {
+  return Array.from({ length: cols }, (_, c) => poseToFrameAngle(c, cols, dirIndex, isRun));
 }
 
 /**
@@ -256,21 +293,12 @@ export async function extractPoseGuideGrid(
     Math.floor((i * SOURCE_COLS) / totalFrames),
   );
 
-  // angles를 실제 추출 srcCol의 위상에서 직접 계산 — computeFrameAngles(totalFrames)는
-  // totalFrames 균등 위상을 쓰므로 totalFrames≠SOURCE_COLS일 때 이미지 포즈와 어긋남.
-  const A = isRun ? 48 : 32;
-  const angles: FrameAngle[] = srcCols.map((srcCol, i) => {
-    const phase = (2 * Math.PI * srcCol) / SOURCE_COLS;
-    const cosP = Math.cos(phase);
-    const leftDeg = Math.round(A * cosP);
-    const rightDeg = Math.round(-A * cosP);
-    const absC = Math.abs(cosP);
-    const label =
-      absC > 0.85
-        ? leftDeg > 0 ? "L-CONTACT" : "R-CONTACT"
-        : absC < 0.15 ? "CROSSOVER" : `f${i}`;
-    return { col: i, leftDeg, rightDeg, label };
-  });
+  // angles는 실제 추출 srcCol의 위상(SOURCE_COLS=8 기준)에서 computePose로 직접 산출 —
+  // 이미지(소스 8프레임)와 동일 위상이라야 텍스트↔이미지 일치.
+  const angles: FrameAngle[] = srcCols.map((srcCol, i) => ({
+    ...poseToFrameAngle(srcCol, SOURCE_COLS, dirIndex, isRun),
+    col: i,
+  }));
 
   const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
   if (existsSync(cacheFile)) return { path: cacheFile, angles };
@@ -327,7 +355,7 @@ export async function getCachedPoseRow(
 ): Promise<{ path: string; angles: FrameAngle[] }> {
   const type = isRun ? "run" : "walk";
   const cacheFile = `${templatesDir}/pose-${type}-dir${dirIndex}-c${cols}.png`;
-  const angles = computeFrameAngles(cols, isRun);
+  const angles = computeFrameAngles(cols, isRun, dirIndex);
 
   const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
   if (existsSync(cacheFile)) return { path: cacheFile, angles };
@@ -362,4 +390,112 @@ export async function getCachedPoseRow(
 
   writeFileSync(cacheFile, buf);
   return { path: cacheFile, angles };
+}
+
+/**
+ * 다중방향(2/4/8) 포즈 가이드: 출력 행마다 다른 dirIndex를 매핑해 n행×cols열 가이드 PNG 생성.
+ * 행 dirIndex는 dirIndices(directionLabels(n) 순서와 정확히 일치)로 전달받는다.
+ *   n=2 → [2,6] / n=4 → [0,2,6,4] / n=8 → [0..7].
+ * buildPoseSvg로 직접 렌더(전제 PNG 불필요) — 각 행은 cols 프레임 완전 사이클.
+ *
+ * NOTE: 다중방향 포즈 가이드의 codex 생성 효과는 모델 의존·미검증(메모리 경고 준수).
+ *
+ * @returns { path, rows } — 캐시 파일 경로 + 행별(=방향별) 프레임 각도 데이터
+ */
+export async function getMultiDirPoseGuide(
+  dirIndices: number[],
+  cols: number,
+  cellSize: number,
+  templatesDir: string,
+  isRun = false,
+): Promise<{ path: string; rows: { dirIndex: number; angles: FrameAngle[] }[] }> {
+  const type = isRun ? "run" : "walk";
+  const rows = dirIndices.length;
+  const cacheFile = `${templatesDir}/pose-${type}-multidir${rows}-c${cols}.png`;
+
+  const rowsData = dirIndices.map(dirIndex => ({
+    dirIndex,
+    angles: computeFrameAngles(cols, isRun, dirIndex),
+  }));
+
+  const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
+  if (existsSync(cacheFile)) return { path: cacheFile, rows: rowsData };
+
+  mkdirSync(templatesDir, { recursive: true });
+
+  const skelH = Math.round(cellSize * 0.65);
+  const skelW = Math.round(skelH * (W / H));
+  const offsetX = Math.round((cellSize - skelW) / 2);
+  const offsetY = Math.round((cellSize - skelH) * 0.35);
+
+  const composites: { input: Buffer; left: number; top: number; blend: "over" }[] = [];
+  for (let r = 0; r < rows; r++) {
+    const dirIndex = dirIndices[r];
+    for (let c = 0; c < cols; c++) {
+      const svg = buildPoseSvg(c, cols, true, dirIndex, isRun);
+      const buf = await sharp(Buffer.from(svg)).resize(skelW, skelH).png().toBuffer();
+      composites.push({
+        input: buf,
+        left: c * cellSize + offsetX,
+        top: r * cellSize + offsetY,
+        blend: "over",
+      });
+    }
+  }
+
+  const buf = await sharp({
+    create: { width: cols * cellSize, height: rows * cellSize, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
+
+  writeFileSync(cacheFile, buf);
+  return { path: cacheFile, rows: rowsData };
+}
+
+/**
+ * 레퍼런스 PNG 재생성용: 8방향(행)×totalCols(열) 그리드 SVG/PNG 합성 버퍼 반환.
+ * scripts/gen-pose-guides.ts가 사용. 셀=cellSize, 흰 배경 + 옅은 그리드선 + 투명 스켈레톤 중앙 배치.
+ */
+export async function buildEightDirReferenceSheet(cellSize: number, isRun: boolean): Promise<Buffer> {
+  const SOURCE_DIRS = 8;
+  const SOURCE_FRAMES = 8;
+  const skelH = Math.round(cellSize * 0.65);
+  const skelW = Math.round(skelH * (W / H));
+  const offsetX = Math.round((cellSize - skelW) / 2);
+  const offsetY = Math.round((cellSize - skelH) * 0.35);
+  const canvas = SOURCE_DIRS * cellSize;
+
+  // 옅은 그리드선(OLD 레퍼런스와 동일: 204,204,204)
+  const gridLines: string[] = [];
+  for (let i = 1; i < SOURCE_DIRS; i++) {
+    gridLines.push(`<line x1="${i * cellSize}" y1="0" x2="${i * cellSize}" y2="${canvas}" stroke="#cccccc" stroke-width="1"/>`);
+    gridLines.push(`<line x1="0" y1="${i * cellSize}" x2="${canvas}" y2="${i * cellSize}" stroke="#cccccc" stroke-width="1"/>`);
+  }
+  const gridSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${canvas}" height="${canvas}">${gridLines.join("")}</svg>`;
+  const gridBuf = await sharp(Buffer.from(gridSvg)).png().toBuffer();
+
+  const composites: { input: Buffer; left: number; top: number; blend: "over" }[] = [
+    { input: gridBuf, left: 0, top: 0, blend: "over" },
+  ];
+  for (let dir = 0; dir < SOURCE_DIRS; dir++) {
+    for (let f = 0; f < SOURCE_FRAMES; f++) {
+      const svg = buildPoseSvg(f, SOURCE_FRAMES, true, dir, isRun);
+      const buf = await sharp(Buffer.from(svg)).resize(skelW, skelH).png().toBuffer();
+      composites.push({
+        input: buf,
+        left: f * cellSize + offsetX,
+        top: dir * cellSize + offsetY,
+        blend: "over",
+      });
+    }
+  }
+
+  return sharp({
+    create: { width: canvas, height: canvas, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 1 } },
+  })
+    .composite(composites)
+    .png()
+    .toBuffer();
 }

@@ -10,6 +10,7 @@
     "app": "electron electron/main.js",
     "db:init": "tsx scripts/init-db.ts",
     "cleanup": "tsx scripts/cleanup.ts",
+    "gen:poses": "tsx scripts/gen-pose-guides.ts",
     "probe": "node scripts/probe-codex-imagegen.mjs",
     "postinstall": "cp -f node_modules/gif.js/dist/gif.worker.js public/gif.worker.js && /usr/libexec/PlistBuddy -c 'Set :CFBundleName Sprite Forge' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Sprite Forge' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; true"
   },
