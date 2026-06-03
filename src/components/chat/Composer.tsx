@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
+import { Grid3x3, LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -39,6 +39,8 @@ type Props = {
   onAskSuggestions?: (text: string) => void;
   /** 입력창에 이미지 파일을 드롭하면 업로드 → 다음 메시지의 reference 로 자동 첨부. */
   onUploadImage?: (file: File) => void;
+  /** [시트 만들기] 버튼 — 참조 이미지 없이 SpriteGenPanel 을 바로 열기. */
+  onOpenSpritePanel?: () => void;
 };
 
 export function Composer({
@@ -50,6 +52,7 @@ export function Composer({
   attachment,
   onAskSuggestions,
   onUploadImage,
+  onOpenSpritePanel,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -120,10 +123,12 @@ export function Composer({
     if (presetId) opts.presetId = presetId;
     if (attached) opts.attachmentGenerationIds = [attached.id];
     // attached 있고 frames 선택 시 sprite sheet suffix 결합.
-    const withFrames =
-      attached && frames !== null
-        ? `${withDir}, ${frames}프레임 sprite sheet, 1×${frames} grid`
-        : withDir;
+    const withFrames = (() => {
+      if (!attached || frames === null) return withDir;
+      const side = Math.round(Math.sqrt(frames));
+      const grid = `${side}×${side}`;
+      return `${withDir}, ${frames}프레임 sprite sheet, ${grid} grid`;
+    })();
     // 배치: 첨부/스프라이트가 아니고 count>1 일 때만. 그 외엔 단일 생성 흐름 유지.
     if (!attached && frames === null && count > 1) opts.count = count;
     onSend(withFrames, Object.keys(opts).length ? opts : undefined);
@@ -283,6 +288,16 @@ export function Composer({
                   ))}
                 </select>
               </label>
+            )}
+            {onOpenSpritePanel && (
+              <button
+                type="button"
+                onClick={onOpenSpritePanel}
+                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+                title="스프라이트시트 생성 — 캐릭터는 먼저 이미지를 만든 뒤 결과 카드의 [시트 만들기]를 쓰면 스타일이 더 일관됩니다"
+              >
+                <Grid3x3 size={12} /> 시트
+              </button>
             )}
             <button
               type="button"

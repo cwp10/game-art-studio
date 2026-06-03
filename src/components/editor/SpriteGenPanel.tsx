@@ -26,16 +26,17 @@ export type Direction =
   | "UP-LEFT"
   | "UP-RIGHT"
   | "REF";
-export type FrameCount = 4 | 6 | 8 | 12 | 16;
+export type FrameCount = 4 | 6 | 8 | 9 | 12 | 16;
+export type EffectType = "attack" | "explosion" | "trail" | "buff" | "ambient";
 
 export type SpriteGenState = {
   subjectType: SubjectType;
-  contextType: ContextMode; // effect 탭일 때 어떤 컨텍스트의 이펙트인지
   direction: Direction;
   frames: FrameCount;
   seamlessLoop: boolean;
   actionPrompt: string;
   perspective?: Perspective;
+  effectType?: EffectType;
 };
 
 type Props = {
@@ -87,8 +88,20 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 4,  rows: 2, cols: 2 },
   { value: 6,  rows: 2, cols: 3 },
   { value: 8,  rows: 2, cols: 4 },
+  { value: 9,  rows: 3, cols: 3 },
   { value: 12, rows: 4, cols: 3 },
   { value: 16, rows: 4, cols: 4 },
+];
+
+// 이펙트 탭 전용 — 정사각형 그리드만 (VFX는 방향성이 없어 정사각형이 자연스러움)
+const EFFECT_FRAME_OPTS = FRAME_OPTS.filter(f => f.rows === f.cols);
+
+const EFFECT_TYPES: Array<{ value: EffectType; label: string; phrase: string }> = [
+  { value: "attack",    label: "공격",  phrase: "directional strike or slash effect, motion toward an impact point" },
+  { value: "explosion", label: "폭발",  phrase: "radiates outward from a center point, expands then dissipates into smoke" },
+  { value: "trail",     label: "궤적",  phrase: "trailing motion path effect, fading streaks following the direction of movement" },
+  { value: "buff",      label: "버프",  phrase: "aura or orbiting particle effect surrounding a central subject" },
+  { value: "ambient",   label: "주변",  phrase: "subtle ambient particles, gentle drifting environmental effect" },
 ];
 
 // 동작 텍스트 키워드 → 프레임·루프 자동 추천 (애니메이션 드롭다운 대체)
@@ -125,7 +138,7 @@ function frameCanvasInfo(rows: number, cols: number): {
   return { w, h, totalPx, status: isOver ? "over" : isNear ? "near" : "safe" };
 }
 
-type ExampleKey = "character" | "object" | "character-effect" | "object-effect";
+type ExampleKey = "character" | "object" | "effect";
 
 const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
   character: [
@@ -141,17 +154,12 @@ const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
     { label: "불꽃 흔들림", text: "촛불이나 모닥불이 부드럽게 좌우로 흔들리는 동작" },
     { label: "아이템 부유", text: "아이템이 천천히 위아래로 떠다니며 은은하게 빛나는 루프 동작" },
   ],
-  "character-effect": [
+  effect: [
     { label: "공격 이펙트", text: "빠른 검 궤적과 빛 잔상이 대각선으로 지나가는 슬래시 이펙트" },
     { label: "마법 폭발", text: "중앙에서 바깥으로 퍼지는 강렬한 마법 폭발, 파티클이 사방으로 흩어지는 동작" },
     { label: "힐 이펙트", text: "아래에서 위로 올라오는 부드러운 녹색 빛 파티클, 치유의 기운이 감도는 동작" },
-    { label: "방어막 이펙트", text: "캐릭터 주변을 둘러싸는 에너지 방어막이 생겼다가 사라지는 동작" },
-  ],
-  "object-effect": [
     { label: "획득 이펙트", text: "아이템 위에서 반짝이는 빛 파티클이 방사형으로 흩어지는 동작" },
     { label: "파괴 이펙트", text: "오브젝트가 산산조각 나며 파편이 사방으로 흩어지고 먼지가 피어오르는 동작" },
-    { label: "상호작용 이펙트", text: "오브젝트 주변에 빛나는 테두리와 스파크가 생겼다 사라지는 동작" },
-    { label: "등장 이펙트", text: "오브젝트 아래에서 빛이 수직으로 솟구치며 나타나는 연출" },
   ],
 };
 
@@ -192,17 +200,11 @@ export function SpriteGenPanel({
   onSubmit,
   onClose,
 }: Props) {
-  // contextMode: 캐릭터 모드 or 오브젝트 모드
-  const [contextMode, setContextMode] = useState<ContextMode>("character");
-  // tab: "subject"(캐릭터 또는 오브젝트) or "effect"
-  const [tab, setTab] = useState<"subject" | "effect">("subject");
-
-  // tab + contextMode → subjectType
-  const subjectType: SubjectType = tab === "effect" ? "effect" : contextMode;
-
+  const [subjectType, setSubjectType] = useState<SubjectType>(initialSubjectMode ?? "character");
   const [direction, setDirection] = useState<Direction>(referenceImageUrl ? "REF" : "DOWN");
   const [frames, setFrames] = useState<FrameCount>(8);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
+  const [effectType, setEffectType] = useState<EffectType>("explosion");
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
   // 사용자가 직접 프레임을 변경했는지 추적 — true면 자동 추천 덮어쓰기 안 함
@@ -243,18 +245,20 @@ export function SpriteGenPanel({
   const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
   const canSubmit = actionPrompt.trim().length > 0 && !submitting;
 
-  // 탭·모드 전환 시 AI 결과/에러 초기화
-  function switchTab(t: "subject" | "effect") {
-    setTab(t);
+  function handleSubjectChange(s: SubjectType) {
+    setSubjectType(s);
     setExampleOpen(false);
     setAiResult(null);
     setAiError(null);
+    if (s === "effect") {
+      setSeamlessLoop(false);
+      if (!EFFECT_FRAME_OPTS.find(f => f.value === frames)) setFrames(9);
+    } else {
+      setSeamlessLoop(true);
+    }
   }
 
-  // 이펙트 탭용 exampleKey — 컨텍스트(character-effect | object-effect)
-  const exampleKey: ExampleKey = tab === "subject"
-    ? contextMode
-    : `${contextMode}-effect` as ExampleKey;
+  const exampleKey: ExampleKey = subjectType === "effect" ? "effect" : subjectType;
 
   // 카테고리별 최근 프롬프트 — exampleKey 변경 시 갱신
   const [recents, setRecents] = useState<string[]>(() => loadRecents(exampleKey));
@@ -275,8 +279,7 @@ export function SpriteGenPanel({
         body: JSON.stringify({
           question,
           subjectType,
-          contextType: tab === "effect" ? contextMode : undefined,
-          referencePrompt: tab === "effect" ? referencePrompt : undefined,
+          referencePrompt: subjectType === "effect" ? referencePrompt : undefined,
           direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
           frames,
           seamlessLoop,
@@ -301,12 +304,12 @@ export function SpriteGenPanel({
     try {
         const state: SpriteGenState = {
         subjectType,
-        contextType: contextMode,
         direction,
         frames,
         seamlessLoop,
         actionPrompt: actionPrompt.trim(),
         perspective,
+        effectType: subjectType === "effect" ? effectType : undefined,
       };
       const msg = buildSpriteMessage(state, null, referenceId ?? null);
       saveRecent(exampleKey, state.actionPrompt);
@@ -333,8 +336,8 @@ export function SpriteGenPanel({
       </header>
 
       <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-4 overflow-y-auto p-3">
-        {/* 참조 이미지 줄 — 없으면 캐릭터/오브젝트 토글만 단독 노출 */}
-        {referenceImageUrl ? (
+        {/* 참조 이미지 — 있을 때만 */}
+        {referenceImageUrl && (
           <div className="flex shrink-0 items-center gap-3 rounded-lg border border-border bg-bg-card p-2">
             <div className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -344,65 +347,51 @@ export function SpriteGenPanel({
               <div className="text-text-primary">참조 이미지</div>
               <div className="truncate text-text-muted/70">{referenceId?.slice(0, 12)}…</div>
             </div>
-            {/* 캐릭터/오브젝트 토글 — 참조 이미지 줄 오른쪽 */}
-            <div className="flex shrink-0 rounded-lg border border-border bg-bg-panel p-0.5 text-xs">
-              <button
-                onClick={() => setContextMode("character")}
-                className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "character" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-              >
-                캐릭터
-              </button>
-              <button
-                onClick={() => setContextMode("object")}
-                className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "object" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-              >
-                오브젝트
-              </button>
-            </div>
-          </div>
-        ) : (
-          /* 참조 이미지 없을 때 — 캐릭터/오브젝트 토글 단독 */
-          <div className="flex shrink-0 rounded-lg border border-border bg-bg-card p-0.5 text-xs self-start">
-            <button
-              onClick={() => setContextMode("character")}
-              className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "character" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-            >
-              캐릭터
-            </button>
-            <button
-              onClick={() => setContextMode("object")}
-              className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "object" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-            >
-              오브젝트
-            </button>
           </div>
         )}
 
-        {/* 2-탭 — contextMode 에 따라 [캐릭터|이펙트] 또는 [오브젝트|이펙트] */}
-        <div className="shrink-0">
-          <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
+        {/* 3-way 탭 — 캐릭터 / 오브젝트 / 이펙트 */}
+        <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+          {([
+            { value: "character", label: "캐릭터" },
+            { value: "object",    label: "오브젝트" },
+            { value: "effect",    label: "이펙트" },
+          ] as { value: SubjectType; label: string }[]).map(opt => (
             <button
-              onClick={() => switchTab("subject")}
-              className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
-                tab === "subject"
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-transparent text-text-muted hover:text-text-primary"
+              key={opt.value}
+              onClick={() => handleSubjectChange(opt.value)}
+              className={`flex h-7 flex-1 items-center justify-center rounded-md transition-colors ${
+                subjectType === opt.value
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
               }`}
             >
-              {contextMode === "character" ? "캐릭터" : "오브젝트"}
+              {opt.label}
             </button>
-            <button
-              onClick={() => switchTab("effect")}
-              className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
-                tab === "effect"
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-transparent text-text-muted hover:text-text-primary"
-              }`}
-            >
-              이펙트
-            </button>
-          </div>
+          ))}
         </div>
+
+        {/* 이펙트 종류 — 이펙트일 때만 */}
+        {subjectType === "effect" && (
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs text-text-muted">종류</span>
+            <div className="flex flex-wrap gap-1">
+              {EFFECT_TYPES.map(et => (
+                <button
+                  key={et.value}
+                  onClick={() => setEffectType(et.value)}
+                  className={`flex h-7 items-center px-3 rounded-md border text-xs transition-colors ${
+                    effectType === et.value
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-border bg-bg-card text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {et.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 시점 선택 */}
         <div className="flex shrink-0 items-center gap-2">
@@ -440,7 +429,10 @@ export function SpriteGenPanel({
             <textarea
               value={actionPrompt}
               onChange={e => setActionPrompt(e.target.value)}
-              placeholder="어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
+              placeholder={subjectType === "effect"
+                ? "어떤 이펙트인지 설명하세요 (예: 불꽃 폭발이 퍼지며 연기로 사라짐)"
+                : "어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
+              }
               rows={3}
               className="block min-h-[78px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
             />
@@ -476,6 +468,7 @@ export function SpriteGenPanel({
                 {frameOpen && (
                   <FramePopover
                     selected={frames}
+                    opts={subjectType === "effect" ? EFFECT_FRAME_OPTS : undefined}
                     onSelect={f => {
                       setFrames(f);
                       setUserSetFrames(true);
@@ -486,15 +479,17 @@ export function SpriteGenPanel({
                 )}
               </div>
               {/* 루프 */}
-              <label className="flex cursor-pointer items-center gap-1 rounded-md border border-border bg-bg-panel px-2 py-1 text-xs text-text-muted hover:text-text-primary">
-                <input
-                  type="checkbox"
-                  checked={seamlessLoop}
-                  onChange={e => setSeamlessLoop(e.target.checked)}
-                  className="h-3 w-3"
-                />
+              <button
+                type="button"
+                onClick={() => setSeamlessLoop(v => !v)}
+                className={`flex h-7 items-center px-2 rounded-md border text-xs transition-colors ${
+                  seamlessLoop
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border bg-bg-panel text-text-muted hover:text-text-primary"
+                }`}
+              >
                 루프
-              </label>
+              </button>
               {/* 프레임 한계 경고 */}
               {(() => {
                 const info = frameCanvasInfo(grid.rows, grid.cols);
@@ -687,10 +682,12 @@ function DirectionPopover({
 
 function FramePopover({
   selected,
+  opts = FRAME_OPTS,
   onSelect,
   onClose,
 }: {
   selected: FrameCount;
+  opts?: typeof FRAME_OPTS;
   onSelect: (f: FrameCount) => void;
   onClose: () => void;
 }) {
@@ -702,7 +699,7 @@ function FramePopover({
       className="absolute left-0 top-full z-30 mt-1 w-[240px] rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
     >
       <div className="grid grid-cols-2 gap-2">
-        {FRAME_OPTS.map(f => {
+        {opts.map(f => {
           const active = selected === f.value;
           const info = frameCanvasInfo(f.rows, f.cols);
           const mpx = (info.totalPx / 1_000_000).toFixed(1);
@@ -846,6 +843,10 @@ export function buildSpriteMessage(
   // REF 방향은 참조 이미지가 실제로 첨부될 때만 의미가 있음
   if (isCharacter && (state.direction !== "REF" || referenceId)) {
     nlParts.push(facingPhrase(state.direction, state.perspective ?? "side"));
+  }
+  if (state.subjectType === "effect" && state.effectType) {
+    const et = EFFECT_TYPES.find(e => e.value === state.effectType);
+    if (et) nlParts.push(et.phrase);
   }
   nlParts.push("transparent background");
   const nl = nlParts.join(", ");
