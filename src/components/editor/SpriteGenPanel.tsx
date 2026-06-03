@@ -433,40 +433,7 @@ export function SpriteGenPanel({
 
         {/* 동작 프롬프트 */}
         <div className="shrink-0 space-y-1">
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-text-muted">동작</label>
-            <div className="ml-auto flex items-center gap-1">
-              <div className="relative">
-                <button
-                  onClick={() => setExampleOpen(o => !o)}
-                  className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary"
-                >
-                  <Lightbulb size={12} /> 예시
-                </button>
-                {exampleOpen && (
-                  <ExamplePopover
-                    exampleKey={exampleKey}
-                    onPick={text => {
-                      setActionPrompt(text);
-                      setExampleOpen(false);
-                    }}
-                    onClose={() => setExampleOpen(false)}
-                  />
-                )}
-              </div>
-              <button
-                onClick={handleAiSuggest}
-                disabled={aiLoading}
-                className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
-                  aiLoading
-                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                    : "border-border text-text-muted hover:text-text-primary"
-                } disabled:opacity-60`}
-              >
-                <Sparkles size={12} /> {aiLoading ? "생각 중…" : "AI 제안"}
-              </button>
-            </div>
-          </div>
+          <label className="text-xs text-text-muted">동작</label>
 
           {/* 통합 입력 박스 — textarea + 옵션 툴바 */}
           <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
@@ -539,6 +506,38 @@ export function SpriteGenPanel({
                   </span>
                 );
               })()}
+              {/* 예시·AI 제안 — 오른쪽 끝 */}
+              <div className="ml-auto flex items-center gap-1">
+                <div className="relative">
+                  <button
+                    onClick={() => setExampleOpen(o => !o)}
+                    className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary"
+                  >
+                    <Lightbulb size={12} /> 예시
+                  </button>
+                  {exampleOpen && (
+                    <ExamplePopover
+                      exampleKey={exampleKey}
+                      onPick={text => {
+                        setActionPrompt(text);
+                        setExampleOpen(false);
+                      }}
+                      onClose={() => setExampleOpen(false)}
+                    />
+                  )}
+                </div>
+                <button
+                  onClick={handleAiSuggest}
+                  disabled={aiLoading}
+                  className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
+                    aiLoading
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-border text-text-muted hover:text-text-primary"
+                  } disabled:opacity-60`}
+                >
+                  <Sparkles size={12} /> {aiLoading ? "생각 중…" : "AI 제안"}
+                </button>
+              </div>
             </div>
           </div>
 
