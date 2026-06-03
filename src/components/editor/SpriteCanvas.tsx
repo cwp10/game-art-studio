@@ -33,6 +33,10 @@ type Props = {
   onCancel: () => void;
   /** 보정본을 새 generation 으로 저장 후 호출 — ChatLayout 이 결과 카드 삽입. */
   onSaved?: (result: { generationId: string; width: number; height: number }) => void;
+  /** 셀 단위 재생성 대상 시트 id. 있으면 셀 호버 시 재생성(✏️) 버튼 노출. 없으면 미노출. */
+  sheetGenerationId?: string;
+  /** 셀 재생성으로 새 시트가 생기면 호출 — ChatLayout 이 패널을 새 시트로 re-point. */
+  onSheetUpdated?: (result: { generationId: string; width: number; height: number }) => void;
 };
 
 export function SpriteCanvas({
@@ -44,6 +48,8 @@ export function SpriteCanvas({
   sessionId,
   onCancel,
   onSaved,
+  sheetGenerationId,
+  onSheetUpdated,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -110,6 +116,12 @@ export function SpriteCanvas({
   const dragFromIdxRef = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
+  // 셀 재생성 — 인라인 프롬프트 입력이 열린 origIdx(없으면 null) + 진행 중 origIdx + 프롬프트 텍스트.
+  const [regenIdx, setRegenIdx] = useState<number | null>(null);
+  const [regenBusy, setRegenBusy] = useState<number | null>(null);
+  const [regenPrompt, setRegenPrompt] = useState("");
+  const [regenError, setRegenError] = useState<string | null>(null);
+
   // 드래그/선택(화살표 nudge) 중 리사이즈로 표시 크기가 재측정되면 진행 중인
   // 포인터 좌표 변환이 흔들린다. MaskCanvas 와 동일하게 조작 중엔 avail 을 고정.
   // useLayoutEffect 클로저에서 최신 상태에 접근하기 위해 ref 사용.
@@ -170,6 +182,14 @@ export function SpriteCanvas({
   // 비정사각 셀 지원 — cellW/cellH 를 각각 독립 역산(정사각 가정 없음).
   const cellW = Math.floor(imageWidth / cols);
   const cellH = Math.floor(imageHeight / rows);
+
+  // 셀 재생성 가드 — API 는 params(rows/cols) 우선·detectSpriteGrid 폴백으로 그리드를 재도출한다.
+  // 사용자가 패널에서 rows/cols 를 수동 변경하면 UI 와 API 의 셀 좌표가 어긋나 엉뚱한 셀을 패치한다
+  // (에러 없이 조용히). 라이브 그리드가 API 가 쓸 그리드와 일치할 때만 ✏️ 버튼을 활성화한다.
+  const apiRows = typeof params?.rows === "number" && params.rows >= 1 ? params.rows : detected?.rows ?? null;
+  const apiCols = typeof params?.cols === "number" && params.cols >= 1 ? params.cols : detected?.cols ?? null;
+  const gridMatchesSheet = apiRows !== null && apiCols !== null && rows === apiRows && cols === apiCols;
+  const canRegenCell = Boolean(sheetGenerationId) && gridMatchesSheet;
   const frameCount = rows * cols;
   // 드래그 여유 공간: 셀 최소 치수의 25%. 이 범위 안에서 드래그해도 콘텐츠가 잘리지 않음.
   const dragPad = Math.round(Math.min(cellW, cellH) * 0.25);
@@ -864,6 +884,34 @@ export function SpriteCanvas({
     }
   }
 
+  // 셀 재생성 — origIdx 를 framePos 로 시트 (row,col) 로 변환해 API 호출(order 흡수). 백엔드의
+  // patchSpritesheetFrame 이 col*cellW/row*cellH 로 추출하므로 시트 좌표를 보내야 한다.
+  async function regenerateCell(origIdx: number) {
+    if (!sheetGenerationId || !canRegenCell || !regenPrompt.trim()) return;
+    const { r, col } = framePos(origIdx, rows, cols, order);
+    setRegenBusy(origIdx);
+    setRegenError(null);
+    try {
+      const res = await fetch("/api/sprite-frame/regenerate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheetGenerationId, row: r, col, prompt: regenPrompt.trim() }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(error ?? `재생성 실패 (${res.status})`);
+      }
+      const data = (await res.json()) as { newSheetGenerationId: string; width: number; height: number };
+      setRegenIdx(null);
+      setRegenPrompt("");
+      onSheetUpdated?.({ generationId: data.newSheetGenerationId, width: data.width, height: data.height });
+    } catch (e) {
+      setRegenError((e as Error).message);
+    } finally {
+      setRegenBusy(null);
+    }
+  }
+
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
@@ -1144,6 +1192,63 @@ export function SpriteCanvas({
                   >
                     {excludedFrames.has(origIdx) ? "+" : "×"}
                   </button>
+                  )}
+                  {/* 셀 재생성 버튼(좌상단) — 라이브 그리드가 API 그리드와 일치할 때만(좌표 정합). 클릭 시 인라인 프롬프트. */}
+                  {canRegenCell && !reorderMode && (
+                  <button
+                    className="absolute left-0.5 top-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border border-white/30 bg-black/50 text-[9px] text-white opacity-0 transition-opacity hover:bg-[color:var(--accent)] group-hover:opacity-100"
+                    title="이 프레임 재생성"
+                    onMouseDown={e => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setRegenIdx(prev => (prev === origIdx ? null : origIdx));
+                      setRegenPrompt("");
+                      setRegenError(null);
+                    }}
+                  >
+                    ✏️
+                  </button>
+                  )}
+                  {/* 진행 중 스피너 오버레이. */}
+                  {regenBusy === origIdx && (
+                    <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded bg-black/60">
+                      <RefreshCw size={16} className="animate-spin text-white" />
+                    </div>
+                  )}
+                  {/* 인라인 재생성 프롬프트 — 셀 위에 떠서 표시. mouseDown 전파 차단(드래그 방지). */}
+                  {regenIdx === origIdx && regenBusy !== origIdx && (
+                    <div
+                      className="absolute inset-x-0 top-full z-30 mt-1 flex flex-col gap-1 rounded border border-[color:var(--accent)] bg-bg-card p-1.5 shadow-lg"
+                      onMouseDown={e => e.stopPropagation()}
+                    >
+                      <input
+                        autoFocus
+                        value={regenPrompt}
+                        onChange={e => setRegenPrompt(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") { e.preventDefault(); regenerateCell(origIdx); }
+                          if (e.key === "Escape") { setRegenIdx(null); setRegenError(null); }
+                        }}
+                        placeholder="이 프레임 편집 프롬프트…"
+                        className="w-full rounded border border-border bg-bg-app px-1.5 py-1 text-[11px] text-text-primary placeholder:text-text-muted/50"
+                      />
+                      {regenError && <span className="text-[10px] text-red-400">{regenError}</span>}
+                      <div className="flex justify-end gap-1">
+                        <button
+                          onClick={() => { setRegenIdx(null); setRegenError(null); }}
+                          className="rounded border border-border px-2 py-0.5 text-[10px] text-text-muted hover:text-text-primary"
+                        >
+                          취소
+                        </button>
+                        <button
+                          onClick={() => regenerateCell(origIdx)}
+                          disabled={!regenPrompt.trim()}
+                          className="rounded bg-[color:var(--accent)] px-2 py-0.5 text-[10px] text-white disabled:opacity-40"
+                        >
+                          재생성
+                        </button>
+                      </div>
+                    </div>
                   )}
                   <svg
                     className="pointer-events-none absolute inset-0 h-full w-full"

@@ -1,6 +1,6 @@
 "use client";
 
-import { Image as ImageIcon, Loader2, MessageSquare, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Download, Image as ImageIcon, Loader2, MessageSquare, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Session } from "@/types/db";
 
@@ -21,6 +21,17 @@ type Props = {
 export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onRename, onOpenGallery, generating }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  function exportSession(s: Session) {
+    setExportingId(s.id);
+    const a = document.createElement("a");
+    a.href = `/api/export?sessionId=${encodeURIComponent(s.id)}`;
+    a.download = `session-${s.id}.zip`;
+    a.click();
+    // 다운로드 시작 후 바로 해제 — 실제 완료 감지는 불필요.
+    setTimeout(() => setExportingId(null), 1500);
+  }
 
   function startEdit(s: Session) {
     setEditingId(s.id);
@@ -121,6 +132,17 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
                         title="제목 수정"
                       >
                         <Pencil size={12} className="text-text-muted hover:text-text-primary" />
+                      </button>
+                      <button
+                        onClick={() => exportSession(s)}
+                        disabled={exportingId === s.id}
+                        className="opacity-0 transition-opacity group-hover:opacity-100 disabled:opacity-100"
+                        title="ZIP 내보내기"
+                      >
+                        {exportingId === s.id
+                          ? <Loader2 size={12} className="animate-spin text-[color:var(--accent)]" />
+                          : <Download size={12} className="text-text-muted hover:text-text-primary" />
+                        }
                       </button>
                       <button
                         onClick={() => {

@@ -145,6 +145,22 @@ export function deleteGeneration(id: string): void {
 }
 
 /**
+ * 세션 ZIP 내보내기용: 한 세션의 모든 생성 이미지를 created_at ASC 정렬로 조회.
+ * 내부 작업용 행(mask/layer)은 제외하고, limit 없이 전부 반환한다.
+ * (listGenerations 는 sessionId 지정 시 mask/layer 필터를 건너뛰고 DESC·LIMIT 200 이라 부적합.)
+ */
+export function listSessionImagesForExport(sessionId: string): Generation[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM generations
+       WHERE session_id = ? AND kind NOT IN ('mask','layer')
+       ORDER BY created_at ASC`,
+    )
+    .all(sessionId) as GenerationRow[];
+  return rows.map(rowToGeneration);
+}
+
+/**
  * 후처리(업스케일/리사이즈/normalize)로 파일 치수가 바뀌면 DB width/height 를 동기화.
  * runImageTool 이 생성 시점 크기를 기록하므로, make_spritesheet 의 업스케일 후 호출 필요.
  */

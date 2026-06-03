@@ -945,11 +945,33 @@ export function ChatLayout() {
       {editing?.mode === "sprite" && (
         <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <SpriteCanvas
+            key={editing.generationId}
             parentGenerationId={editing.generationId}
             imageUrl={editing.imageUrl}
             imageWidth={editing.width}
             imageHeight={editing.height}
             sessionId={state.activeSessionId}
+            sheetGenerationId={editing.generationId}
+            onSheetUpdated={res => {
+              // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
+              // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: "✏️ 프레임 재생성",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "spritesheet",
+              });
+              setEditing({
+                mode: "sprite",
+                generationId: res.generationId,
+                imageUrl: `/api/images/${res.generationId}`,
+                width: res.width,
+                height: res.height,
+              });
+            }}
             onSaved={res => {
               // 보정본을 결과 카드로 chat 에 삽입(reskin b-precise 패턴). 패널은 계속 열린 채로
               // 유지 — 사용자가 추가 방향 보정을 이어갈 수 있게.
