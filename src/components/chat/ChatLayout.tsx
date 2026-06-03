@@ -9,6 +9,7 @@ import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
+import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
@@ -66,6 +67,7 @@ type Editing =
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "a" | "b" | "c" } & EditTarget)
+  | ({ mode: "normal_map" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -452,9 +454,15 @@ export function ChatLayout() {
         handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
           attachmentGenerationIds: [payload.generationId],
         });
-      } else if (action === "make_normal_map" && payload.generationId) {
-        handleSend("이 이미지로 노멀맵 만들어줘.", {
-          attachmentGenerationIds: [payload.generationId],
+      } else if (action === "make_normal_map" && payload.generationId && payload.width && payload.height) {
+        setSpriteGen(null);
+        setEditing({
+          mode: "normal_map",
+          generationId: payload.generationId,
+          imageUrl: `/api/images/${payload.generationId}`,
+          width: payload.width,
+          height: payload.height,
+          kind: payload.kind,
         });
       } else if (action === "overlay" && payload.generationId && payload.width && payload.height) {
         // 캐릭터 오버레이 = 리스킨 모드 c(참조 전이)를 시트 베이스로 바로 오픈.
@@ -1000,6 +1008,29 @@ export function ChatLayout() {
             initialMode={editing.initialMode}
             sessionId={state.activeSessionId}
             onSubmit={handleReskin}
+            onClose={() => setEditing(null)}
+          />
+        </div>
+      )}
+      {editing?.mode === "normal_map" && (
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+          <NormalMapPanel
+            generationId={editing.generationId}
+            imageUrl={editing.imageUrl}
+            width={editing.width}
+            height={editing.height}
+            onResult={res => {
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: "🗺️ 노멀맵",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "normal_map",
+              });
+              setEditing(null);
+            }}
             onClose={() => setEditing(null)}
           />
         </div>
