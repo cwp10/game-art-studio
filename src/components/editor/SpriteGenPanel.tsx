@@ -93,19 +93,16 @@ const FRAME_OPTS: Array<{ value: FrameCount; rows: number; cols: number }> = [
   { value: 16, rows: 4, cols: 4 },
 ];
 
-// 애니메이션 타입 프리셋 — frames 자동 설정 + 비어 있을 때 동작 힌트 채움 (로컬 UI 전용)
-const ANIM_PRESETS = [
-  { key: "custom", label: "커스텀",  frames: null, hint: "" },
-  { key: "idle",   label: "대기",    frames: 4,    hint: "idle breathing animation, subtle movement" },
-  { key: "walk",   label: "걷기",    frames: 8,    hint: "walking cycle animation" },
-  { key: "run",    label: "달리기",  frames: 8,    hint: "running cycle animation, fast movement" },
-  { key: "attack", label: "공격",    frames: 6,    hint: "attack animation, swing motion" },
-  { key: "jump",   label: "점프",    frames: 6,    hint: "jump arc animation" },
-  { key: "death",  label: "사망",    frames: 6,    hint: "death animation, falling down" },
-  { key: "cast",   label: "시전",    frames: 8,    hint: "spell casting animation, magical gesture" },
-] as const;
-
-type AnimType = (typeof ANIM_PRESETS)[number]["key"];
+// 동작 텍스트 키워드 → 프레임·루프 자동 추천 (애니메이션 드롭다운 대체)
+const ACTION_FRAME_HINTS: Array<{ pattern: RegExp; frames: FrameCount; loop: boolean }> = [
+  { pattern: /걷기|보행|walk(ing)?/, frames: 8, loop: true },
+  { pattern: /달리기|뛰기|run(ning)?|sprint/, frames: 8, loop: true },
+  { pattern: /대기|idle|호흡|breath(ing)?|서있/, frames: 4, loop: true },
+  { pattern: /공격|attack|slash|swing|때리|strike/, frames: 6, loop: false },
+  { pattern: /점프|jump|도약|leap/, frames: 6, loop: false },
+  { pattern: /사망|죽음|die|death|fall(ing)? down/, frames: 6, loop: false },
+  { pattern: /시전|cast(ing)?|마법|magic|spell/, frames: 8, loop: false },
+];
 
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
 // 실측 built-in tool 한계: 한 변 최대 1536px(CELL_PX=384 × 4). MCP server.ts 검증과 동일.
@@ -211,7 +208,8 @@ export function SpriteGenPanel({
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
-  const [animType, setAnimType] = useState<AnimType>("custom");
+  // 사용자가 직접 프레임을 변경했는지 추적 — true면 자동 추천 덮어쓰기 안 함
+  const [userSetFrames, setUserSetFrames] = useState(false);
 
   // 참조 이미지 연결·해제 시 방향 자동 전환 — 함수형 업데이트로 stale closure 방지
   useEffect(() => {
@@ -221,6 +219,19 @@ export function SpriteGenPanel({
       setDirection(prev => prev === "REF" ? "DOWN" : prev);
     }
   }, [referenceImageUrl]);
+
+  // 동작 텍스트 변경 시 자동 프레임·루프 추천 (사용자가 직접 설정하지 않은 경우만)
+  useEffect(() => {
+    if (userSetFrames || !actionPrompt.trim()) return;
+    const lower = actionPrompt.toLowerCase();
+    for (const hint of ACTION_FRAME_HINTS) {
+      if (hint.pattern.test(lower)) {
+        setFrames(hint.frames);
+        setSeamlessLoop(hint.loop);
+        break;
+      }
+    }
+  }, [actionPrompt, userSetFrames]);
 
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
@@ -327,28 +338,53 @@ export function SpriteGenPanel({
       </header>
 
       <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-4 overflow-y-auto p-3">
-        {/* 참조 이미지 썸네일 */}
-        {referenceImageUrl && (
+        {/* 참조 이미지 줄 — 없으면 캐릭터/오브젝트 토글만 단독 노출 */}
+        {referenceImageUrl ? (
           <div className="flex shrink-0 items-center gap-3 rounded-lg border border-border bg-bg-card p-2">
             <div className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={referenceImageUrl}
-                alt="참조"
-                className="block h-14 w-14 object-contain"
-              />
+              <img src={referenceImageUrl} alt="참조" className="block h-14 w-14 object-contain" />
             </div>
-            <div className="min-w-0 text-xs">
+            <div className="min-w-0 flex-1 text-xs">
               <div className="text-text-primary">참조 이미지</div>
-              <div className="truncate text-text-muted/70">
-                {referenceId?.slice(0, 12)}…
-              </div>
+              <div className="truncate text-text-muted/70">{referenceId?.slice(0, 12)}…</div>
             </div>
+            {/* 캐릭터/오브젝트 토글 — 참조 이미지 줄 오른쪽 */}
+            <div className="flex shrink-0 rounded-lg border border-border bg-bg-panel p-0.5 text-xs">
+              <button
+                onClick={() => setContextMode("character")}
+                className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "character" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+              >
+                캐릭터
+              </button>
+              <button
+                onClick={() => setContextMode("object")}
+                className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "object" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+              >
+                오브젝트
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* 참조 이미지 없을 때 — 캐릭터/오브젝트 토글 단독 */
+          <div className="flex shrink-0 rounded-lg border border-border bg-bg-card p-0.5 text-xs self-start">
+            <button
+              onClick={() => setContextMode("character")}
+              className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "character" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+            >
+              캐릭터
+            </button>
+            <button
+              onClick={() => setContextMode("object")}
+              className={`flex h-7 items-center px-3 rounded-md transition-colors ${contextMode === "object" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+            >
+              오브젝트
+            </button>
           </div>
         )}
 
         {/* 2-탭 — contextMode 에 따라 [캐릭터|이펙트] 또는 [오브젝트|이펙트] */}
-        <div className="shrink-0 space-y-1.5">
+        <div className="shrink-0">
           <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
             <button
               onClick={() => switchTab("subject")}
@@ -371,131 +407,6 @@ export function SpriteGenPanel({
               이펙트
             </button>
           </div>
-        </div>
-
-        {/* 옵션 줄 — 캐릭터/오브젝트 전환 + 방향(캐릭터 탭만) + 프레임 + 스타일 + 루프 */}
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <div className="flex rounded-lg border border-border bg-bg-card p-0.5 text-xs">
-            <button
-              onClick={() => setContextMode("character")}
-              className={`flex h-7 items-center px-3 rounded-md transition-colors ${
-                contextMode === "character"
-                  ? "bg-[color:var(--accent)]/20 text-text-primary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              캐릭터
-            </button>
-            <button
-              onClick={() => setContextMode("object")}
-              className={`flex h-7 items-center px-3 rounded-md transition-colors ${
-                contextMode === "object"
-                  ? "bg-[color:var(--accent)]/20 text-text-primary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              오브젝트
-            </button>
-          </div>
-          {subjectType === "character" && (
-            <div className="relative">
-              <button
-                onClick={() => {
-                  setDirOpen(o => !o);
-                  setFrameOpen(false);
-                }}
-                className="flex h-8 items-center gap-1 rounded-lg border border-border bg-bg-card px-3 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
-              >
-                {DIRECTION_LABELS[direction]}
-              </button>
-              {dirOpen && (
-                <DirectionPopover
-                  selected={direction}
-                  onSelect={d => {
-                    setDirection(d);
-                    setDirOpen(false);
-                  }}
-                  onClose={() => setDirOpen(false)}
-                  referenceImageUrl={referenceImageUrl}
-                />
-              )}
-            </div>
-          )}
-
-          <div className="relative">
-            <button
-              onClick={() => {
-                setFrameOpen(o => !o);
-                setDirOpen(false);
-              }}
-              className="flex h-8 items-center gap-1 rounded-lg border border-border bg-bg-card px-3 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
-            >
-              {frames}프레임 {grid.rows}×{grid.cols}
-            </button>
-            {frameOpen && (
-              <FramePopover
-                selected={frames}
-                onSelect={f => {
-                  setFrames(f);
-                  setAnimType("custom");
-                  setFrameOpen(false);
-                }}
-                onClose={() => setFrameOpen(false)}
-              />
-            )}
-          </div>
-
-          <StylePresetPicker value={stylePresetId} onChange={setStylePresetId} popoverDirection="down" />
-
-          <label className="flex cursor-pointer items-center gap-1 text-xs text-text-muted">
-            <input
-              type="checkbox"
-              checked={seamlessLoop}
-              onChange={e => setSeamlessLoop(e.target.checked)}
-            />
-            루프
-          </label>
-        </div>
-
-        {/* 프레임 한계 경고 — near/over 일 때만 */}
-        {(() => {
-          const info = frameCanvasInfo(grid.rows, grid.cols);
-          if (info.status === "safe") return null;
-          const mpx = (info.totalPx / 1_000_000).toFixed(1);
-          return (
-            <p className={`text-[11px] ${info.status === "over" ? "text-red-400" : "text-orange-400"}`}>
-              {info.status === "over" ? "⚠ API 한계 초과:" : "⚠ API 한계 근접:"}{" "}
-              {info.w}×{info.h} = {mpx}M / {(API_MAX_PX / 1_000_000).toFixed(1)}M px — 생성 실패 가능
-            </p>
-          );
-        })()}
-
-        {/* 애니메이션 타입 프리셋 */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-text-muted">애니메이션</span>
-          <select
-            value={animType}
-            onChange={e => {
-              const key = e.target.value as AnimType;
-              setAnimType(key);
-              const preset = ANIM_PRESETS.find(p => p.key === key);
-              if (!preset) return;
-              if (preset.frames !== null) setFrames(preset.frames);
-              const isPresetHint = ANIM_PRESETS.some(p => p.hint && p.hint === actionPrompt.trim());
-              if (key === "custom") {
-                if (isPresetHint) setActionPrompt("");
-              } else if (preset.hint && (actionPrompt.trim().length === 0 || isPresetHint)) {
-                setActionPrompt(preset.hint);
-              }
-            }}
-            className="h-7 rounded-md border border-border bg-bg-card px-2 text-xs text-text-primary outline-none focus:border-[color:var(--accent)]/60"
-          >
-            {ANIM_PRESETS.map(p => (
-              <option key={p.key} value={p.key}>
-                {p.label}
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* 시점 선택 */}
@@ -562,18 +473,86 @@ export function SpriteGenPanel({
             </div>
           </div>
 
-          <textarea
-            value={actionPrompt}
-            onChange={e => setActionPrompt(e.target.value)}
-            placeholder="어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
-            rows={3}
-            className="block min-h-[78px] w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
-          />
+          {/* 통합 입력 박스 — textarea + 옵션 툴바 */}
+          <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+            <textarea
+              value={actionPrompt}
+              onChange={e => setActionPrompt(e.target.value)}
+              placeholder="어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
+              rows={3}
+              className="block min-h-[78px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+            />
+            {/* 옵션 툴바 — 참조·프레임·스타일·루프 */}
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-2 py-1.5">
+              {/* 방향 — 캐릭터 탭만 */}
+              {subjectType === "character" && (
+                <div className="relative">
+                  <button
+                    onClick={() => { setDirOpen(o => !o); setFrameOpen(false); }}
+                    className="flex h-7 items-center gap-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
+                  >
+                    ↻ {DIRECTION_LABELS[direction]}
+                  </button>
+                  {dirOpen && (
+                    <DirectionPopover
+                      selected={direction}
+                      onSelect={d => { setDirection(d); setDirOpen(false); }}
+                      onClose={() => setDirOpen(false)}
+                      referenceImageUrl={referenceImageUrl}
+                    />
+                  )}
+                </div>
+              )}
+              {/* 프레임 */}
+              <div className="relative">
+                <button
+                  onClick={() => { setFrameOpen(o => !o); setDirOpen(false); }}
+                  className="flex h-7 items-center gap-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
+                >
+                  {frames}프레임 {grid.rows}×{grid.cols}
+                </button>
+                {frameOpen && (
+                  <FramePopover
+                    selected={frames}
+                    onSelect={f => {
+                      setFrames(f);
+                      setUserSetFrames(true);
+                      setFrameOpen(false);
+                    }}
+                    onClose={() => setFrameOpen(false)}
+                  />
+                )}
+              </div>
+              {/* 스타일 */}
+              <StylePresetPicker value={stylePresetId} onChange={setStylePresetId} popoverDirection="up" />
+              {/* 루프 */}
+              <label className="flex cursor-pointer items-center gap-1 rounded-md border border-border bg-bg-panel px-2 py-1 text-xs text-text-muted hover:text-text-primary">
+                <input
+                  type="checkbox"
+                  checked={seamlessLoop}
+                  onChange={e => setSeamlessLoop(e.target.checked)}
+                  className="h-3 w-3"
+                />
+                루프
+              </label>
+              {/* 프레임 한계 경고 */}
+              {(() => {
+                const info = frameCanvasInfo(grid.rows, grid.cols);
+                if (info.status === "safe") return null;
+                const mpx = (info.totalPx / 1_000_000).toFixed(1);
+                return (
+                  <span className={`text-[10px] ${info.status === "over" ? "text-red-400" : "text-orange-400"}`}>
+                    ⚠ {info.w}×{info.h} = {mpx}M px {info.status === "over" ? "(초과)" : "(근접)"}
+                  </span>
+                );
+              })()}
+            </div>
+          </div>
 
-          {/* 걷기·달리기 추천 힌트 — 캐릭터 탭만 */}
-          {subjectType === "character" && (
+          {/* 자동 프레임 추천 힌트 */}
+          {!userSetFrames && actionPrompt.trim().length > 0 && (
             <p className="text-[11px] text-text-muted/60 leading-relaxed">
-              걷기·달리기는 <span className="text-text-muted">{ANIM_PRESETS.find(p => p.key === "walk")!.frames}프레임</span> + <span className="text-text-muted">루프 켜기</span> 추천
+              <span className="text-text-muted">{frames}프레임{seamlessLoop ? " · 루프" : ""}</span>으로 자동 설정됨 — 툴바에서 직접 변경 가능
             </p>
           )}
 
