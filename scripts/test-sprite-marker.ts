@@ -29,7 +29,6 @@ function base(): SpriteGenState {
     contextType: "character",
     direction: "DOWN",
     frames: 8,
-    stylePresetId: null,
     seamlessLoop: false,
     actionPrompt: "걷기 모션",
   };

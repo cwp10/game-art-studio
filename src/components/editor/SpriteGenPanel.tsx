@@ -2,8 +2,7 @@
 
 import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { StylePresetPicker } from "@/components/library/StylePresetPicker";
-import { listPresets } from "@/lib/api/client";
+
 
 /**
  * SpriteGenPanel — 스프라이트시트 전용 생성 패널 (editor 오버레이, ChatLayout 우측).
@@ -34,7 +33,6 @@ export type SpriteGenState = {
   contextType: ContextMode; // effect 탭일 때 어떤 컨텍스트의 이펙트인지
   direction: Direction;
   frames: FrameCount;
-  stylePresetId: string | null;
   seamlessLoop: boolean;
   actionPrompt: string;
   perspective?: Perspective;
@@ -204,7 +202,6 @@ export function SpriteGenPanel({
 
   const [direction, setDirection] = useState<Direction>(referenceImageUrl ? "REF" : "DOWN");
   const [frames, setFrames] = useState<FrameCount>(8);
-  const [stylePresetId, setStylePresetId] = useState<string | null>(null);
   const [seamlessLoop, setSeamlessLoop] = useState(true);
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
@@ -302,18 +299,16 @@ export function SpriteGenPanel({
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const suffix = await resolveStyleSuffix(stylePresetId);
-      const state: SpriteGenState = {
+        const state: SpriteGenState = {
         subjectType,
         contextType: contextMode,
         direction,
         frames,
-        stylePresetId,
         seamlessLoop,
         actionPrompt: actionPrompt.trim(),
         perspective,
       };
-      const msg = buildSpriteMessage(state, suffix, referenceId ?? null);
+      const msg = buildSpriteMessage(state, null, referenceId ?? null);
       saveRecent(exampleKey, state.actionPrompt);
       setRecents(loadRecents(exampleKey));
       onSubmit([msg]);
@@ -523,8 +518,6 @@ export function SpriteGenPanel({
                   />
                 )}
               </div>
-              {/* 스타일 */}
-              <StylePresetPicker value={stylePresetId} onChange={setStylePresetId} popoverDirection="up" />
               {/* 루프 */}
               <label className="flex cursor-pointer items-center gap-1 rounded-md border border-border bg-bg-panel px-2 py-1 text-xs text-text-muted hover:text-text-primary">
                 <input
@@ -864,12 +857,3 @@ export function buildSpriteMessage(
   };
 }
 
-export async function resolveStyleSuffix(presetId: string | null): Promise<string | null> {
-  if (!presetId) return null;
-  try {
-    const all = await listPresets();
-    return all.find(p => p.id === presetId)?.prompt_suffix ?? null;
-  } catch {
-    return null;
-  }
-}
