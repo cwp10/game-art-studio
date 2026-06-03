@@ -42,14 +42,27 @@ function circle(cx: number, cy: number, r: number, color: string) {
 }
 
 /**
- * 8방향 시트의 dirIndex(0~7) → walkAngle θ(도). directionLabels(8) 순서:
- *   0:DOWN(90) 1:DOWN-LEFT(135) 2:LEFT(180) 3:UP-LEFT(225)
- *   4:UP(270)  5:UP-RIGHT(315)  6:RIGHT(0)  7:DOWN-RIGHT(45)
+ * 8방향 canonical order(게임 관례 확정). directionLabels(8) 행 순서와 1:1.
+ *   short = 셀 라벨용 짧은 이름 / full = make_spritesheet 입력 방향명(DIR_INDEX 역매핑 키)
+ *   angle = 보행 진행각 θ(도). walkX=cos θ(오른쪽+), walkY=sin θ(아래/전면+).
+ * DIR_NAMES·DIR_WALK_ANGLE·DIR_INDEX를 전부 이 테이블에서 파생 — 순서가 한 곳뿐이라 드리프트 불가.
  */
-const DIR_WALK_ANGLE = [90, 135, 180, 225, 270, 315, 0, 45];
+const DIRECTIONS_8 = [
+  { short: "DOWN",     full: "DOWN",       angle: 90 },
+  { short: "DN-LEFT",  full: "DOWN-LEFT",  angle: 135 },
+  { short: "LEFT",     full: "LEFT",       angle: 180 },
+  { short: "UP-LEFT",  full: "UP-LEFT",    angle: 225 },
+  { short: "UP",       full: "UP",         angle: 270 },
+  { short: "UP-RIGHT", full: "UP-RIGHT",   angle: 315 },
+  { short: "RIGHT",    full: "RIGHT",      angle: 0 },
+  { short: "DN-RIGHT", full: "DOWN-RIGHT", angle: 45 },
+] as const;
 
-/** dirIndex(0~7) → 짧은 방향명. DIR_WALK_ANGLE / directionLabels(8) 순서와 1:1. server.ts 라벨링과 공용. */
-export const DIR_NAMES = ["DOWN", "DN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DN-RIGHT"];
+/** dirIndex(0~7) → 짧은 방향명. 셀 라벨·server.ts 다중방향 라벨링 공용. */
+export const DIR_NAMES = DIRECTIONS_8.map(d => d.short);
+/** make_spritesheet 입력 방향명(full) → dirIndex. server.ts parsedWalkDir 변환 공용. */
+export const DIR_INDEX: Record<string, number> = Object.fromEntries(DIRECTIONS_8.map((d, i) => [d.full, i]));
+const DIR_WALK_ANGLE = DIRECTIONS_8.map(d => d.angle);
 
 /** 방향별 스크린 투영 성분. walkX 양수=오른쪽, walkY 양수=아래쪽(전면/시청자 쪽). */
 function walkComponents(dirIndex: number) {

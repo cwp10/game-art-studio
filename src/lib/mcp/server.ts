@@ -46,7 +46,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../image-backend/spritesheet-postprocess.js";
-import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, DIR_NAMES, type FrameAngle } from "../image-backend/pose-reference.js";
+import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, DIR_NAMES, DIR_INDEX, type FrameAngle } from "../image-backend/pose-reference.js";
 import {
   inferSubjectType,
   buildDirectionPrompt,
@@ -1276,11 +1276,7 @@ async function buildSpritePrompt(
   let poseRefPath: string | null = null;
   let poseFrameAnglesText = "";
   if (isWalk && isCharacter && isSingleDirection) {
-    // directionLabels(8) 순서: 0:DOWN 1:DOWN-LEFT 2:LEFT 3:UP-LEFT 4:UP 5:UP-RIGHT 6:RIGHT 7:DOWN-RIGHT
-    const DIR_INDEX: Record<string, number> = {
-      "DOWN": 0, "DOWN-LEFT": 1, "LEFT": 2, "UP-LEFT": 3,
-      "UP": 4, "UP-RIGHT": 5, "RIGHT": 6, "DOWN-RIGHT": 7,
-    };
+    // DIR_INDEX(full 방향명→dirIndex)는 pose-reference.ts DIRECTIONS_8에서 파생 — 순서 단일 소스.
     const dirIndex = DIR_INDEX[parsedWalkDir ?? "RIGHT"] ?? 6;
     // 단일방향: 평탄 배열을 rows에 따라 셀 위치 라벨링.
     const toAngleText = (angles: FrameAngle[], r: number) =>
