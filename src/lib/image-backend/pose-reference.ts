@@ -161,13 +161,16 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   const headColor = isBack ? "#7a6038" : "#f0c080";
   elements.push(circle(CX, HEAD_Y, HEAD_R, headColor));
 
+  // faceDeg: 진행방향 각도(endpoint 관례 0°=아래, 90°=오른쪽). 코와 발끝 양쪽에서 공유.
+  // SIDE_WALKX_THRESHOLD 조건 밖에서는 0(미사용)이며 guard 조건이 재확인한다.
+  const faceDeg = Math.abs(walkX) > SIDE_WALKX_THRESHOLD
+    ? (Math.atan2(walkX, walkY) * 180) / Math.PI
+    : 0;
+
   // facing 단서(코): 후면이 아니고 좌우 진행 성분이 있으면 머리에서 진행방향으로 짧게 돌출.
   // 순수 측면(LEFT↔RIGHT)·전면 대각은 머리·몸통이 대칭이라 발끝만으론 좌우 구분이 약함 →
   // 모델이 facing을 안정적으로 읽도록 코를 추가. 정면/후면(walkX≈0)은 머리색으로 이미 구분.
   if (!isBack && Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
-    // 실제 진행방향(walkX,walkY)으로 코를 꺾어 대각선 방향을 명확히 표현.
-    // endpoint 각도 관례: 0°=아래, 90°=오른쪽. atan2(walkX,walkY)가 이 관례와 일치.
-    const faceDeg = (Math.atan2(walkX, walkY) * 180) / Math.PI;
     const noseStart = endpoint(CX, HEAD_Y, faceDeg, HEAD_R * 0.4);
     const noseEnd   = endpoint(CX, HEAD_Y, faceDeg, HEAD_R + 8);
     elements.push(line(noseStart.x, noseStart.y, noseEnd.x, noseEnd.y, headColor, 6));
@@ -224,7 +227,6 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     // (예: DOWN-RIGHT는 우하향). endpoint 각도(수직 기준): RIGHT=90°, DOWN-RIGHT=45°.
     // walkY를 무시한 수평 발끝이 "대각으로 걷는데 발은 옆" 방향 불일치를 일으키던 문제 수정.
     if (Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
-      const faceDeg = (Math.atan2(walkX, walkY) * 180) / Math.PI;
       const tip = endpoint(foot.x, footY, faceDeg + leg.swingAngle * 0.2, 14);
       elements.push(line(foot.x, footY, tip.x, tip.y, color, 4));
     } else {
