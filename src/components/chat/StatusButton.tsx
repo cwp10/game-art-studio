@@ -25,13 +25,39 @@ function Dot({ ok, loading }: { ok: boolean; loading: boolean }) {
     : <XCircle size={12} className="text-[color:var(--danger)]" />;
 }
 
+type Orchestrator = "claude" | "codex";
+
 export function StatusButton() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
+  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // 마운트 시 오케스트레이터 설정 fetch. 토글은 낙관적 업데이트 후 PATCH.
+  useEffect(() => {
+    fetch("/api/config")
+      .then(r => r.json())
+      .then((cfg: { orchestrator?: Orchestrator }) => setOrchestrator(cfg.orchestrator === "codex" ? "codex" : "claude"))
+      .catch(() => {});
+  }, []);
+
+  async function handleToggleOrchestrator() {
+    const next: Orchestrator = orchestrator === "claude" ? "codex" : "claude";
+    setOrchestrator(next); // 낙관적
+    try {
+      await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orchestrator: next }),
+      });
+    } catch {
+      setOrchestrator(orchestrator); // 롤백
+    }
+  }
+  const isClaudeMode = orchestrator === "claude";
 
   async function runCleanup() {
     setClearing(true);
@@ -121,9 +147,28 @@ export function StatusButton() {
                     <Dot ok={s?.ok ?? false} loading={loading || !status} />
                     <span className="flex-1 text-xs text-text-primary">{TOOL_LABELS[key]}</span>
                     {s?.version && (
-                      <span className="text-[10px] text-text-muted/60">{s.version}</span>
+                      <span className="max-w-[80px] truncate text-[10px] text-text-muted/60">{s.version}</span>
+                    )}
+                    {key === "claude" && (
+                      <button
+                        onClick={handleToggleOrchestrator}
+                        title={isClaudeMode ? "오케스트레이터: Claude — 클릭 시 Codex 직접 모드로 전환" : "오케스트레이터: Codex 직접 — 클릭 시 Claude로 전환"}
+                        className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                          isClaudeMode
+                            ? "bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/25"
+                            : "bg-border text-text-muted hover:bg-bg-card hover:text-text-primary"
+                        }`}
+                      >
+                        {isClaudeMode ? "Claude" : "Codex 직접"}
+                      </button>
+                    )}
+                    {key === "codex" && orchestrator === "codex" && (
+                      <span className="shrink-0 rounded bg-[color:var(--success)]/15 px-1.5 py-0.5 text-[10px] text-[color:var(--success)]">사용 중</span>
                     )}
                   </div>
+                  {key === "codex" && (
+                    <p className="mt-1 pl-5 text-[10px] text-text-muted/60">이미지 생성 전용</p>
+                  )}
                   {s && !s.ok && (
                     <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[color:var(--danger)]/80">
                       <AlertCircle size={10} className="mt-0.5 shrink-0" />

@@ -77,6 +77,8 @@ export function ChatLayout() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  // 오케스트레이터 모드 — Codex 직접 모드면 Composer 위 배너 표시. StatusButton 과 독립 fetch.
+  const [orchestrator, setOrchestrator] = useState<"claude" | "codex">("claude");
   // Composer prefill — seq 카운터로 같은 text 도 매번 새 trigger.
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
   // Composer attachment — 업로드/카드 액션 직후 set. seq 카운터로 동일 generationId 도 새로 trigger.
@@ -100,6 +102,14 @@ export function ChatLayout() {
   // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
+
+  // 오케스트레이터 설정 로드 (마운트 1회).
+  useEffect(() => {
+    fetch("/api/config")
+      .then(r => r.json())
+      .then((cfg: { orchestrator?: "claude" | "codex" }) => setOrchestrator(cfg.orchestrator === "codex" ? "codex" : "claude"))
+      .catch(() => {});
+  }, []);
 
   // 세션 목록 로드 — search 변경 시 reload (debounce 200ms).
   useEffect(() => {
@@ -1013,6 +1023,12 @@ export function ChatLayout() {
             />
           )}
         </main>
+        {orchestrator === "codex" && (
+          <div className="flex items-center gap-2 border-t border-border bg-bg-card px-4 py-1.5 text-[11px] text-text-muted">
+            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--warning,#f59e0b)]" />
+            Codex 직접 모드 — 자유형 편집 요청은 정확도가 낮을 수 있습니다
+          </div>
+        )}
         <Composer
           disabled={state.generating}
           generating={state.generating}

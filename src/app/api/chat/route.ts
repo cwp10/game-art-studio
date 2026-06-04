@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { createSseStream, SSE_HEADERS } from "@/lib/sse/stream";
 import type { ChatEvent, ChatRequest } from "@/types/chat";
-import type { MessageBlock } from "@/types/db";
+import type { GenerationKind, MessageBlock } from "@/types/db";
 import {
   createSession,
   getSession,
@@ -16,8 +17,9 @@ import { createJob, updateJob } from "@/lib/db/repo/jobs";
 import { newJobId, newGenerationId } from "@/lib/util/ids";
 import { spawnClaude, checkClaudeAvailable } from "@/lib/cli/claude-cli";
 import { tailProgress } from "@/lib/cli/progress-tail";
-import { selectImageBackend } from "@/lib/image-backend";
-import { toRelative } from "@/lib/util/paths";
+import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
+import { DATA_DIR, IMAGES_DIR, imagePath, toRelative } from "@/lib/util/paths";
+import { parseIntent, type CodexIntent } from "@/lib/codex-orchestrator";
 
 /**
  * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
@@ -40,6 +42,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MCP_CONFIG_PATH = path.join(process.cwd(), "data", "mcp.json");
+const APP_CONFIG_PATH = path.join(DATA_DIR, "config.json");
+
+/**
+ * data/config.json 의 orchestrator 설정. 파일 없거나 파싱 실패 시 Claude 기본값.
+ * StatusButton 토글이 PATCH /api/config 로 쓴 값을 chat/route 가 이 함수로 읽어 분기.
+ */
+function readOrchestratorConfig(): "claude" | "codex" {
+  try {
+    const raw = fs.readFileSync(APP_CONFIG_PATH, "utf8");
+    const cfg = JSON.parse(raw) as { orchestrator?: unknown };
+    return cfg.orchestrator === "codex" ? "codex" : "claude";
+  } catch {
+    return "claude";
+  }
+}
 const SYSTEM_PROMPT_PATH = path.join(
   process.cwd(),
   "src",
@@ -167,10 +184,18 @@ async function runChat(
   sseSignal.addEventListener("abort", onAbort, { once: true });
   reqSignal.addEventListener("abort", onAbort, { once: true });
 
-  // 5. Claude CLI 가용성 확인 — 미연결 시 Codex 직접 실행 경로로 전환
-  if (!(await checkClaudeAvailable())) {
+  // 5. 오케스트레이터 분기.
+  //    - config 가 "codex" 면 Claude 체크 없이 바로 Codex 직접 모드(주 경로).
+  //    - "claude" 면 가용성 확인 후, 미연결 시에만 Codex 로 자동 폴백.
+  const orchestrator = readOrchestratorConfig();
+  if (orchestrator === "codex" || !(await checkClaudeAvailable())) {
+    // Claude 모드인데 미연결이라 폴백한 경우에만 안내 메시지를 붙인다(intent 무관 1줄).
+    const autoFallback = orchestrator === "claude";
     try {
-      await runChatCodexDirect({ body, send, sessionId, isNewSession, jobId, messageText, signal: combinedAbort.signal });
+      await runChatCodexDirect({
+        body, send, sessionId, isNewSession, jobId, messageText,
+        autoFallback, signal: combinedAbort.signal,
+      });
     } catch (err) {
       const msg = (err as Error).message;
       updateJob(jobId, { status: "failed", error: msg, ended_at: Date.now() });
@@ -453,10 +478,14 @@ function findIdInString(s: string): string | null {
 }
 
 /**
- * Claude CLI 없이 CodexExecBackend 를 직접 호출하는 fallback 경로.
+ * Claude CLI 없이 CodexExecBackend 를 직접 호출하는 경로.
  *
- * Claude 오케스트레이션 없이 단순 text2img 만 수행한다 (첨부 이미지·복합 도구 미지원).
- * SSE 이벤트 포맷은 일반 경로와 동일하게 유지해서 클라이언트가 차이를 몰라도 된다.
+ * codex-orchestrator 의 parseIntent() 로 메시지를 도구 호출 명세로 해석한 뒤, 11개 도구를
+ * MCP 서버와 동일한 흐름(job → backend.execute / sharp → generation 행)으로 실행한다.
+ * generate_normal_map·resize_image 는 sharp 결정적 처리(codex 미경유), 나머지는 backend.execute.
+ *
+ * config.orchestrator==="codex" 면 주 경로, "claude" 인데 미연결이면 자동 폴백(autoFallback).
+ * SSE 이벤트 포맷은 일반 경로와 동일 — 클라이언트가 차이를 몰라도 된다.
  */
 async function runChatCodexDirect(opts: {
   body: ChatRequest;
@@ -465,80 +494,73 @@ async function runChatCodexDirect(opts: {
   isNewSession: boolean;
   jobId: string;
   messageText: string;
+  autoFallback: boolean;
   signal: AbortSignal;
 }): Promise<void> {
-  const { body, send, sessionId, isNewSession, jobId, messageText, signal } = opts;
+  const { send, sessionId, isNewSession, jobId, messageText, autoFallback, signal } = opts;
   const toolCallId = `codex_${jobId}`;
 
   send({ type: "assistant_thinking" });
-  const hasAttachments = (body.attachmentGenerationIds?.length ?? 0) > 0 || !!body.maskGenerationId;
-  const fallbackNotice = hasAttachments
-    ? "(Claude CLI 연결 안 됨 — 첨부 이미지는 지원되지 않아 텍스트만으로 생성합니다)\n"
-    : "(Claude CLI 연결 안 됨 — Codex로 직접 생성합니다)\n";
-  send({ type: "assistant_text", text: fallbackNotice });
-  send({ type: "tool_call_started", toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } });
+  // Claude 모드 자동 폴백일 때만 안내 1줄. Codex 주 모드는 정상 모드라 안내 없음.
+  if (autoFallback) {
+    send({ type: "assistant_text", text: "(Claude CLI 연결 안 됨 — Codex 모드로 전환합니다)\n" });
+  }
 
-  const innerJobId = newJobId();
-  const generationId = newGenerationId();
+  const intent = parseIntent(messageText);
+  const toolDisplayName = `mcp__imggen__${intent.tool}`;
 
-  createJob({
-    id: innerJobId,
-    session_id: sessionId,
-    kind: "codex_image",
-    args: { prompt: body.message, generationId, viaMcp: false },
-  });
+  // 입력 generationId → 디스크 절대 경로. 없거나 못 찾으면 null.
+  const resolveImagePath = (generationId?: string): string | null => {
+    if (!generationId) return null;
+    const gen = getGeneration(generationId);
+    return gen ? path.join(DATA_DIR, gen.image_path) : null;
+  };
 
-  const backend = await selectImageBackend();
-  let result: Awaited<ReturnType<typeof backend.execute>>;
+  // 참조 입력이 필요한 도구인데 첨부가 없으면 안내 후 종료.
+  const needsInput: CodexIntent["tool"][] = [
+    "edit_image", "upscale_image", "resize_image", "remove_background",
+    "inpaint_image", "reskin_image", "generate_normal_map", "make_emote_sheet",
+  ];
+  if (needsInput.includes(intent.tool) && !intent.args.inputGenerationId) {
+    send({ type: "assistant_text", text: "참조 이미지가 필요합니다. 결과 카드의 [참조] 버튼이나 업로드로 이미지를 먼저 첨부해 주세요." });
+    updateJob(jobId, { status: "failed", error: "input image required", ended_at: Date.now() });
+    return;
+  }
+
+  send({ type: "tool_call_started", toolCallId, name: toolDisplayName, args: intent.args });
+
+  // ── 실행: sharp 전용(normal_map/resize) vs backend.execute ────────────────
+  let outcome: { generationId: string; width: number; height: number; createdAt: number; kind: GenerationKind };
   try {
-    result = await backend.execute(
-      { id: innerJobId, generationId, kind: "text2img", prompt: body.message },
-      (stage, detail) => {
-        send({ type: "tool_call_progress", toolCallId, stage, detail });
-      },
-      signal,
-    );
+    if (intent.tool === "resize_image") {
+      outcome = await runDirectResize({ sessionId, inputGenerationId: intent.args.inputGenerationId!, targetSize: intent.args.targetSize ?? 512 });
+    } else if (intent.tool === "generate_normal_map") {
+      outcome = await runDirectNormalMap({ sessionId, inputGenerationId: intent.args.inputGenerationId!, strength: intent.args.strength });
+    } else {
+      outcome = await runDirectBackendJob({ send, sessionId, toolCallId, intent, resolveImagePath, signal });
+    }
   } catch (err) {
-    updateJob(innerJobId, { status: "failed", error: (err as Error).message, ended_at: Date.now() });
+    send({ type: "tool_call_finished", toolCallId, result: { error: (err as Error).message } });
     throw err;
   }
 
-  const gen = createGeneration({
-    id: generationId,
-    session_id: sessionId,
-    message_id: null,
-    kind: "text2img",
-    prompt: body.message,
-    image_path: toRelative(result.imagePath),
-    width: result.width,
-    height: result.height,
-    backend: "codex_exec",
-  });
-
-  updateJob(innerJobId, {
-    status: "succeeded",
-    result: { generationId, elapsedMs: result.elapsedMs },
-    ended_at: Date.now(),
-  });
-
+  // ── assistant 메시지 영속화 + generation ownership ────────────────────────
   let assistantMsgId: string | null = null;
   try {
     const assistantMsg = createMessage({
       session_id: sessionId,
       role: "assistant",
       content: [
-        { type: "tool_call", id: toolCallId, name: "mcp__imggen__generate_image", args: { prompt: body.message } },
-        { type: "tool_result", tool_call_id: toolCallId, result: `Generated via Codex. image ref id "${gen.id}".` },
-        { type: "image_ref", generation_id: gen.id },
+        { type: "tool_call", id: toolCallId, name: toolDisplayName, args: intent.args },
+        { type: "tool_result", tool_call_id: toolCallId, result: `Generated via Codex. image ref id "${outcome.generationId}".` },
+        { type: "image_ref", generation_id: outcome.generationId },
       ],
       claude_session_id: null,
     });
-
-    linkGeneration(gen.id, { session_id: sessionId, message_id: assistantMsg.id });
-
+    linkGeneration(outcome.generationId, { session_id: sessionId, message_id: assistantMsg.id });
     updateJob(jobId, {
       status: "succeeded",
-      result: { generationId: gen.id, assistantMessageId: assistantMsg.id, generationIds: [gen.id], codexFallback: true },
+      result: { generationId: outcome.generationId, assistantMessageId: assistantMsg.id, generationIds: [outcome.generationId], codexDirect: true },
       ended_at: Date.now(),
     });
     assistantMsgId = assistantMsg.id;
@@ -552,12 +574,12 @@ async function runChatCodexDirect(opts: {
     type: "tool_call_finished",
     toolCallId,
     result: {
-      generationId: gen.id,
-      imageUrl: `/api/images/${gen.id}`,
-      width: result.width,
-      height: result.height,
-      kind: "text2img",
-      createdAt: gen.created_at,
+      generationId: outcome.generationId,
+      imageUrl: `/api/images/${outcome.generationId}`,
+      width: outcome.width,
+      height: outcome.height,
+      kind: outcome.kind,
+      createdAt: outcome.createdAt,
     },
   });
 
@@ -566,4 +588,255 @@ async function runChatCodexDirect(opts: {
     if (isNewSession) renameSession(sessionId, deriveSessionTitle(messageText));
     touchSession(sessionId);
   }
+}
+
+/** intent.tool → backend.execute 용 (kind, storeKind) 매핑. */
+function codexJobKind(tool: CodexIntent["tool"], extractObject?: boolean): { kind: GenerationKind; storeKind: GenerationKind } {
+  switch (tool) {
+    case "generate_image": return { kind: "text2img", storeKind: "text2img" };
+    case "make_spritesheet": return { kind: "spritesheet", storeKind: "spritesheet" };
+    case "make_emote_sheet": return { kind: "emote_sheet", storeKind: "emote_sheet" };
+    case "make_tileset": return { kind: "tileset", storeKind: "tileset" };
+    case "edit_image": return { kind: "img2img", storeKind: "img2img" };
+    case "upscale_image": return { kind: "upscale", storeKind: "upscale" };
+    case "remove_background": return { kind: "remove_bg", storeKind: "remove_bg" };
+    case "reskin_image": return { kind: "reskin", storeKind: "reskin" };
+    case "inpaint_image":
+      return extractObject
+        ? { kind: "layer_extract", storeKind: "layer_extract" }
+        : { kind: "inpaint", storeKind: "inpaint" };
+    default:
+      throw new Error(`codexJobKind: unsupported tool '${tool}'`);
+  }
+}
+
+/**
+ * codex 백엔드로 이미지 생성하는 공통 실행기. 입력 경로 조립 → ImageJob → backend.execute →
+ * generation 행 작성. 스프라이트시트/리스킨의 무거운 후처리(normalize/chroma-key)는 MCP 서버
+ * 전용이므로 여기선 backend 의 1차 결과를 그대로 사용(Codex 모드 best-effort).
+ */
+async function runDirectBackendJob(opts: {
+  send: (e: ChatEvent) => void;
+  sessionId: string;
+  toolCallId: string;
+  intent: CodexIntent;
+  resolveImagePath: (id?: string) => string | null;
+  signal: AbortSignal;
+}): Promise<{ generationId: string; width: number; height: number; createdAt: number; kind: GenerationKind }> {
+  const { send, sessionId, toolCallId, intent, resolveImagePath, signal } = opts;
+  const { kind, storeKind } = codexJobKind(intent.tool, intent.args.extractObject);
+
+  // 입력 이미지 경로 조립 — reskin(c) 은 [base, styleRef], inpaint(mask) 은 [원본, 마스크].
+  const inputImagePaths: string[] = [];
+  const inputGenerationIds: string[] = [];
+  const basePath = resolveImagePath(intent.args.inputGenerationId);
+  if (basePath) {
+    inputImagePaths.push(basePath);
+    inputGenerationIds.push(intent.args.inputGenerationId!);
+  }
+  let styleRefPath: string | undefined;
+  if (intent.tool === "reskin_image" && intent.args.styleReferenceId) {
+    const p = resolveImagePath(intent.args.styleReferenceId);
+    if (p) {
+      styleRefPath = p;
+      inputImagePaths.push(p);
+      inputGenerationIds.push(intent.args.styleReferenceId);
+    }
+  } else if (intent.tool === "inpaint_image" && intent.args.maskGenerationId) {
+    const p = resolveImagePath(intent.args.maskGenerationId);
+    if (p) {
+      inputImagePaths.push(p);
+      inputGenerationIds.push(intent.args.maskGenerationId);
+    }
+  }
+
+  const params: Record<string, unknown> = {};
+  if (intent.tool === "make_spritesheet") {
+    params.seamlessLoop = intent.args.seamlessLoop === true;
+    if (intent.args.subjectType) params.subjectType = intent.args.subjectType;
+    if (intent.args.rows) params.rows = intent.args.rows;
+    if (intent.args.cols) params.cols = intent.args.cols;
+  }
+  if (intent.tool === "reskin_image") {
+    params.mode = styleRefPath ? "style_ref" : intent.args.paletteOnly ? "palette" : "appearance";
+  }
+
+  const prompt = intent.args.prompt ?? "";
+  const innerJobId = newJobId();
+  const generationId = newGenerationId();
+
+  createJob({
+    id: innerJobId,
+    session_id: sessionId,
+    kind: "codex_image",
+    args: { tool: intent.tool, prompt, kind, generationId, inputGenerationIds, viaMcp: false },
+  });
+
+  const job: ImageJob = {
+    id: innerJobId,
+    generationId,
+    kind,
+    prompt,
+    inputImagePaths: inputImagePaths.length ? inputImagePaths : undefined,
+    styleRefPath,
+    paletteOnly: intent.args.paletteOnly,
+    params: Object.keys(params).length ? params : undefined,
+  };
+
+  const backend = await selectImageBackend();
+  let result: Awaited<ReturnType<typeof backend.execute>>;
+  try {
+    result = await backend.execute(job, (stage, detail) => {
+      send({ type: "tool_call_progress", toolCallId, stage, detail });
+    }, signal);
+  } catch (err) {
+    updateJob(innerJobId, { status: "failed", error: (err as Error).message, ended_at: Date.now() });
+    throw err;
+  }
+
+  const gen = createGeneration({
+    id: generationId,
+    session_id: sessionId,
+    message_id: null,
+    kind: storeKind,
+    prompt,
+    input_image_ids: inputGenerationIds,
+    params: Object.keys(params).length ? params : undefined,
+    image_path: toRelative(result.imagePath),
+    width: result.width,
+    height: result.height,
+    backend: "codex_exec",
+  });
+  updateJob(innerJobId, { status: "succeeded", result: { generationId, elapsedMs: result.elapsedMs }, ended_at: Date.now() });
+
+  return { generationId: gen.id, width: result.width, height: result.height, createdAt: gen.created_at, kind: storeKind };
+}
+
+/**
+ * sharp lanczos 결정적 리사이즈 (codex 미경유). MCP server.ts runResizeTool 과 동일 로직.
+ * 긴 변 기준 비율 유지(fit:inside), 알파 보존.
+ */
+async function runDirectResize(opts: {
+  sessionId: string;
+  inputGenerationId: string;
+  targetSize: number;
+}): Promise<{ generationId: string; width: number; height: number; createdAt: number; kind: GenerationKind }> {
+  const inputGen = getGeneration(opts.inputGenerationId);
+  if (!inputGen) throw new Error(`generation not found: ${opts.inputGenerationId}`);
+  const inputPath = path.join(DATA_DIR, inputGen.image_path);
+
+  const generationId = newGenerationId();
+  const jobId = newJobId();
+  const destPath = imagePath(generationId);
+
+  createJob({
+    id: jobId,
+    session_id: opts.sessionId,
+    kind: "codex_image",
+    args: { tool: "resize_image", inputGenerationId: opts.inputGenerationId, targetSize: opts.targetSize, generationId, viaMcp: false },
+  });
+
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  const startedAt = performance.now();
+  const info = await sharp(inputPath)
+    .resize(opts.targetSize, opts.targetSize, { kernel: "lanczos3", fit: "inside" })
+    .png()
+    .toFile(destPath);
+  const elapsedMs = Math.round(performance.now() - startedAt);
+
+  const gen = createGeneration({
+    id: generationId,
+    session_id: opts.sessionId,
+    message_id: null,
+    kind: "resize",
+    prompt: `Resize longest side to ${opts.targetSize}px (→ ${info.width}×${info.height}, aspect preserved)`,
+    input_image_ids: [opts.inputGenerationId],
+    image_path: toRelative(destPath),
+    width: info.width,
+    height: info.height,
+    backend: "direct",
+  });
+  updateJob(jobId, { status: "succeeded", result: { generationId: gen.id, elapsedMs }, ended_at: Date.now() });
+
+  return { generationId: gen.id, width: info.width, height: info.height, createdAt: gen.created_at, kind: "resize" };
+}
+
+/**
+ * sharp Sobel 기반 노멀맵 생성 (codex 미경유). MCP server.ts generate_normal_map 과 동일 로직.
+ * RGB 인코딩: R=X기울기, G=Y기울기, B=255. 알파 채널 보존.
+ */
+async function runDirectNormalMap(opts: {
+  sessionId: string;
+  inputGenerationId: string;
+  strength?: number;
+}): Promise<{ generationId: string; width: number; height: number; createdAt: number; kind: GenerationKind }> {
+  const inputGen = getGeneration(opts.inputGenerationId);
+  if (!inputGen) throw new Error(`generation not found: ${opts.inputGenerationId}`);
+  const inputPath = path.join(DATA_DIR, inputGen.image_path);
+  const strength = typeof opts.strength === "number" ? Math.max(0.5, Math.min(2.0, opts.strength)) : 1.0;
+
+  const generationId = newGenerationId();
+  const jobId = newJobId();
+  const outPath = imagePath(generationId);
+
+  createJob({
+    id: jobId,
+    session_id: opts.sessionId,
+    kind: "codex_image",
+    args: { tool: "generate_normal_map", inputGenerationId: opts.inputGenerationId, generationId, viaMcp: false },
+  });
+
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+  const startedAt = performance.now();
+
+  const meta = await sharp(inputPath).metadata();
+  const width = meta.width ?? 0;
+  const height = meta.height ?? 0;
+  if (!width || !height) throw new Error("generate_normal_map: 이미지 크기 읽기 실패");
+
+  const hasAlpha = meta.hasAlpha ?? false;
+  let alphaBuf: Buffer | null = null;
+  if (hasAlpha) {
+    alphaBuf = await sharp(inputPath).extractChannel("alpha").raw().toBuffer();
+  }
+
+  const base = sharp(inputPath).flatten({ background: { r: 128, g: 128, b: 128 } }).greyscale();
+  const scale = Math.round(1.0 / strength);
+  const k = strength;
+  const [rBuf, gBuf] = await Promise.all([
+    base.clone().convolve({ width: 3, height: 3, kernel: [-k, 0, k, -2 * k, 0, 2 * k, -k, 0, k].map(Math.round), scale, offset: 128 }).raw().toBuffer(),
+    base.clone().convolve({ width: 3, height: 3, kernel: [-k, -2 * k, -k, 0, 0, 0, k, 2 * k, k].map(Math.round), scale, offset: 128 }).raw().toBuffer(),
+  ]);
+
+  const pixels = width * height;
+  const channels = hasAlpha ? 4 : 3;
+  const out = Buffer.alloc(pixels * channels, 0);
+  for (let i = 0; i < pixels; i++) {
+    const alpha = alphaBuf ? alphaBuf[i] : 255;
+    if (alpha < 10) {
+      out[i * channels] = 128; out[i * channels + 1] = 128; out[i * channels + 2] = 255;
+    } else {
+      out[i * channels] = rBuf[i]; out[i * channels + 1] = gBuf[i]; out[i * channels + 2] = 255;
+    }
+    if (channels === 4) out[i * channels + 3] = alpha;
+  }
+
+  await sharp(out, { raw: { width, height, channels } }).png().toFile(outPath);
+  const elapsedMs = Math.round(performance.now() - startedAt);
+
+  const gen = createGeneration({
+    id: generationId,
+    session_id: opts.sessionId,
+    message_id: null,
+    kind: "normal_map",
+    prompt: `Normal map from ${opts.inputGenerationId} (strength=${strength})`,
+    input_image_ids: [opts.inputGenerationId],
+    image_path: toRelative(outPath),
+    width,
+    height,
+    backend: "direct",
+  });
+  updateJob(jobId, { status: "succeeded", result: { generationId: gen.id, elapsedMs }, ended_at: Date.now() });
+
+  return { generationId: gen.id, width, height, createdAt: gen.created_at, kind: "normal_map" };
 }
