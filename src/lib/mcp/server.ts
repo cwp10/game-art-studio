@@ -1393,8 +1393,11 @@ async function buildSpritePrompt(
           `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
           `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
           `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. ` +
-          `Some cells (front/back-facing rows) use a 'foot fwd(lower)/back(higher)' depth note instead of an angle, because their legs swing toward/away from the camera, not sideways. ` +
-          `For those cells, draw the 'fwd' foot lower on screen (stepping toward the viewer) and the 'back' foot higher (stepping away), with the two feet at clearly different heights. `
+          `Some cells (front/back-facing rows) use a depth note instead of an angle, because their legs swing toward/away from the camera, not sideways. ` +
+          `'fwd(lower)' = draw that foot LOWER on screen (stepped toward the viewer). ` +
+          `'fwd(higher)' = draw that foot HIGHER on screen (stepped away from the viewer). ` +
+          `'back(lower)' / 'back(higher)' = the opposite foot at the opposite position. ` +
+          `In all cases, the two feet must be at clearly different heights. `
         : "")
     : "";
 

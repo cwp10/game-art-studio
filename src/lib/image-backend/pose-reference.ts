@@ -97,10 +97,9 @@ function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A
   const lateral = side * STEP_W * Math.abs(walkY);
   // depthY: 전진 중인 발이 전면(walkY>0)이면 아래로, 후면(walkY<0)이면 위로.
   const depthY = side * DEPTH * walkY * cosp;
-  // swing(공중) 다리 = 전진 중(각도 증가, d/dφ>0). d(swingAngle)/dφ ∝ -side*walkX*sin(φ).
-  // walkX≈0(정면/후면)이면 swingAngle은 항상 0이므로 깊이 진행으로 판정: -side*walkY*sin(φ).
-  const motion = Math.abs(walkX) > 1e-6 ? walkX : walkY;
-  const isSwing = -side * motion * Math.sin(phase) > 0;
+  // swing(공중) 다리 = 전진 중(각도 증가, d/dφ>0). 위상만으로 판정 — 방향 부호(walkX/walkY)에
+  // 곱하면 LEFT/UP 등 음수 성분 방향에서 위상이 반전돼 frame 0 앞다리가 뒤바뀐다(버그).
+  const isSwing = -side * Math.sin(phase) > 0;
   return { side, swingAngle, lateral, depthY, isSwing };
 }
 
@@ -120,8 +119,8 @@ export function computePose(frame: number, totalFrames: number, dirIndex: number
 /** 정강이(lower leg) 각도. swing(공중) 다리는 굽혀 정강이 들어올림, stance는 곧게. */
 function lowerLegAngle(leg: LegPose, isRun: boolean): number {
   if (isRun) {
-    // 기존 힐킥 동작 보존: 앞 다리는 발 앞으로 차올림(0.5×), 뒷 다리는 뒤꿈치 킥(-0.9×).
-    return leg.swingAngle > 0 ? leg.swingAngle * 0.5 : leg.swingAngle * -0.9;
+    // isSwing=FALSE → 접지/앞다리: shin 완만히 앞으로(0.5×). isSwing=TRUE → 스윙/뒷다리: heel kick(-0.9×).
+    return !leg.isSwing ? leg.swingAngle * 0.5 : leg.swingAngle * -0.9;
   }
   // walk: swing 다리는 정강이를 안쪽으로 굽혀 stance와 분리(passing 겹침 해소), stance는 곧게.
   return leg.isSwing ? leg.swingAngle - leg.side * 26 : leg.swingAngle * 0.15;
@@ -234,7 +233,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   renderLeg(right, "#ef5350", "#ef5350");
 
   if (!transparent) {
-    const txt = legAngleText(left, right, walkX);
+    const txt = legAngleText(left, right, walkX, walkY);
     elements.push(`<text x="4" y="${H - 20}" fill="#4fc3f7" font-family="monospace" font-size="10">L:${txt.l}</text>`);
     elements.push(`<text x="${W - 64}" y="${H - 20}" fill="#ef5350" font-family="monospace" font-size="10">R:${txt.r}</text>`);
   }
@@ -243,23 +242,27 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
 }
 
 /**
- * depthY → 전후(fore/aft) 분류. depthY>0=화면 아래=전진(fwd). |depthY|<2px=중립(mid).
+ * depthY → 전후(fore/aft) 분류. fwd=진행방향 발(depthY*walkY>0). |depthY|<2px=중립(mid).
+ * UP(walkY<0)에서는 화면 아래(depthY>0)가 후방이므로 walkY로 부호 보정해야 한다(버그).
  * verbose=true면 화면 높이 단서(lower/higher) 병기. legAngleText·poseToFrameAngle 공용 소스.
  */
-function classifyForeAft(depthY: number, verbose: boolean): string {
+function classifyForeAft(depthY: number, verbose: boolean, walkY = 1): string {
   if (Math.abs(depthY) < 2) return "mid";
-  if (verbose) return depthY > 0 ? "fwd(lower)" : "back(higher)";
-  return depthY > 0 ? "fwd" : "back";
+  const isFwd = depthY * walkY > 0;
+  if (verbose) return isFwd
+    ? (walkY >= 0 ? "fwd(lower)" : "fwd(higher)")
+    : (walkY >= 0 ? "back(higher)" : "back(lower)");
+  return isFwd ? "fwd" : "back";
 }
 
 /**
  * 두 다리 → 셀 내 디버그 각도 텍스트(이미지 라벨용).
  * 측면/대각선(walkX 유의): 스윙각. 정면/후면(walkX≈0): 전후(fwd/back) 오프셋 언어.
  */
-function legAngleText(left: LegPose, right: LegPose, walkX: number) {
+function legAngleText(left: LegPose, right: LegPose, walkX: number, walkY: number) {
   if (Math.abs(walkX) < SIDE_WALKX_THRESHOLD) {
     // 정면/후면: 깊이(depthY) 부호로 fore/aft.
-    return { l: classifyForeAft(left.depthY, false), r: classifyForeAft(right.depthY, false) };
+    return { l: classifyForeAft(left.depthY, false, walkY), r: classifyForeAft(right.depthY, false, walkY) };
   }
   return {
     l: `${left.swingAngle >= 0 ? "+" : ""}${left.swingAngle.toFixed(0)}°`,
@@ -279,17 +282,19 @@ export type FrameAngle = {
 
 /** 한 프레임의 computePose 결과 → FrameAngle(각도 텍스트의 단일 소스). */
 function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, isRun: boolean): FrameAngle {
-  const { walkX, left, right, phase } = computePose(col, totalFrames, dirIndex, isRun);
+  const { walkX, walkY, left, right, phase } = computePose(col, totalFrames, dirIndex, isRun);
   const leftDeg = Math.round(left.swingAngle);
   const rightDeg = Math.round(right.swingAngle);
   const cosP = Math.cos(phase);
   const absC = Math.abs(cosP);
   // 정면/후면(walkX≈0): 스윙각 0이라 degenerate → 전후(fore/aft) 오프셋 언어로.
   if (Math.abs(walkX) < SIDE_WALKX_THRESHOLD) {
-    const label = absC > 0.85 ? (left.depthY > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
-    return { col, leftDeg, rightDeg, label, foreAft: `L foot ${classifyForeAft(left.depthY, true)}/R foot ${classifyForeAft(right.depthY, true)}` };
+    // L-CONTACT = 왼발이 진행방향 앞(depthY*walkY>0). UP(walkY<0)에서 부호 보정 필수.
+    const label = absC > 0.85 ? (left.depthY * walkY > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
+    return { col, leftDeg, rightDeg, label, foreAft: `L foot ${classifyForeAft(left.depthY, true, walkY)}/R foot ${classifyForeAft(right.depthY, true, walkY)}` };
   }
-  const label = absC > 0.85 ? (leftDeg > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
+  // L-CONTACT = 왼발이 진행방향 앞. LEFT(walkX<0)에서 swingAngle 부호가 뒤집히므로 sign(walkX) 보정.
+  const label = absC > 0.85 ? (leftDeg * Math.sign(walkX) > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
   return { col, leftDeg, rightDeg, label, foreAft: null };
 }
 
