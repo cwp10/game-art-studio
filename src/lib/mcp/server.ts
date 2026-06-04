@@ -1506,17 +1506,27 @@ async function runSpritesheetAttempts(
   };
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const mcpResult = await runImageTool({
-      name,
-      kind: "spritesheet",
-      prompt: decorated,
-      inputGenerationIds: refId ? [refId] : [],
-      overrideInputPaths,
-      params: spritesheetParams,
-      sessionId,
-      progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
-      signal,
-    });
+    let mcpResult: Awaited<ReturnType<typeof runImageTool>>;
+    try {
+      mcpResult = await runImageTool({
+        name,
+        kind: "spritesheet",
+        prompt: decorated,
+        inputGenerationIds: refId ? [refId] : [],
+        overrideInputPaths,
+        params: spritesheetParams,
+        sessionId,
+        progressPrefix: retryEnabled ? `attempt ${attempt + 1}/${MAX_RETRIES + 1}` : undefined,
+        signal,
+      });
+    } catch (e) {
+      const isTimeout = (e as Error).message?.includes("timed out");
+      if (isTimeout && retryEnabled && attempt < MAX_RETRIES) {
+        log(`make_spritesheet attempt ${attempt + 1}/${MAX_RETRIES + 1}: Codex timeout — retrying`);
+        continue;
+      }
+      throw e;
+    }
     cumulativeMs += mcpResult?.structuredContent?.elapsedMs ?? 0;
 
     const genId: string | undefined = mcpResult?.structuredContent?.generationId;
