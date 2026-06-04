@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
+import { createGeneration, getGeneration, linkGeneration } from "@/lib/db/repo/generations";
+import { createMessage } from "@/lib/db/repo/messages";
 import { selectImageBackend } from "@/lib/image-backend";
 import { patchSpritesheetFrame } from "@/lib/image-backend/sprite-frame-patch";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
@@ -18,7 +19,8 @@ export const runtime = "nodejs";
  * 폴백. (방향 시트는 gcd 역산이 잘못된 그리드를 잡아 셀 좌표가 어긋난다 — params 우선이 정합.)
  *
  * body: { sheetGenerationId, row, col, prompt }
- * 응답: { newSheetGenerationId, imageUrl, width, height, elapsedMs }
+ * 응답: { newSheetGenerationId, messageId, imageUrl, width, height, elapsedMs }
+ *   messageId: assistant 메시지 id (session 미연결 시트면 null).
  */
 
 type RegenBody = {
@@ -46,8 +48,8 @@ export async function POST(req: NextRequest) {
   if (!Number.isInteger(col) || (col as number) < 0) {
     return Response.json({ error: "col must be a non-negative integer" }, { status: 400 });
   }
-  if (typeof prompt !== "string" || !prompt.trim()) {
-    return Response.json({ error: "prompt required" }, { status: 400 });
+  if (prompt !== undefined && typeof prompt !== "string") {
+    return Response.json({ error: "prompt must be a string" }, { status: 400 });
   }
 
   const original = getGeneration(sheetGenerationId);
@@ -97,7 +99,7 @@ export async function POST(req: NextRequest) {
     cols,
     totalFrames: rows * cols,
     frameIndex,
-    prompt,
+    prompt: prompt ?? "",
     backend,
     outPath,
     jobId,
@@ -110,7 +112,7 @@ export async function POST(req: NextRequest) {
     session_id: original.session_id,
     message_id: null,
     kind: "spritesheet",
-    prompt,
+    prompt: prompt ?? null,
     input_image_ids: [sheetGenerationId],
     params: original.params,
     image_path: toRelative(outPath),
@@ -119,8 +121,38 @@ export async function POST(req: NextRequest) {
     backend: "codex_exec",
   });
 
+  // assistant 메시지로 영속 — 재생성을 chat 타임라인의 tool_call/tool_result/image_ref 로 기록해
+  // reopen·history 에서 ImageResultCard 가 렌더된다. chat/route 의 generation 영속 패턴과 동일.
+  // session 미연결 시트(session_id=null)는 timeline 귀속처가 없으므로 generation 만 저장하고 스킵.
+  let messageId: string | null = null;
+  if (original.session_id) {
+    const toolCallId = `regen_${newGenId}`;
+    const assistantMsg = createMessage({
+      session_id: original.session_id,
+      role: "assistant",
+      content: [
+        {
+          type: "tool_call",
+          id: toolCallId,
+          name: "mcp__imggen__regenerate_sprite_frame",
+          args: { row, col, prompt: prompt ?? "" },
+        },
+        {
+          type: "tool_result",
+          tool_call_id: toolCallId,
+          result: `Regenerated frame (row=${row as number}, col=${col as number}). image ref id "${newGenId}".`,
+        },
+        { type: "image_ref", generation_id: newGenId },
+      ],
+      claude_session_id: null,
+    });
+    linkGeneration(newGenId, { session_id: original.session_id, message_id: assistantMsg.id });
+    messageId = assistantMsg.id;
+  }
+
   return Response.json({
     newSheetGenerationId: gen.id,
+    messageId,
     imageUrl: `/api/images/${gen.id}`,
     width: outW,
     height: outH,

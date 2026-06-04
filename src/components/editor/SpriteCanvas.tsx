@@ -36,7 +36,14 @@ type Props = {
   /** 셀 단위 재생성 대상 시트 id. 있으면 셀 호버 시 재생성(✏️) 버튼 노출. 없으면 미노출. */
   sheetGenerationId?: string;
   /** 셀 재생성으로 새 시트가 생기면 호출 — ChatLayout 이 패널을 새 시트로 re-point. */
-  onSheetUpdated?: (result: { generationId: string; width: number; height: number }) => void;
+  onSheetUpdated?: (result: {
+    generationId: string;
+    messageId: string;
+    width: number;
+    height: number;
+  }) => void;
+  /** 셀 재생성 진행 중 여부 — ChatLayout 이 Composer 입력을 블로킹. */
+  onRegenBusyChange?: (busy: boolean) => void;
 };
 
 export function SpriteCanvas({
@@ -50,6 +57,7 @@ export function SpriteCanvas({
   onSaved,
   sheetGenerationId,
   onSheetUpdated,
+  onRegenBusyChange,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -121,6 +129,11 @@ export function SpriteCanvas({
   const [regenBusy, setRegenBusy] = useState<number | null>(null);
   const [regenPrompt, setRegenPrompt] = useState("");
   const [regenError, setRegenError] = useState<string | null>(null);
+
+  // regenBusy 변경 시 부모(ChatLayout)에 알림 — 재생성 중 Composer 입력 블로킹.
+  useEffect(() => {
+    onRegenBusyChange?.(regenBusy !== null);
+  }, [regenBusy, onRegenBusyChange]);
 
   // 드래그/선택(화살표 nudge) 중 리사이즈로 표시 크기가 재측정되면 진행 중인
   // 포인터 좌표 변환이 흔들린다. MaskCanvas 와 동일하게 조작 중엔 avail 을 고정.
@@ -887,7 +900,7 @@ export function SpriteCanvas({
   // 셀 재생성 — origIdx 를 framePos 로 시트 (row,col) 로 변환해 API 호출(order 흡수). 백엔드의
   // patchSpritesheetFrame 이 col*cellW/row*cellH 로 추출하므로 시트 좌표를 보내야 한다.
   async function regenerateCell(origIdx: number) {
-    if (!sheetGenerationId || !canRegenCell || !regenPrompt.trim()) return;
+    if (!sheetGenerationId || !canRegenCell) return;
     const { r, col } = framePos(origIdx, rows, cols, order);
     setRegenBusy(origIdx);
     setRegenError(null);
@@ -901,10 +914,20 @@ export function SpriteCanvas({
         const { error } = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(error ?? `재생성 실패 (${res.status})`);
       }
-      const data = (await res.json()) as { newSheetGenerationId: string; width: number; height: number };
+      const data = (await res.json()) as {
+        newSheetGenerationId: string;
+        messageId: string;
+        width: number;
+        height: number;
+      };
       setRegenIdx(null);
       setRegenPrompt("");
-      onSheetUpdated?.({ generationId: data.newSheetGenerationId, width: data.width, height: data.height });
+      onSheetUpdated?.({
+        generationId: data.newSheetGenerationId,
+        messageId: data.messageId,
+        width: data.width,
+        height: data.height,
+      });
     } catch (e) {
       setRegenError((e as Error).message);
     } finally {
@@ -1229,7 +1252,7 @@ export function SpriteCanvas({
                           if (e.key === "Enter") { e.preventDefault(); regenerateCell(origIdx); }
                           if (e.key === "Escape") { setRegenIdx(null); setRegenError(null); }
                         }}
-                        placeholder="이 프레임 편집 프롬프트…"
+                        placeholder="추가 안내 프롬프트 (선택)…"
                         className="w-full rounded border border-border bg-bg-app px-1.5 py-1 text-[11px] text-text-primary placeholder:text-text-muted/50"
                       />
                       {regenError && <span className="text-[10px] text-red-400">{regenError}</span>}
@@ -1242,8 +1265,7 @@ export function SpriteCanvas({
                         </button>
                         <button
                           onClick={() => regenerateCell(origIdx)}
-                          disabled={!regenPrompt.trim()}
-                          className="rounded bg-[color:var(--accent)] px-2 py-0.5 text-[10px] text-white disabled:opacity-40"
+                          className="rounded bg-[color:var(--accent)] px-2 py-0.5 text-[10px] text-white"
                         >
                           재생성
                         </button>

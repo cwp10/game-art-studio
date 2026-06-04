@@ -76,6 +76,8 @@ export function ChatLayout() {
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  // 스프라이트 셀 재생성 진행 중 — Composer 입력을 블로킹(state.generating 과 동일 취급).
+  const [spriteRegenBusy, setSpriteRegenBusy] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
   // 오케스트레이터 모드 — Codex 직접 모드면 Composer 위 배너 표시. StatusButton 과 독립 fetch.
   const [orchestrator, setOrchestrator] = useState<"claude" | "codex">("claude");
@@ -1030,7 +1032,7 @@ export function ChatLayout() {
           </div>
         )}
         <Composer
-          disabled={state.generating}
+          disabled={state.generating || spriteRegenBusy}
           generating={state.generating}
           onSend={handleSend}
           onCancel={handleCancel}
@@ -1096,12 +1098,14 @@ export function ChatLayout() {
             imageHeight={editing.height}
             sessionId={state.activeSessionId}
             sheetGenerationId={editing.generationId}
+            onRegenBusyChange={setSpriteRegenBusy}
             onSheetUpdated={res => {
               // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
               // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
+              // tempId 는 영속된 assistant 메시지 id — reopen 시 user 버블 키가 안정적으로 일치.
               dispatch({
                 type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                tempId: res.messageId,
                 userText: "✏️ 프레임 재생성",
                 generationId: res.generationId,
                 width: res.width,
