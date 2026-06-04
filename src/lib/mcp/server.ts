@@ -1366,6 +1366,12 @@ async function buildSpritePrompt(
           `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
           `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
           `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. ` +
+          (rows > 1
+            ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row is a continuation of the previous row — NOT a new cycle. ` +
+              `Row 1 col 1 = L-CONTACT (left foot forward). Row 2 col 1 = R-CONTACT (right foot forward). ` +
+              `These two cells must be visually OPPOSITE — if you drew the left boot leading in row1col1, the right boot MUST be clearly leading in row2col1. ` +
+              `Row 2 frames must show clearly different foot positions from the corresponding Row 1 frames. `
+            : "") +
           `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
           `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
           `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — ` +
@@ -1387,6 +1393,13 @@ async function buildSpritePrompt(
       `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
       (poseFrameAnglesText
         ? `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
+          (rows > 1
+            ? `ROW CONTINUITY (CRITICAL): This grid is ONE continuous animation sequence — Row 2 is NOT a repeat of Row 1. ` +
+              `Row 1 = first half of the gait cycle (frames 1–${cols}). Row 2 = second half (frames ${cols + 1}–${cols * rows}). ` +
+              `The leading foot in row2col1 MUST be the OPPOSITE foot from row1col1. ` +
+              `If row1col1 is L-CONTACT (left foot forward), row2col1 MUST be R-CONTACT (right foot forward) — and vice versa. ` +
+              `Row 2 must look visually DISTINCT from Row 1. Never copy, mirror, or repeat Row 1 poses in Row 2. `
+            : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
           `, negative = back. ` +
