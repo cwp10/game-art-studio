@@ -1025,7 +1025,7 @@ export function ChatLayout() {
         </main>
         {orchestrator === "codex" && (
           <div className="flex items-center gap-2 border-t border-border bg-bg-card px-4 py-1.5 text-[11px] text-text-muted">
-            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--warning,#f59e0b)]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]/60" />
             Codex 직접 모드 — 자유형 편집 요청은 정확도가 낮을 수 있습니다
           </div>
         )}

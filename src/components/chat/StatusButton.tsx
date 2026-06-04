@@ -153,17 +153,17 @@ export function StatusButton() {
                       <button
                         onClick={handleToggleOrchestrator}
                         title={isClaudeMode ? "오케스트레이터: Claude — 클릭 시 Codex 직접 모드로 전환" : "오케스트레이터: Codex 직접 — 클릭 시 Claude로 전환"}
-                        className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                        className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors ${
                           isClaudeMode
-                            ? "bg-[color:var(--success)]/15 text-[color:var(--success)] hover:bg-[color:var(--success)]/25"
-                            : "bg-border text-text-muted hover:bg-bg-card hover:text-text-primary"
+                            ? "border-[color:var(--accent)]/40 bg-[color:var(--accent)]/20 text-text-primary hover:bg-[color:var(--accent)]/30"
+                            : "border-border text-text-muted hover:border-[color:var(--accent)]/30 hover:text-text-primary"
                         }`}
                       >
                         {isClaudeMode ? "Claude" : "Codex 직접"}
                       </button>
                     )}
                     {key === "codex" && orchestrator === "codex" && (
-                      <span className="shrink-0 rounded bg-[color:var(--success)]/15 px-1.5 py-0.5 text-[10px] text-[color:var(--success)]">사용 중</span>
+                      <span className="shrink-0 rounded-md border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">사용 중</span>
                     )}
                   </div>
                   {key === "codex" && (
