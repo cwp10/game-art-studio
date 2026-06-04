@@ -24,12 +24,17 @@ export async function patchSpritesheetFrame(opts: {
   cellH: number; // 셀 높이 px
   row: number; // 0-indexed
   col: number; // 0-indexed
+  rows: number; // 전체 행 수 (엣지 케이스 판단용)
+  cols: number; // 전체 열 수
+  totalFrames: number; // rows * cols (범위 체크)
+  frameIndex: number; // row * cols + col (0-based 선형 인덱스)
   prompt: string; // 편집 프롬프트
   backend: ImageBackend; // codex-exec 어댑터 (인터페이스)
   outPath: string; // 결과 시트 저장 경로 (절대)
   jobId: string; // logging용
 }): Promise<{ width: number; height: number; elapsedMs: number }> {
-  const { sheetImagePath, cellW, cellH, row, col, prompt, backend, outPath, jobId } = opts;
+  const { sheetImagePath, cellW, cellH, row, col, cols, totalFrames, frameIndex, prompt, backend, outPath, jobId } =
+    opts;
   const startedAt = performance.now();
 
   const tmpDir = jobDirFor(jobId);
@@ -44,14 +49,65 @@ export async function patchSpritesheetFrame(opts: {
       .png()
       .toFile(cellInPath);
 
+    // 1b. 앞/뒤 프레임 추출 — in-between 생성용 참조. 시트에서 이미 셀 크기로 잘리므로
+    //     cell-fit 불필요(codex 입력 참조 전용). 선형 인덱스→(row,col) 역산 후 extract.
+    const prevIndex = frameIndex - 1;
+    const nextIndex = frameIndex + 1;
+    let prevFramePath: string | null = null;
+    let nextFramePath: string | null = null;
+    if (prevIndex >= 0) {
+      prevFramePath = path.join(tmpDir, "prev-frame.png");
+      await sharp(sheetImagePath)
+        .extract({
+          left: (prevIndex % cols) * cellW,
+          top: Math.floor(prevIndex / cols) * cellH,
+          width: cellW,
+          height: cellH,
+        })
+        .png()
+        .toFile(prevFramePath);
+    }
+    if (nextIndex < totalFrames) {
+      nextFramePath = path.join(tmpDir, "next-frame.png");
+      await sharp(sheetImagePath)
+        .extract({
+          left: (nextIndex % cols) * cellW,
+          top: Math.floor(nextIndex / cols) * cellH,
+          width: cellW,
+          height: cellH,
+        })
+        .png()
+        .toFile(nextFramePath);
+    }
+
+    // 상황별 in-between 프롬프트 + inputImagePaths 조합. userPrompt 비면 안내 문구만 사용.
+    const userPrompt = prompt.trim();
+    const userSuffix = userPrompt ? ` ${userPrompt}` : "";
+    let inBetweenPrompt: string;
+    let imageInputs: string[];
+    if (prevFramePath && nextFramePath) {
+      imageInputs = [prevFramePath, cellInPath, nextFramePath];
+      inBetweenPrompt = `In-between animation frame. Image 1 is the PREVIOUS frame, image 2 is the CURRENT frame to replace, image 3 is the NEXT frame. Generate a new version of image 2 showing a smooth motion between images 1 and 3 — same character, same style, same transparent background.${userSuffix}`;
+    } else if (prevFramePath) {
+      imageInputs = [prevFramePath, cellInPath];
+      inBetweenPrompt = `Final animation frame. Image 1 is the PREVIOUS frame, image 2 is the CURRENT frame to replace. Generate a new version of image 2 that flows naturally AFTER image 1 to complete the animation — same character, same style, same transparent background.${userSuffix}`;
+    } else if (nextFramePath) {
+      imageInputs = [cellInPath, nextFramePath];
+      inBetweenPrompt = `Opening animation frame. Image 1 is the CURRENT frame to replace, image 2 is the NEXT frame. Generate a new version of image 1 that flows naturally BEFORE image 2 to begin the animation — same character, same style, same transparent background.${userSuffix}`;
+    } else {
+      // 단일 프레임 시트(앞뒤 모두 없음) — 기존 단순 편집으로 폴백.
+      imageInputs = [cellInPath];
+      inBetweenPrompt = userPrompt;
+    }
+
     // 2. codex img2img 편집. backend.execute 는 data/images/{generationId}.png 에 결과를 쓰고
     //    result.imagePath 로 반환한다. 호출자 jobId 와 다른 id 를 써서 tmpDir 충돌 회피.
     const editJob: ImageJob = {
       id: newJobId(),
       generationId: newGenerationId(),
       kind: "img2img",
-      prompt,
-      inputImagePaths: [cellInPath],
+      prompt: inBetweenPrompt,
+      inputImagePaths: imageInputs,
     };
     const editResult = await backend.execute(editJob, () => {});
     // backend 산출물을 우리 tmp 경로로 이동(data/images 에 잔류물 남기지 않음).

@@ -86,12 +86,17 @@ export async function POST(req: NextRequest) {
   const outPath = imagePathFor(newGenId);
 
   const backend = await selectImageBackend();
+  const frameIndex = (row as number) * cols + (col as number);
   const { width: outW, height: outH, elapsedMs } = await patchSpritesheetFrame({
     sheetImagePath,
     cellW,
     cellH,
     row: row as number,
     col: col as number,
+    rows,
+    cols,
+    totalFrames: rows * cols,
+    frameIndex,
     prompt,
     backend,
     outPath,
