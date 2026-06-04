@@ -165,8 +165,12 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   // 순수 측면(LEFT↔RIGHT)·전면 대각은 머리·몸통이 대칭이라 발끝만으론 좌우 구분이 약함 →
   // 모델이 facing을 안정적으로 읽도록 코를 추가. 정면/후면(walkX≈0)은 머리색으로 이미 구분.
   if (!isBack && Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
-    const nz = walkX >= 0 ? 1 : -1;
-    elements.push(line(CX + nz * HEAD_R * 0.4, HEAD_Y, CX + nz * (HEAD_R + 8), HEAD_Y, headColor, 6));
+    // 실제 진행방향(walkX,walkY)으로 코를 꺾어 대각선 방향을 명확히 표현.
+    // endpoint 각도 관례: 0°=아래, 90°=오른쪽. atan2(walkX,walkY)가 이 관례와 일치.
+    const faceDeg = (Math.atan2(walkX, walkY) * 180) / Math.PI;
+    const noseStart = endpoint(CX, HEAD_Y, faceDeg, HEAD_R * 0.4);
+    const noseEnd   = endpoint(CX, HEAD_Y, faceDeg, HEAD_R + 8);
+    elements.push(line(noseStart.x, noseStart.y, noseEnd.x, noseEnd.y, headColor, 6));
   }
 
   // 목 + 어깨 가로선

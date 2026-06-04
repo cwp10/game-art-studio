@@ -1357,6 +1357,11 @@ async function buildSpritePrompt(
       `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
       `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
       `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. ` +
+      (parsedWalkDir && !singleDirWalkDir
+        ? `WALKING DIRECTION (CRITICAL): The character walks toward screen-${parsedWalkDir}. ` +
+          `The character MUST face screen-${parsedWalkDir} in EVERY frame — do NOT reverse or mirror this direction. ` +
+          `Use the FACING CUE nub in the pose guide to confirm the correct facing. `
+        : "") +
       (singleDirWalkDir
         ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
           `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
