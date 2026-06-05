@@ -666,8 +666,9 @@ export function ChatLayout() {
           : `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`;
         handleSend(msg, { attachmentGenerationIds: [genId, payload.styleReferenceId] });
       }
+      setEditing(null);
     },
-    [editing, handleSend],
+    [editing, handleSend, setEditing],
   );
 
   // SpriteGenPanel 이 submit 한 완성 메시지 배열 → 순차 handleSend.
@@ -680,8 +681,9 @@ export function ChatLayout() {
       for (const m of messages) {
         await handleSend(m.message, { attachmentGenerationIds: m.attachmentGenerationIds });
       }
+      setSpriteGen(null);
     },
-    [handleSend],
+    [handleSend, setSpriteGen],
   );
 
   // LayerCanvas 가 submit 한 부위 이름들 → 부위별로 텍스트 기반 추출을 직렬 호출.

@@ -3,6 +3,7 @@
 import { Loader2, Palette, Sparkles, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
+import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 import type { Generation } from "@/types/db";
 
 /**
@@ -724,34 +725,6 @@ function AiSuggestResult({
   );
 }
 
-// SpriteCanvas 와 동일한 GCD 역산으로 시트 여부·grid 추정 (kind 미지정 시 폴백).
-function detectSpriteGrid(width: number, height: number): { rows: number; cols: number } | null {
-  if (!width || !height) return null;
-  const g = gcd(width, height);
-  const divs: number[] = [];
-  for (let d = 1; d * d <= g; d++) {
-    if (g % d === 0) {
-      divs.push(d);
-      if (d !== g / d) divs.push(g / d);
-    }
-  }
-  divs.sort((a, b) => b - a);
-  for (const d of divs) {
-    if (d < 64 || d > 512) continue;
-    const c = width / d;
-    const r = height / d;
-    if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
-      // 1×1 은 시트로 보지 않음 (단일 이미지).
-      if (r === 1 && c === 1) return null;
-      return { rows: r, cols: c };
-    }
-  }
-  return null;
-}
-
-function gcd(a: number, b: number): number {
-  return b === 0 ? a : gcd(b, a % b);
-}
 
 function rgbToHex(r: number, g: number, b: number): string {
   return "#" + [r, g, b].map(v => v.toString(16).padStart(2, "0")).join("");

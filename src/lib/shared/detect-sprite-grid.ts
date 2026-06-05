@@ -24,6 +24,7 @@ export function detectSpriteGrid(
     const c = width / d;
     const r = height / d;
     if (c >= 1 && c <= 16 && r >= 1 && r <= 16 && Number.isInteger(c) && Number.isInteger(r)) {
+      if (r === 1 && c === 1) return null; // 단일 이미지 오인 방지
       return { rows: r, cols: c };
     }
   }

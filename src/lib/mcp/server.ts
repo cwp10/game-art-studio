@@ -726,7 +726,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         let styleRefPath: string | undefined;
         const inputGenerationIds = [inputId];
         let overrideInputPaths: string[] | undefined;
-        const tmpCropPath: string | undefined = undefined; // (현재 미사용) finally 정리 호환 유지
         const isSheet = inputGen.kind === "spritesheet";
         // styleGen/refIsSheet 를 블록 밖(메타 상속·후처리)에서 참조하기 위해 스코프 확장.
         let styleGen: ReturnType<typeof getGeneration> | undefined;
@@ -759,7 +758,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         }
 
         // 케이스 3: 베이스가 단일이지만 참조가 시트 → 결과도 시트.
-        const effectiveIsSheet = isSheet || Boolean(refIsSheet && !isSheet);
+        const effectiveIsSheet = isSheet || refIsSheet;
 
         // 시트면 배경 상속(투명 여부) — 후처리 chroma-key/정렬에 사용. 케이스 3 은
         // 포즈 소스(참조 시트)의 투명 여부를 따른다.
@@ -791,7 +790,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
             }
           : {};
 
-        try {
         const mcpResult = await runImageTool({
           name,
           kind: "reskin",
@@ -890,15 +888,6 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           }
         }
         return mcpResult;
-        } finally {
-          if (tmpCropPath && fs.existsSync(tmpCropPath)) {
-            try {
-              fs.unlinkSync(tmpCropPath);
-            } catch {
-              /* 임시 파일 정리 실패는 무시 */
-            }
-          }
-        }
       }
 
       case "make_emote_sheet": {
