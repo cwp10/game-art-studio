@@ -3,6 +3,7 @@
 import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
 import { PanelFooter } from "@/components/editor/PanelFooter";
 
 
@@ -243,7 +244,7 @@ export function SpriteGenPanel({
   const [exampleOpen, setExampleOpen] = useState(false);
 
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
@@ -254,7 +255,7 @@ export function SpriteGenPanel({
   function handleSubjectChange(s: SubjectType) {
     setSubjectType(s);
     setExampleOpen(false);
-    setAiResult(null);
+    setAiSuggestions(null);
     setAiError(null);
     if (s === "effect") {
       setSeamlessLoop(false);
@@ -276,7 +277,7 @@ export function SpriteGenPanel({
     if (aiLoading) return;
     setAiLoading(true);
     setAiError(null);
-    setAiResult(null);
+    setAiSuggestions(null);
     const question = actionPrompt.trim() || "동작을 추천해주세요";
     try {
       const res = await fetch("/api/sprite-suggest", {
@@ -291,12 +292,12 @@ export function SpriteGenPanel({
           seamlessLoop,
         }),
       });
-      const data = (await res.json()) as { suggestion?: string; error?: string };
-      if (!res.ok || !data.suggestion) {
+      const data = (await res.json()) as { suggestions?: AiSuggestion[]; error?: string };
+      if (!res.ok || !data.suggestions?.length) {
         setAiError(data.error ?? "제안 생성에 실패했습니다.");
         return;
       }
-      setAiResult(data.suggestion);
+      setAiSuggestions(data.suggestions);
     } catch (e) {
       setAiError((e as Error).message);
     } finally {
@@ -527,17 +528,16 @@ export function SpriteGenPanel({
                     />
                   )}
                 </div>
-                <button
-                  onClick={handleAiSuggest}
-                  disabled={aiLoading}
-                  className={`flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${
-                    aiLoading
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                      : "border-border text-text-muted hover:text-text-primary"
-                  } disabled:opacity-60`}
-                >
-                  <Sparkles size={12} /> {aiLoading ? "생각 중…" : "AI 제안"}
-                </button>
+                <div className="relative">
+                  <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                  {aiSuggestions && (
+                    <AiSuggestDropdown
+                      suggestions={aiSuggestions}
+                      onSelect={v => { setActionPrompt(v); setAiSuggestions(null); }}
+                      onClose={() => setAiSuggestions(null)}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -549,27 +549,8 @@ export function SpriteGenPanel({
             </p>
           )}
 
-          {/* AI 제안 결과 */}
-          {(aiError || aiResult) && (
-            <div className="space-y-1 rounded-lg border border-border bg-bg-card p-2">
-              {aiError && (
-                <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
-              )}
-              {aiResult && (
-                <>
-                  <p className="text-xs text-text-primary">{aiResult}</p>
-                  <button
-                    onClick={() => {
-                      setActionPrompt(aiResult);
-                      setAiResult(null);
-                    }}
-                    className="rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
-                  >
-                    적용
-                  </button>
-                </>
-              )}
-            </div>
+          {aiError && (
+            <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
           )}
 
           {/* 최근 동작 chips */}
