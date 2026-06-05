@@ -44,15 +44,23 @@ export const dynamic = "force-dynamic";
 const MCP_CONFIG_PATH = path.join(process.cwd(), "data", "mcp.json");
 const APP_CONFIG_PATH = path.join(DATA_DIR, "config.json");
 
+let cachedOrchConfig: "claude" | "codex" | null = null;
+let cachedOrchConfigMtime = 0;
+
 /**
  * data/config.json 의 orchestrator 설정. 파일 없거나 파싱 실패 시 Claude 기본값.
  * StatusButton 토글이 PATCH /api/config 로 쓴 값을 chat/route 가 이 함수로 읽어 분기.
  */
 function readOrchestratorConfig(): "claude" | "codex" {
   try {
-    const raw = fs.readFileSync(APP_CONFIG_PATH, "utf8");
-    const cfg = JSON.parse(raw) as { orchestrator?: unknown };
-    return cfg.orchestrator === "codex" ? "codex" : "claude";
+    const mtime = fs.statSync(APP_CONFIG_PATH).mtimeMs;
+    if (cachedOrchConfig == null || mtime !== cachedOrchConfigMtime) {
+      const raw = fs.readFileSync(APP_CONFIG_PATH, "utf8");
+      const cfg = JSON.parse(raw) as { orchestrator?: unknown };
+      cachedOrchConfig = cfg.orchestrator === "codex" ? "codex" : "claude";
+      cachedOrchConfigMtime = mtime;
+    }
+    return cachedOrchConfig;
   } catch {
     return "claude";
   }

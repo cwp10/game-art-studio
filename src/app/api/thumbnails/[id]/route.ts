@@ -5,7 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import sharp from "sharp";
 import { getGeneration } from "@/lib/db/repo/generations";
-import { DATA_DIR, THUMBS_DIR, ensureDataDirs, thumbnailPath } from "@/lib/util/paths";
+import { THUMBS_DIR, ensureDataDirs, resolveImagePath, thumbnailPath } from "@/lib/util/paths";
 
 export const runtime = "nodejs";
 
@@ -33,9 +33,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     /* 캐시 미스 → 아래에서 생성 */
   }
 
-  const srcPath = path.isAbsolute(gen.image_path)
-    ? gen.image_path
-    : path.join(DATA_DIR, gen.image_path);
+  const srcPath = resolveImagePath(gen.image_path);
   try {
     await stat(srcPath);
   } catch {

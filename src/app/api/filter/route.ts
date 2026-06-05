@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import path from "node:path";
-import { DATA_DIR, IMAGES_DIR, resolveImagePath } from "@/lib/util/paths";
+import { imagePath, resolveImagePath, toRelative } from "@/lib/util/paths";
 import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
 import { newGenerationId } from "@/lib/util/ids";
 
@@ -20,7 +19,7 @@ export async function POST(req: NextRequest) {
 
   const srcPath = resolveImagePath(gen.image_path);
   const newId = newGenerationId();
-  const outPath = path.join(IMAGES_DIR, `${newId}.png`);
+  const outPath = imagePath(newId);
 
   let pipeline = sharp(srcPath).ensureAlpha();
 
@@ -65,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   const meta = await pipeline.png().toFile(outPath);
 
-  const relPath = path.relative(DATA_DIR, outPath);
+  const relPath = toRelative(outPath);
   createGeneration({
     id: newId,
     session_id: gen.session_id,

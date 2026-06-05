@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { claudeRunSimple } from "@/lib/cli/claude-cli";
+import { extractJsonArray } from "@/lib/util/json-parse";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -112,22 +113,15 @@ export async function POST(req: NextRequest) {
     }
 
     // mode "a"/"b"/"c": JSON 배열 파싱 시도 → 구조화된 제안 목록 반환
-    if (mode === "a" || mode === "b" || mode === "c") {
-      const match = suggestion.match(/\[[\s\S]*\]/);
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[0]) as unknown[];
-          const suggestions = parsed.filter(
-            (x): x is SkinSuggestion =>
-              typeof x === "object" && x !== null &&
-              typeof (x as SkinSuggestion).title === "string" &&
-              typeof (x as SkinSuggestion).body === "string",
-          );
-          if (suggestions.length > 0) {
-            return Response.json({ suggestions });
-          }
-        } catch { /* JSON 파싱 실패 시 단일 텍스트로 폴백 */ }
-      }
+    const parsed = extractJsonArray(suggestion);
+    if (parsed) {
+      const suggestions = parsed.filter(
+        (x): x is SkinSuggestion =>
+          typeof x === "object" && x !== null &&
+          typeof (x as SkinSuggestion).title === "string" &&
+          typeof (x as SkinSuggestion).body === "string",
+      );
+      if (suggestions.length > 0) return Response.json({ suggestions });
     }
 
     return Response.json({ suggestion });

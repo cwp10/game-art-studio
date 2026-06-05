@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { claudeRunSimple } from "@/lib/cli/claude-cli";
 import { getGeneration } from "@/lib/db/repo/generations";
+import { extractJsonArray } from "@/lib/util/json-parse";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -69,14 +70,3 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function extractJsonArray(raw: string): unknown[] | null {
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}

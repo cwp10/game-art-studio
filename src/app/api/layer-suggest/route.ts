@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { claudeRunSimple } from "@/lib/cli/claude-cli";
+import { extractJsonArray } from "@/lib/util/json-parse";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -35,18 +36,15 @@ export async function POST(req: NextRequest) {
     const text = raw.trim();
     if (!text) return Response.json({ error: "empty suggestion" }, { status: 502 });
 
-    const match = text.match(/\[[\s\S]*\]/);
-    if (match) {
-      try {
-        const parsed = JSON.parse(match[0]) as unknown[];
-        const suggestions = parsed.filter(
-          (x): x is Suggestion =>
-            typeof x === "object" && x !== null &&
-            typeof (x as Suggestion).title === "string" &&
-            typeof (x as Suggestion).body === "string",
-        );
-        if (suggestions.length > 0) return Response.json({ suggestions });
-      } catch { /* fall through */ }
+    const parsed = extractJsonArray(text);
+    if (parsed) {
+      const suggestions = parsed.filter(
+        (x): x is Suggestion =>
+          typeof x === "object" && x !== null &&
+          typeof (x as Suggestion).title === "string" &&
+          typeof (x as Suggestion).body === "string",
+      );
+      if (suggestions.length > 0) return Response.json({ suggestions });
     }
     return Response.json({ error: "응답 파싱 실패" }, { status: 502 });
   } catch (e) {
