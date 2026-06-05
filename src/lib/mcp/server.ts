@@ -1284,6 +1284,8 @@ async function buildSpritePrompt(
 
   let poseRefPath: string | null = null;
   let poseFrameAnglesText = "";
+  // 단일방향 평탄 각도 배열 — buildFrameNarrative(per-frame 서술)용으로 try 블록 밖에 노출.
+  let poseFrameAngles: FrameAngle[] | null = null;
   if (isWalk && isCharacter && isSingleDirection) {
     // DIR_INDEX(full 방향명→dirIndex)는 pose-reference.ts DIRECTIONS_8에서 파생 — 순서 단일 소스.
     const dirIndex = DIR_INDEX[parsedWalkDir ?? "RIGHT"] ?? 6;
@@ -1301,6 +1303,7 @@ async function buildSpritePrompt(
       );
       poseRefPath = guidePath;
       poseFrameAnglesText = toAngleText(angles, rows);
+      poseFrameAngles = angles;
       log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
     } catch (e) {
       log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
@@ -1308,6 +1311,7 @@ async function buildSpritePrompt(
         const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, cellW, TEMPLATES_DIR, isRun);
         poseRefPath = guidePath;
         poseFrameAnglesText = toAngleText(angles, 1);
+        poseFrameAngles = angles;
         log(`make_spritesheet: pose guide (SVG fallback) → ${path.basename(guidePath)}`);
       } catch (e2) {
         log(`make_spritesheet: pose guide failed (non-fatal): ${(e2 as Error).message}`);
@@ -1341,9 +1345,30 @@ async function buildSpritePrompt(
     }
   }
 
+  // buildFrameNarrative: 각 프레임을 사람이 읽기 쉬운 narrative로 변환.
+  // foreAft(정면/후면)는 발 높이차로, 측면/대각선은 L/R 스윙각과 stride 위상으로 서술.
+  const buildFrameNarrative = (frameAngles: FrameAngle[], numRows: number, numCols: number): string => {
+    const descs = frameAngles.map((a, i) => {
+      const pos = numRows > 1
+        ? `row${Math.floor(i / numCols) + 1}col${(i % numCols) + 1}`
+        : `col${i + 1}`;
+      if (a.foreAft) {
+        const isContact = a.label.includes("CONTACT");
+        const hint = isContact ? "(≥15% cell height apart)" : "(slightly different heights)";
+        return `${pos}[${a.label}]: ${a.foreAft} ${hint}`;
+      }
+      const lA = a.leftDeg;
+      const rA = a.rightDeg;
+      const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
+      return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})`;
+    });
+    return `MANDATORY FRAME SEQUENCE: ${descs.join("; ")}. `;
+  };
+
   // ── 보행 사이클 규칙 ────────────────────────────────────────────────────
   const walkCycleRule = isWalk && isCharacter
-    ? `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
+    ? `ANTI-STATIC ANIMATION RULE (CRITICAL, READ FIRST): Each of the ${cols * rows} frames MUST be visually different from every other frame. If any two frames look identical or near-identical, those frames are WRONG — walking means legs move continuously through the gait cycle. A static character repeated ${cols * rows} times is a COMPLETE FAILURE. YOU MUST SHOW CONTINUOUS MOVEMENT. ` +
+      `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
       `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
       `(1) CONTACT — left leg fully forward, right leg fully back; ` +
       `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
@@ -1379,6 +1404,19 @@ async function buildSpritePrompt(
           `MID-STANCE/CROSSOVER frames: both legs are near vertical (0°) but STILL at slightly different positions — ` +
           `e.g. LEFT at +5°, RIGHT at -5° — they are crossing, NOT both at 0° simultaneously. ` +
           `NEVER draw both legs at the same angle in any frame. Symmetric leg poses (both legs identical) indicate a static T-pose, NOT a walk cycle — this is a critical error. `
+        : parsedWalkDir === "DOWN" || parsedWalkDir === "UP"
+        ? `FRONT/BACK LEG DEPTH RULE (CRITICAL): For this front/back-facing walk, leg separation is shown as DEPTH, not side-to-side angles. ` +
+          `CONTACT frames: ONE foot is drawn LOWER in the frame (stepped forward toward the camera) and the OTHER foot is drawn HIGHER (pulled back away from the camera). ` +
+          `The vertical gap between the two feet must be OBVIOUS — at least 15% of the cell height. ` +
+          `CROSSOVER frames: both feet near the same height, but STILL at slightly different vertical positions — never both at exactly the same height. ` +
+          `In EVERY frame, the two feet MUST be at different heights. Never let both feet sit at the same vertical position — that is a T-pose (static), not a walk. `
+        : parsedWalkDir
+        ? `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
+          `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
+          `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT MUST be back (-angle), and vice versa. ` +
+          `Typical contact stride: one leg ~+20° to +32°, the other ~-20° to -32°. ` +
+          `CROSSOVER frames: both legs near 0° but STILL slightly different — e.g. LEFT +5°, RIGHT -5°. ` +
+          `NEVER draw both legs at the same angle in any frame. Symmetric poses indicate a static T-pose, NOT a walk cycle. `
         : "") +
       (rows > 1 && parsedWalkDir
         ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row continues the animation from the previous row — NOT a new cycle. ` +
@@ -1398,7 +1436,8 @@ async function buildSpritePrompt(
       `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +
       `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
       (poseFrameAnglesText
-        ? `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
+        ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
+          `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
           (rows > 1
             ? `ROW CONTINUITY (CRITICAL): This grid is ONE continuous animation sequence — each row continues from where the previous row ended. ` +
               `The leading foot at the start of each row alternates: row1col1 = L-CONTACT, row2col1 = R-CONTACT` +
@@ -1412,10 +1451,10 @@ async function buildSpritePrompt(
           `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
           `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. ` +
           `Some cells (front/back-facing rows) use a depth note instead of an angle, because their legs swing toward/away from the camera, not sideways. ` +
-          `'fwd(lower)' = draw that foot LOWER on screen (stepped toward the viewer). ` +
-          `'fwd(higher)' = draw that foot HIGHER on screen (stepped away from the viewer). ` +
-          `'back(lower)' / 'back(higher)' = the opposite foot at the opposite position. ` +
-          `In all cases, the two feet must be at clearly different heights. `
+          `'fwd(lower)' = draw that foot CLEARLY LOWER in the frame (stepped forward toward the viewer) — in CONTACT frames, this foot must be at least 15% of the cell height lower than the other foot. ` +
+          `'fwd(higher)' = draw that foot CLEARLY HIGHER in the frame (stepped forward away from the viewer, back-facing walk). ` +
+          `'back(lower)' / 'back(higher)' = the trailing foot at the opposite position. ` +
+          `In ALL CONTACT frames, the two feet must have an OBVIOUS height difference — never draw both feet at the same vertical position. `
         : "")
     : "";
 
