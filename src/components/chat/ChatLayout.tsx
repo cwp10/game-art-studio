@@ -414,6 +414,10 @@ export function ChatLayout() {
     abortRef.current?.abort();
   }, []);
 
+  // 편집/스프라이트 패널 닫기 — JSX inline 화살표 대신 안정 참조로 공유(원자적 상태 정리).
+  const closeEditing = useCallback(() => setEditing(null), []);
+  const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
+
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
   // resize / remove_bg 는 generationId 를 attach 해서 Claude 가 inputGenerationId 로
@@ -934,6 +938,148 @@ export function ChatLayout() {
     [state.activeSessionId],
   );
 
+  // 우측 편집 패널 — mode 별로 props 가 전부 달라 config 맵은 불가하지만, 공통 래퍼
+  // (fixed inset-y-0 right-0 z-40 w-1/2)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
+  // (spriteGen 상태)은 EditTarget 기반이 아니라 별도라 이 함수 밖에 유지.
+  function renderEditPanel() {
+    if (!editing) return null;
+    const panel = (() => {
+      switch (editing.mode) {
+        case "inpaint":
+          return (
+            <MaskCanvas
+              key={editing.generationId}
+              parentGenerationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              imageWidth={editing.width}
+              imageHeight={editing.height}
+              sessionId={state.activeSessionId}
+              busy={state.generating}
+              onSubmit={handleInpaint}
+              onCancel={closeEditing}
+              onCancelGeneration={handleCancel}
+            />
+          );
+        case "layer":
+          return (
+            <LayerCanvas
+              parentGenerationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              imageWidth={editing.width}
+              imageHeight={editing.height}
+              busy={state.generating}
+              results={layerResults}
+              onSubmit={handleLayerSplit}
+              onBrushSubmit={handleLayerBrush}
+              onCancel={closeEditing}
+            />
+          );
+        case "image_tools":
+          return (
+            <ImageToolsPanel
+              key={editing.generationId}
+              generationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              imageWidth={editing.width}
+              imageHeight={editing.height}
+              busy={state.generating}
+              onCrop={handleImageCrop}
+              onCancel={closeEditing}
+            />
+          );
+        case "sprite":
+          return (
+            <SpriteCanvas
+              key={editing.generationId}
+              parentGenerationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              imageWidth={editing.width}
+              imageHeight={editing.height}
+              sessionId={state.activeSessionId}
+              sheetGenerationId={editing.generationId}
+              onRegenBusyChange={setSpriteRegenBusy}
+              onSheetUpdated={res => {
+                // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
+                // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
+                // tempId 는 영속된 assistant 메시지 id — reopen 시 user 버블 키가 안정적으로 일치.
+                dispatch({
+                  type: "add_result_card",
+                  tempId: res.messageId,
+                  userText: "✏️ 프레임 재생성",
+                  generationId: res.generationId,
+                  width: res.width,
+                  height: res.height,
+                  kind: "spritesheet",
+                });
+                setEditing({
+                  mode: "sprite",
+                  generationId: res.generationId,
+                  imageUrl: `/api/images/${res.generationId}`,
+                  width: res.width,
+                  height: res.height,
+                });
+              }}
+              onSaved={res => {
+                // 보정본을 결과 카드로 chat 에 삽입(reskin b-precise 패턴). 패널은 계속 열린 채로
+                // 유지 — 사용자가 추가 방향 보정을 이어갈 수 있게.
+                dispatch({
+                  type: "add_result_card",
+                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                  userText: "🎞️ 보정된 스프라이트시트",
+                  generationId: res.generationId,
+                  width: res.width,
+                  height: res.height,
+                  kind: "spritesheet",
+                });
+              }}
+              onCancel={closeEditing}
+            />
+          );
+        case "reskin":
+          return (
+            <ReskinPanel
+              generationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              width={editing.width}
+              height={editing.height}
+              kind={editing.kind}
+              initialMode={editing.initialMode}
+              initialSkinInput={editing.initialSkinInput}
+              sessionId={state.activeSessionId}
+              busy={state.generating}
+              onSubmit={handleReskin}
+              onClose={closeEditing}
+              onCancel={handleCancel}
+            />
+          );
+        case "normal_map":
+          return (
+            <NormalMapPanel
+              generationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              width={editing.width}
+              height={editing.height}
+              onResult={res => {
+                dispatch({
+                  type: "add_result_card",
+                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                  userText: "🗺️ 노멀맵",
+                  generationId: res.generationId,
+                  width: res.width,
+                  height: res.height,
+                  kind: "normal_map",
+                });
+                setEditing(null);
+              }}
+              onClose={closeEditing}
+            />
+          );
+      }
+    })();
+    if (!panel) return null;
+    return <div className="fixed inset-y-0 right-0 z-40 w-1/2">{panel}</div>;
+  }
+
   const hasItems = state.items.length > 0;
   // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
   // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
@@ -1030,141 +1176,7 @@ export function ChatLayout() {
           onOpenSpritePanel={() => { setEditing(null); setSpriteGen({}); }}
         />
       </div>
-      {editing?.mode === "inpaint" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <MaskCanvas
-            key={editing.generationId}
-            parentGenerationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            imageWidth={editing.width}
-            imageHeight={editing.height}
-            sessionId={state.activeSessionId}
-            busy={state.generating}
-            onSubmit={handleInpaint}
-            onCancel={() => setEditing(null)}
-            onCancelGeneration={handleCancel}
-          />
-        </div>
-      )}
-      {editing?.mode === "layer" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <LayerCanvas
-            parentGenerationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            imageWidth={editing.width}
-            imageHeight={editing.height}
-            busy={state.generating}
-            results={layerResults}
-            onSubmit={handleLayerSplit}
-            onBrushSubmit={handleLayerBrush}
-            onCancel={() => setEditing(null)}
-          />
-        </div>
-      )}
-      {editing?.mode === "image_tools" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <ImageToolsPanel
-            key={editing.generationId}
-            generationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            imageWidth={editing.width}
-            imageHeight={editing.height}
-            busy={state.generating}
-            onCrop={handleImageCrop}
-            onCancel={() => setEditing(null)}
-          />
-        </div>
-      )}
-      {editing?.mode === "sprite" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <SpriteCanvas
-            key={editing.generationId}
-            parentGenerationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            imageWidth={editing.width}
-            imageHeight={editing.height}
-            sessionId={state.activeSessionId}
-            sheetGenerationId={editing.generationId}
-            onRegenBusyChange={setSpriteRegenBusy}
-            onSheetUpdated={res => {
-              // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
-              // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
-              // tempId 는 영속된 assistant 메시지 id — reopen 시 user 버블 키가 안정적으로 일치.
-              dispatch({
-                type: "add_result_card",
-                tempId: res.messageId,
-                userText: "✏️ 프레임 재생성",
-                generationId: res.generationId,
-                width: res.width,
-                height: res.height,
-                kind: "spritesheet",
-              });
-              setEditing({
-                mode: "sprite",
-                generationId: res.generationId,
-                imageUrl: `/api/images/${res.generationId}`,
-                width: res.width,
-                height: res.height,
-              });
-            }}
-            onSaved={res => {
-              // 보정본을 결과 카드로 chat 에 삽입(reskin b-precise 패턴). 패널은 계속 열린 채로
-              // 유지 — 사용자가 추가 방향 보정을 이어갈 수 있게.
-              dispatch({
-                type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: "🎞️ 보정된 스프라이트시트",
-                generationId: res.generationId,
-                width: res.width,
-                height: res.height,
-                kind: "spritesheet",
-              });
-            }}
-            onCancel={() => setEditing(null)}
-          />
-        </div>
-      )}
-      {editing?.mode === "reskin" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <ReskinPanel
-            generationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            width={editing.width}
-            height={editing.height}
-            kind={editing.kind}
-            initialMode={editing.initialMode}
-            initialSkinInput={editing.initialSkinInput}
-            sessionId={state.activeSessionId}
-            busy={state.generating}
-            onSubmit={handleReskin}
-            onClose={() => setEditing(null)}
-            onCancel={handleCancel}
-          />
-        </div>
-      )}
-      {editing?.mode === "normal_map" && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
-          <NormalMapPanel
-            generationId={editing.generationId}
-            imageUrl={editing.imageUrl}
-            width={editing.width}
-            height={editing.height}
-            onResult={res => {
-              dispatch({
-                type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: "🗺️ 노멀맵",
-                generationId: res.generationId,
-                width: res.width,
-                height: res.height,
-                kind: "normal_map",
-              });
-              setEditing(null);
-            }}
-            onClose={() => setEditing(null)}
-          />
-        </div>
-      )}
+      {renderEditPanel()}
       {spriteGen && (
         <div className="fixed inset-y-0 right-0 z-40 w-1/2">
           <SpriteGenPanel
@@ -1174,7 +1186,7 @@ export function ChatLayout() {
             initialSubjectMode={spriteGen.initialSubjectMode}
             busy={state.generating}
             onSubmit={handleSpriteGen}
-            onClose={() => setSpriteGen(null)}
+            onClose={closeSpriteGen}
             onCancel={handleCancel}
           />
         </div>

@@ -1,6 +1,7 @@
 /**
  * 클라이언트 측 fetch 래퍼. 클라이언트 컴포넌트에서만 사용.
  */
+import type { UploadResultDTO } from "@/types/api";
 import type { ChatEvent, ChatRequest } from "@/types/chat";
 import type { Generation, Message, PromptLibraryItem, Session, StylePreset } from "@/types/db";
 
@@ -72,7 +73,7 @@ export async function listMessages(sessionId: string, signal?: AbortSignal): Pro
 export async function uploadMask(parentGenerationId: string, dataUrl: string): Promise<string> {
   const r = await jsonFetch("/api/upload", "POST", { kind: "mask", parentGenerationId, dataUrl });
   if (!r.ok) throw new Error(`uploadMask failed: ${await extractError(r)}`);
-  const { generationId } = (await r.json()) as { generationId: string };
+  const { generationId } = (await r.json()) as UploadResultDTO;
   return generationId;
 }
 
