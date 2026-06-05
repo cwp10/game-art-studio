@@ -2,6 +2,7 @@
 
 import { Layers, Loader2, Paintbrush, Sparkles, Tags, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AiSuggestButton, AiSuggestDropdown } from "@/components/editor/AiSuggestControls";
 import { ZoomPanControls, useZoomPan } from "./useZoomPan";
 
 /**
@@ -54,7 +55,7 @@ export function LayerCanvas({
   const [aiSuggestions, setAiSuggestions] = useState<{ title: string; body: string }[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  async function handleAiSuggest() {
+  const handleAiSuggest = useCallback(async () => {
     if (aiLoading) return;
     setAiLoading(true);
     setAiError(null);
@@ -78,7 +79,7 @@ export function LayerCanvas({
     } finally {
       setAiLoading(false);
     }
-  }
+  }, [aiLoading, parts]);
 
   function addPart(raw: string) {
     const value = raw.trim();
@@ -291,10 +292,11 @@ export function LayerCanvas({
             <div className="flex flex-col gap-1.5">
               <div className="relative flex items-center gap-2">
                 <label className="text-xs font-medium text-text-muted">분리할 부위</label>
-                <LayerAiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                <AiSuggestButton compact loading={aiLoading} onClick={handleAiSuggest} />
                 {aiSuggestions && (
-                  <LayerAiSuggestDropdown
+                  <AiSuggestDropdown
                     suggestions={aiSuggestions}
+                    width="w-[320px]"
                     onSelect={v => {
                       setParts(v.split(",").map(s => s.trim()).filter(Boolean).slice(0, MAX_PARTS));
                       setAiSuggestions(null);
@@ -487,66 +489,4 @@ export function LayerCanvas({
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// AI 제안 서브컴포넌트
 
-function LayerAiSuggestButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={loading}
-      className={`ml-auto flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] ${
-        loading
-          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-          : "border-border text-text-muted hover:text-text-primary"
-      } disabled:opacity-60`}
-    >
-      {loading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-      {loading ? "생각 중…" : "AI 제안"}
-    </button>
-  );
-}
-
-function LayerAiSuggestDropdown({
-  suggestions,
-  onSelect,
-  onClose,
-}: {
-  suggestions: { title: string; body: string }[];
-  onSelect: (body: string) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [onClose]);
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full z-30 mt-1 w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
-    >
-      {suggestions.map((s, i) => (
-        <div
-          key={i}
-          className="flex items-start gap-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-text-primary">{s.title}</div>
-            <div className="mt-0.5 text-[11px] text-text-muted/80">{s.body}</div>
-          </div>
-          <button
-            onClick={() => onSelect(s.body)}
-            className="shrink-0 rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
-          >
-            선택
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
