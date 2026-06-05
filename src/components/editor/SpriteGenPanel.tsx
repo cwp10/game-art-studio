@@ -1,7 +1,9 @@
 "use client";
 
-import { Grid3x3, Lightbulb, Loader2, Sparkles, X } from "lucide-react";
+import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+import { PanelFooter } from "@/components/editor/PanelFooter";
 
 
 /**
@@ -589,26 +591,16 @@ export function SpriteGenPanel({
         </div>
       </div>
 
-      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
-        <button
-          onClick={busy ? (onCancel ?? onClose) : onClose}
-          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
-        >
-          {busy ? "■ 생성 취소" : "✕ 취소"}
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-          className="flex h-9 flex-[2] items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          title={canSubmit ? "" : busy ? "" : "동작 설명을 입력하세요"}
-        >
-          {busy ? (
-            <><Loader2 size={14} className="animate-spin" /> 생성 중…</>
-          ) : (
-            <><Sparkles size={14} /> 생성하기</>
-          )}
-        </button>
-      </footer>
+      <PanelFooter
+        busy={busy}
+        canSubmit={canSubmit}
+        onSubmit={handleSubmit}
+        onClose={onClose}
+        onCancel={onCancel}
+        submitLabel={<><Sparkles size={14} /> 생성하기</>}
+        busyLabel="생성 중…"
+        submitTitle={canSubmit || busy ? "" : "동작 설명을 입력하세요"}
+      />
     </aside>
   );
 }

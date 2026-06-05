@@ -446,92 +446,13 @@ export function ChatLayout() {
         subjectMode?: "character" | "object";
       },
     ) => {
-      if (action === "compare" && payload.generationId) {
-        setComparing({ afterId: payload.generationId });
-      } else if (action === "duplicate" && payload.prompt) {
-        handleSend(payload.prompt);
-      } else if (action === "reference" && payload.generationId) {
-        // 이 결과를 다음 메시지의 reference 로 attach.
-        const label = payload.prompt?.slice(0, 32) ?? payload.generationId.slice(0, 8);
-        setComposerAttachment(prev => ({
-          generationId: payload.generationId!,
-          label,
-          seq: (prev?.seq ?? 0) + 1,
-        }));
-      } else if (action === "resize" && payload.generationId && payload.targetSize) {
-        handleSend(`이 이미지를 ${payload.targetSize}×${payload.targetSize} 로 리사이즈해줘.`, {
-          attachmentGenerationIds: [payload.generationId],
-        });
-      } else if (action === "remove_bg" && payload.generationId) {
-        handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
-          attachmentGenerationIds: [payload.generationId],
-        });
-      } else if (action === "make_normal_map" && payload.generationId && payload.width && payload.height) {
-        setSpriteGen(null);
-        setEditing({
-          mode: "normal_map",
-          generationId: payload.generationId,
-          imageUrl: `/api/images/${payload.generationId}`,
-          width: payload.width,
-          height: payload.height,
-          kind: payload.kind,
-        });
-      } else if (action === "overlay" && payload.generationId && payload.width && payload.height) {
-        // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
-        // 백엔드 동일 — 패널이 시트+이미지참조 서브일 때 "캐릭터 오버레이"로 리프레이밍.
-        setSpriteGen(null);
-        setEditing({
-          mode: "reskin",
-          initialMode: "skin",
-          initialSkinInput: "image",
-          generationId: payload.generationId,
-          imageUrl: `/api/images/${payload.generationId}`,
-          width: payload.width,
-          height: payload.height,
-          kind: payload.kind,
-        });
-      } else if (action === "make_sheet" && payload.generationId && payload.width && payload.height) {
-        setEditing(null);
-        setSpriteGen({
-          reference: {
-            generationId: payload.generationId,
-            imageUrl: `/api/images/${payload.generationId}`,
-            width: payload.width,
-            height: payload.height,
-            kind: payload.kind,
-            prompt: payload.prompt,
-          },
-          initialSubjectMode:
-            payload.subjectMode ??
-            inferSubjectModeFromPrompt(payload.prompt),
-        });
-      } else if (action === "image_tools" && payload.generationId && payload.width && payload.height) {
-        setSpriteGen(null);
-        setEditing({
-          mode: "image_tools",
-          generationId: payload.generationId,
-          imageUrl: `/api/images/${payload.generationId}`,
-          width: payload.width,
-          height: payload.height,
-          kind: payload.kind,
-        });
-      } else if (
-        (action === "edit" ||
-          action === "layer_split" ||
-          action === "sprite_split" ||
-          action === "reskin") &&
-        payload.generationId &&
-        payload.width &&
-        payload.height
-      ) {
-        const mode =
-          action === "edit"
-            ? "inpaint"
-            : action === "layer_split"
-              ? "layer"
-              : action === "sprite_split"
-                ? "sprite"
-                : "reskin";
+      // 우측 편집 패널을 여는 공통 진입 — generationId·width·height 가드 후 editing 상태 set.
+      // (edit/layer_split/sprite_split/reskin/image_tools/normal_map/overlay 가 공유)
+      const openEditPanel = (
+        mode: Exclude<Editing, null>["mode"],
+        extra?: Partial<Exclude<Editing, null>>,
+      ) => {
+        if (!payload.generationId || !payload.width || !payload.height) return;
         setSpriteGen(null);
         setEditing({
           mode,
@@ -540,9 +461,73 @@ export function ChatLayout() {
           width: payload.width,
           height: payload.height,
           kind: payload.kind,
-        });
-        if (mode === "layer") setLayerResults([]);
-      }
+          ...extra,
+        } as Editing);
+      };
+
+      const handlers: Partial<Record<typeof action, () => void>> = {
+        compare: () => {
+          if (!payload.generationId) return;
+          setComparing({ afterId: payload.generationId });
+        },
+        duplicate: () => {
+          if (!payload.prompt) return;
+          handleSend(payload.prompt);
+        },
+        reference: () => {
+          if (!payload.generationId) return;
+          // 이 결과를 다음 메시지의 reference 로 attach.
+          const label = payload.prompt?.slice(0, 32) ?? payload.generationId.slice(0, 8);
+          setComposerAttachment(prev => ({
+            generationId: payload.generationId!,
+            label,
+            seq: (prev?.seq ?? 0) + 1,
+          }));
+        },
+        resize: () => {
+          if (!payload.generationId || !payload.targetSize) return;
+          handleSend(`이 이미지를 ${payload.targetSize}×${payload.targetSize} 로 리사이즈해줘.`, {
+            attachmentGenerationIds: [payload.generationId],
+          });
+        },
+        remove_bg: () => {
+          if (!payload.generationId) return;
+          handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
+            attachmentGenerationIds: [payload.generationId],
+          });
+        },
+        make_normal_map: () => openEditPanel("normal_map"),
+        overlay: () =>
+          // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
+          // 백엔드 동일 — 패널이 시트+이미지참조 서브일 때 "캐릭터 오버레이"로 리프레이밍.
+          openEditPanel("reskin", { initialMode: "skin", initialSkinInput: "image" }),
+        make_sheet: () => {
+          if (!payload.generationId || !payload.width || !payload.height) return;
+          setEditing(null);
+          setSpriteGen({
+            reference: {
+              generationId: payload.generationId,
+              imageUrl: `/api/images/${payload.generationId}`,
+              width: payload.width,
+              height: payload.height,
+              kind: payload.kind,
+              prompt: payload.prompt,
+            },
+            initialSubjectMode:
+              payload.subjectMode ??
+              inferSubjectModeFromPrompt(payload.prompt),
+          });
+        },
+        image_tools: () => openEditPanel("image_tools"),
+        edit: () => openEditPanel("inpaint"),
+        layer_split: () => {
+          openEditPanel("layer");
+          if (payload.generationId && payload.width && payload.height) setLayerResults([]);
+        },
+        sprite_split: () => openEditPanel("sprite"),
+        reskin: () => openEditPanel("reskin"),
+      };
+      handlers[action]?.();
     },
     [handleSend],
   );

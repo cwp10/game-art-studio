@@ -3,6 +3,7 @@
 import { Loader2, Palette, Sparkles, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
+import { PanelFooter } from "@/components/editor/PanelFooter";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 import type { Generation } from "@/types/db";
 
@@ -645,32 +646,21 @@ export function ReskinPanel({
         )}
       </div>
 
-      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
-        <button
-          onClick={busy ? (onCancel ?? onClose) : onClose}
-          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
-        >
-          {busy ? "■ 생성 취소" : "✕ 취소"}
-        </button>
-        <button
-          onClick={submit}
-          disabled={!canSubmit || busy}
-          className="flex h-9 flex-[2] items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          title={
-            canSubmit || busy
-              ? ""
-              : uiMode === "skin" && skinInput === "image"
-              ? "참조 이미지 선택 필요"
-              : "설명 입력 필요"
-          }
-        >
-          {busy ? (
-            <><Loader2 size={14} className="animate-spin" /> 실행 중…</>
-          ) : (
-            overlay || refIsSheet ? "오버레이 실행 ▸" : "리스킨 실행 ▸"
-          )}
-        </button>
-      </footer>
+      <PanelFooter
+        busy={busy}
+        canSubmit={canSubmit}
+        onSubmit={submit}
+        onClose={onClose}
+        onCancel={onCancel}
+        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : "리스킨 실행 ▸"}
+        submitTitle={
+          canSubmit || busy
+            ? ""
+            : uiMode === "skin" && skinInput === "image"
+            ? "참조 이미지 선택 필요"
+            : "설명 입력 필요"
+        }
+      />
     </aside>
   );
 }

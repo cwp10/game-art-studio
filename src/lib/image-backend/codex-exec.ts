@@ -58,295 +58,288 @@ function isEraseIntent(prompt: string): boolean {
   return false;
 }
 
-function buildNaturalPrompt(job: ImageJob): string {
-  switch (job.kind) {
-    case "text2img":
-      return PROMPT_HEADER + `Generate an image: ${job.prompt}`;
-    case "img2img":
+function buildInpaintPrompt(job: ImageJob): string {
+  const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
+  if (hasMask) {
+    // 지우기(erase) 의도 감지 — Codex image_gen 은 정식 inpaint 가 아니어서
+    // prompt 에 객체명이 한 번이라도 등장하면 그걸 다시 그림. orchestrator 가
+    // "fluffy white clouds, wildflowers..." 같은 장면 묘사를 추가하면 모델이
+    // 그 객체들을 마스크 영역에 다시 그려넣어 "전혀 안 지워짐" 현상이 발생.
+    // 따라서 erase 의도가 잡히면 orchestrator 의 prompt 를 무시하고 강한
+    // 객체 금지 템플릿으로 override.
+    if (isEraseIntent(job.prompt)) {
       return (
         PROMPT_HEADER +
-        `Use the attached image as a reference. Generate a new image: ${job.prompt}`
-      );
-    case "inpaint": {
-      // 2개 첨부: [원본, 마스크]. 1개: 마스크 없는 전역 inpaint (edit_image 와 사실상 동등).
-      // probe-codex-inpaint.mjs 에서 검증된 정확한 자연어 사용.
-      const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
-      if (hasMask) {
-        // 지우기(erase) 의도 감지 — Codex image_gen 은 정식 inpaint 가 아니어서
-        // prompt 에 객체명이 한 번이라도 등장하면 그걸 다시 그림. orchestrator 가
-        // "fluffy white clouds, wildflowers..." 같은 장면 묘사를 추가하면 모델이
-        // 그 객체들을 마스크 영역에 다시 그려넣어 "전혀 안 지워짐" 현상이 발생.
-        // 따라서 erase 의도가 잡히면 orchestrator 의 prompt 를 무시하고 강한
-        // 객체 금지 템플릿으로 override.
-        if (isEraseIntent(job.prompt)) {
-          return (
-            PROMPT_HEADER +
-            `OBJECT REMOVAL. I am attaching TWO images: ` +
-            `(1) the original image, and (2) a mask where the RED region marks an element to remove.\n\n` +
-            `Remove the red-masked element and fill the vacated area with whatever is naturally behind it: ` +
-            `body parts or clothing if the element was in front of the character, ` +
-            `background scenery if it was in front of the background, ` +
-            `or transparent pixels if it was in front of empty space. ` +
-            `Preserve the character's art style, colors, and anatomy as seen outside the red region. ` +
-            `Everything outside the red-masked region must be pixel-identical to image 1. ` +
-            `Do not include the red color or the mask in the output.`
-          );
-        }
-        return (
-          PROMPT_HEADER +
-          `I am attaching TWO images: (1) the original image, and ` +
-          `(2) a mask where the RED region marks the area to be replaced. ` +
-          `Replace ONLY the red region with: ${job.prompt}. ` +
-          `Preserve everything outside the red region exactly as in the original. ` +
-          `Do not include the red color or the mask itself in the output.`
-        );
-      }
-      return (
-        PROMPT_HEADER +
-        `Edit the attached image: ${job.prompt}. Preserve everything outside the requested change.`
+        `OBJECT REMOVAL. I am attaching TWO images: ` +
+        `(1) the original image, and (2) a mask where the RED region marks an element to remove.\n\n` +
+        `Remove the red-masked element and fill the vacated area with whatever is naturally behind it: ` +
+        `body parts or clothing if the element was in front of the character, ` +
+        `background scenery if it was in front of the background, ` +
+        `or transparent pixels if it was in front of empty space. ` +
+        `Preserve the character's art style, colors, and anatomy as seen outside the red region. ` +
+        `Everything outside the red-masked region must be pixel-identical to image 1. ` +
+        `Do not include the red color or the mask in the output.`
       );
     }
-    case "upscale":
-      return (
-        PROMPT_HEADER +
-        `Upscale the attached image to higher resolution while preserving all detail. ${job.prompt}`
-      );
-    case "remove_bg":
-      return (
-        PROMPT_HEADER +
-        `Regenerate the attached subject on a flat solid #00ff00 chroma-key background ` +
-        `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
-        `the post-processing pipeline will key out the green. ${job.prompt}`
-      );
-    case "layer_extract": {
-      // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
-      const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
-      if (hasMask) {
-        return (
-          PROMPT_HEADER +
-          `OBJECT EXTRACTION. I am attaching TWO images: ` +
-          `(1) the original image, and (2) a mask where the RED region marks the object to extract.\n\n` +
-          `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background. ` +
-          `Show ONLY the extracted object — infer its complete and accurate boundary ` +
-          `(the brush stroke is approximate; use visual context to find the true edges). ` +
-          `Preserve the object's original colors, shading, and art style exactly. ` +
-          `Everything outside the extracted object must be solid #00ff00 green with no gradients or shadows. ` +
-          `After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
-        );
-      }
-      // 마스크 없음: job.prompt 가 부위명 (예: "머리띠", "눈", "몸통")
-      return (
-        PROMPT_HEADER +
-        `OBJECT EXTRACTION. From the attached image, extract "${job.prompt}"` +
-        ` and place it on a flat solid #00ff00 chroma-key background.\n\n` +
-        `Find and extract ONLY the "${job.prompt}" — identify its exact location and boundaries in the image.` +
-        ` If any part of "${job.prompt}" is hidden or occluded by other elements,` +
-        ` naturally recreate those hidden parts so the extracted result looks complete.` +
-        ` Preserve the original art style, colors, shading, and details exactly.` +
-        ` Everything outside the extracted "${job.prompt}" must be solid #00ff00 green with no gradients or shadows.` +
-        ` After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
-      );
-    }
-    case "spritesheet": {
-      // 이미지 첨부 순서 (server.ts overrideInputPaths 기준):
-      //   inputCount === 1 → [0] 그리드 템플릿만
-      //   inputCount === 2 → [0] 참조 이미지(char ref 또는 pose guide), [1] 그리드 템플릿
-      //   inputCount >= 3  → [0] 포즈 가이드, [1] 참조 캐릭터, [2] 그리드 템플릿
-      // 그리드 템플릿은 항상 마지막 이미지.
-      const inputCount = job.inputImagePaths?.length ?? 0;
-      const seamlessLoop = job.params?.seamlessLoop === true;
-
-      // 루프 사이클 규칙 — seamlessLoop=true 일 때만 삽입.
-      // "Frame N 직후 Frame 1이 재생"되므로 두 프레임이 인접해야 한다는 관점으로 지시.
-      const loopRule = seamlessLoop
-        ? `INFINITE LOOP DESIGN: These frames loop forever as [1→2→…→N→1→2→…]. ` +
-          `Frame N plays immediately before Frame 1 — design a closed cycle with no visible start or end. ` +
-          `Walk/run: Frame N's foot position is the natural step just before Frame 1's foot position resumes. ` +
-          `Idle: Frame N is a mid-breath moment that flows directly into Frame 1. ` +
-          `NEVER a linear arc. ALWAYS a cycle. `
-        : "";
-
-      if (inputCount >= 3) {
-        // [0] 포즈 레퍼런스, [1] 참조 캐릭터, [2] 그리드 템플릿
-        const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
-        return (
-          PROMPT_HEADER +
-          `I am attaching THREE images:\n` +
-          `(1) BASE POSE REFERENCE — a stick-figure skeleton strip showing the exact leg/arm angles per column. ` +
-          `Use it ONLY as a form guide for leg positions and stride alternation. Do NOT copy its colors or style.\n` +
-          `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
-          `and proportions in every frame.\n` +
-          `(3) GRID TEMPLATE — the OUTPUT CANVAS. ` +
-          `Your output PNG must match its exact pixel dimensions, one animation frame per cell in the ${gridDim} grid.\n\n` +
-          `Task: ${job.prompt}\n\n` +
-          `Rules: fill every cell of the grid (image 3) with exactly one sequential frame. ` +
-          `Each frame shows image 2's character in the corresponding pose from image 1. ` +
-          `Each character must be fully contained within its own cell. ` +
-          loopRule
-        );
-      }
-
-      if (inputCount >= 2) {
-        // [0] 참조 이미지(캐릭터 ref 또는 포즈 가이드), [1] 그리드 템플릿
-        const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
-        return (
-          PROMPT_HEADER +
-          `I am attaching TWO images:\n` +
-          `(1) REFERENCE IMAGE — either a character reference (reproduce its exact visual style, colors, outfit) ` +
-          `or a pose guide (use it only for leg/arm angles, do not copy its style).\n` +
-          `(2) GRID TEMPLATE — this is the OUTPUT CANVAS. ` +
-          `It shows a blank ${gridDim} grid with thin gray cell lines. ` +
-          `Your output PNG must have EXACTLY the same pixel dimensions as this template, ` +
-          `with one sequential animation frame drawn inside each cell.\n\n` +
-          `Task: ${job.prompt}\n\n` +
-          `Rules: fill every cell of the grid (image 2) with exactly one sequential frame. ` +
-          `Each frame's content must be fully contained within its own cell. ` +
-          loopRule
-        );
-      }
-      if (inputCount === 1) {
-        // [0] 그리드 템플릿만. 피사체가 캐릭터일 수도 이펙트(VFX)일 수도 있으므로 "character"
-        // 로 단정하지 않는다 — 단정하면 슬래시/폭발 같은 이펙트 시트에도 캐릭터가 끼어든다.
-        return (
-          PROMPT_HEADER +
-          `The attached image is the OUTPUT CANVAS — a blank grid with thin gray cell lines. ` +
-          `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
-          `Task: ${job.prompt}\n` +
-          `Draw one sequential animation frame inside each cell of the grid. ` +
-          `Render exactly what the task describes and nothing more — ` +
-          `if the task is a visual effect/VFX (slash, explosion, magic, impact, etc.), ` +
-          `draw ONLY that effect with NO character or figure unless the task explicitly asks for one. ` +
-          `Each frame's content must be fully contained within its own cell. ` +
-          loopRule
-        );
-      }
-      // 그리드 템플릿 없음 (fallback)
-      return (
-        PROMPT_HEADER +
-        `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
-        `Uniform cell size, evenly spaced grid, one animation frame per cell. ` +
-        `Render exactly what the task describes — if it is a visual effect/VFX, ` +
-        `draw ONLY the effect with no character unless explicitly requested. ` +
-        loopRule
-      );
-    }
-    case "reskin": {
-      // 3모드 분기 (server.ts reskin_image 핸들러가 결정):
-      //   (c) styleRefPath 있음 → inputImagePaths=[base, styleRef] 2장, 참조 화풍 전이
-      //   (b) paletteOnly=true  → 형태 100% 유지, 색 팔레트만 교체
-      //   (a) 그 외 (prompt만)  → 외형 교체 (포즈/실루엣/구도 유지, 색·재질·테마만)
-      // 스프라이트시트 대상이면 셀 구조·프레임수·포즈 유지 문구를 추가 (params.spritesheet).
-      const isSheet = job.params?.spritesheet === true;
-      const sheetRule = isSheet
-        ? `This is a SPRITE SHEET: preserve the exact grid layout, the same number of cells/frames, ` +
-          `and the per-frame poses. Re-skin every frame identically and keep each frame's character ` +
-          `fully inside its own cell. `
-        : "";
-
-      if (job.styleRefPath) {
-        // (c) 베이스(Image 1) = 포즈 소스, 참조(Image 2) = 외형 소스.
-        // img2img 특성상 Image 1 구조가 결과 포즈를 결정하므로 베이스를 Image 1 로 유지.
-        // 프롬프트에서 외형을 Image 2 로 완전 교체할 것을 강하게 지시.
-        const extra = job.prompt ? `Additional guidance: ${job.prompt}. ` : "";
-        const refIsSheet = job.params?.refIsSheet === true;
-        if (isSheet) {
-          // 케이스 1: 베이스 시트 포즈 유지 × 참조 외형 교체 → 시트 출력
-          return (
-            PROMPT_HEADER +
-            `I am attaching TWO images:\n` +
-            `Image 1 = POSE SHEET — a base spritesheet. Each cell shows a DIFFERENT pose and direction. ` +
-            `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
-            `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
-            `must COMPLETELY REPLACE the character in every cell of Image 1.\n\n` +
-            `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
-            `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
-            `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
-            `Same grid dimensions as Image 1. Transparent background. ` +
-            extra
-          );
-        }
-        if (refIsSheet) {
-          // 케이스 3: 참조 시트 포즈 × 베이스 단일 외형 → 시트 출력.
-          // 입력 순서 [참조 시트(Image 1=포즈), 베이스(Image 2=외형)] (server.ts 가 구성).
-          return (
-            PROMPT_HEADER +
-            `I am attaching TWO images:\n` +
-            `Image 1 = POSE SHEET — a spritesheet showing multiple poses/directions. ` +
-            `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
-            `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
-            `must fill every cell of Image 1's grid.\n\n` +
-            `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
-            `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
-            `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
-            `Same grid dimensions as Image 1. Transparent background. ` +
-            extra
-          );
-        }
-        // 케이스 2: 베이스 단일 포즈 유지 × 참조 외형 교체 → 단일 출력
-        return (
-          PROMPT_HEADER +
-          `I am attaching TWO images:\n` +
-          `Image 1 = POSE REFERENCE — use its EXACT pose, body angle, and composition.\n` +
-          `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
-          `must COMPLETELY REPLACE the character shown in Image 1.\n\n` +
-          `Task: Redraw Image 1's pose using Image 2's character. ` +
-          `The output character must look IDENTICAL to Image 2 — NOT Image 1. ` +
-          `Only the pose and body angle are taken from Image 1. ` +
-          `Same dimensions as Image 1. Transparent background. ` +
-          extra
-        );
-      }
-      if (job.paletteOnly) {
-        // (b) 팔레트만 교체
-        return (
-          PROMPT_HEADER +
-          `Recolor only: keep every shape/line/form pixel-identical; ` +
-          `change ONLY the color palette to ${job.prompt}. No structural changes. Same dimensions. ` +
-          sheetRule
-        );
-      }
-      // (a) 외형 교체
-      return (
-        PROMPT_HEADER +
-        `Re-skin the attached character to: ${job.prompt}. ` +
-        `Keep the EXACT same pose, silhouette, proportions, composition, framing — ` +
-        `change only colors, materials, textures, outfit theme. Same dimensions. ` +
-        sheetRule
-      );
-    }
-    case "emote_sheet": {
-      const inputCount = job.inputImagePaths?.length ?? 0;
-      if (inputCount >= 2) {
-        // [0] 참조 캐릭터, [1] 그리드 템플릿
-        return (
-          PROMPT_HEADER +
-          `I am attaching TWO images:\n` +
-          `(1) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, and proportions in every cell.\n` +
-          `(2) GRID TEMPLATE — the OUTPUT CANVAS with thin gray cell lines. Your output PNG must match its exact pixel dimensions.\n\n` +
-          `Task: ${job.prompt}\n\n` +
-          `Rules: draw the SAME character in each cell, only the FACIAL EXPRESSION changes. ` +
-          `Keep the body pose, outfit, and proportions identical across all cells. ` +
-          `Transparent background.`
-        );
-      }
-      return PROMPT_HEADER + `Generate an emotion expression sheet: ${job.prompt}. Transparent background.`;
-    }
-
-    case "tileset":
-      return (
-        PROMPT_HEADER +
-        `Generate a seamless tileable game texture: ${job.prompt}. ` +
-        `CRITICAL: this texture must tile perfectly in all 4 directions — left edge must seamlessly match ` +
-        `the right edge, top edge must match the bottom edge, with no visible seams when tiled. ` +
-        `Use flat uniform lighting with no vignettes, gradients, or darkening near the edges. ` +
-        `2D game-ready top-down or side-view tile asset.`
-      );
-
-    // mask/layer/external 은 외부 업로드·레이어 행이라 codex 로 생성되지 않음 — 도달 시 버그.
-    // normal_map 은 sharp 결정적 처리(server.ts)라 codex 미경유.
-    default:
-      throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);
+    return (
+      PROMPT_HEADER +
+      `I am attaching TWO images: (1) the original image, and ` +
+      `(2) a mask where the RED region marks the area to be replaced. ` +
+      `Replace ONLY the red region with: ${job.prompt}. ` +
+      `Preserve everything outside the red region exactly as in the original. ` +
+      `Do not include the red color or the mask itself in the output.`
+    );
   }
+  return (
+    PROMPT_HEADER +
+    `Edit the attached image: ${job.prompt}. Preserve everything outside the requested change.`
+  );
+}
+
+function buildLayerExtractPrompt(job: ImageJob): string {
+  // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
+  const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
+  if (hasMask) {
+    return (
+      PROMPT_HEADER +
+      `OBJECT EXTRACTION. I am attaching TWO images: ` +
+      `(1) the original image, and (2) a mask where the RED region marks the object to extract.\n\n` +
+      `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background. ` +
+      `Show ONLY the extracted object — infer its complete and accurate boundary ` +
+      `(the brush stroke is approximate; use visual context to find the true edges). ` +
+      `Preserve the object's original colors, shading, and art style exactly. ` +
+      `Everything outside the extracted object must be solid #00ff00 green with no gradients or shadows. ` +
+      `After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+    );
+  }
+  // 마스크 없음: job.prompt 가 부위명 (예: "머리띠", "눈", "몸통")
+  return (
+    PROMPT_HEADER +
+    `OBJECT EXTRACTION. From the attached image, extract "${job.prompt}"` +
+    ` and place it on a flat solid #00ff00 chroma-key background.\n\n` +
+    `Find and extract ONLY the "${job.prompt}" — identify its exact location and boundaries in the image.` +
+    ` If any part of "${job.prompt}" is hidden or occluded by other elements,` +
+    ` naturally recreate those hidden parts so the extracted result looks complete.` +
+    ` Preserve the original art style, colors, shading, and details exactly.` +
+    ` Everything outside the extracted "${job.prompt}" must be solid #00ff00 green with no gradients or shadows.` +
+    ` After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+  );
+}
+
+function buildSpritesheetPrompt(job: ImageJob): string {
+  // 이미지 첨부 순서 (server.ts overrideInputPaths 기준):
+  //   inputCount === 1 → [0] 그리드 템플릿만
+  //   inputCount === 2 → [0] 참조 이미지(char ref 또는 pose guide), [1] 그리드 템플릿
+  //   inputCount >= 3  → [0] 포즈 가이드, [1] 참조 캐릭터, [2] 그리드 템플릿
+  // 그리드 템플릿은 항상 마지막 이미지.
+  const inputCount = job.inputImagePaths?.length ?? 0;
+  const seamlessLoop = job.params?.seamlessLoop === true;
+
+  // 루프 사이클 규칙 — seamlessLoop=true 일 때만 삽입.
+  // "Frame N 직후 Frame 1이 재생"되므로 두 프레임이 인접해야 한다는 관점으로 지시.
+  const loopRule = seamlessLoop
+    ? `INFINITE LOOP DESIGN: These frames loop forever as [1→2→…→N→1→2→…]. ` +
+      `Frame N plays immediately before Frame 1 — design a closed cycle with no visible start or end. ` +
+      `Walk/run: Frame N's foot position is the natural step just before Frame 1's foot position resumes. ` +
+      `Idle: Frame N is a mid-breath moment that flows directly into Frame 1. ` +
+      `NEVER a linear arc. ALWAYS a cycle. `
+    : "";
+
+  if (inputCount >= 3) {
+    // [0] 포즈 레퍼런스, [1] 참조 캐릭터, [2] 그리드 템플릿
+    const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
+    return (
+      PROMPT_HEADER +
+      `I am attaching THREE images:\n` +
+      `(1) BASE POSE REFERENCE — a stick-figure skeleton strip showing the exact leg/arm angles per column. ` +
+      `Use it ONLY as a form guide for leg positions and stride alternation. Do NOT copy its colors or style.\n` +
+      `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
+      `and proportions in every frame.\n` +
+      `(3) GRID TEMPLATE — the OUTPUT CANVAS. ` +
+      `Your output PNG must match its exact pixel dimensions, one animation frame per cell in the ${gridDim} grid.\n\n` +
+      `Task: ${job.prompt}\n\n` +
+      `Rules: fill every cell of the grid (image 3) with exactly one sequential frame. ` +
+      `Each frame shows image 2's character in the corresponding pose from image 1. ` +
+      `Each character must be fully contained within its own cell. ` +
+      loopRule
+    );
+  }
+
+  if (inputCount >= 2) {
+    // [0] 참조 이미지(캐릭터 ref 또는 포즈 가이드), [1] 그리드 템플릿
+    const gridDim = job.prompt.match(/(\d+)[×x](\d+)/)?.[0] ?? "N×M";
+    return (
+      PROMPT_HEADER +
+      `I am attaching TWO images:\n` +
+      `(1) REFERENCE IMAGE — either a character reference (reproduce its exact visual style, colors, outfit) ` +
+      `or a pose guide (use it only for leg/arm angles, do not copy its style).\n` +
+      `(2) GRID TEMPLATE — this is the OUTPUT CANVAS. ` +
+      `It shows a blank ${gridDim} grid with thin gray cell lines. ` +
+      `Your output PNG must have EXACTLY the same pixel dimensions as this template, ` +
+      `with one sequential animation frame drawn inside each cell.\n\n` +
+      `Task: ${job.prompt}\n\n` +
+      `Rules: fill every cell of the grid (image 2) with exactly one sequential frame. ` +
+      `Each frame's content must be fully contained within its own cell. ` +
+      loopRule
+    );
+  }
+  if (inputCount === 1) {
+    // [0] 그리드 템플릿만. 피사체가 캐릭터일 수도 이펙트(VFX)일 수도 있으므로 "character"
+    // 로 단정하지 않는다 — 단정하면 슬래시/폭발 같은 이펙트 시트에도 캐릭터가 끼어든다.
+    return (
+      PROMPT_HEADER +
+      `The attached image is the OUTPUT CANVAS — a blank grid with thin gray cell lines. ` +
+      `Your output PNG must have EXACTLY the same pixel dimensions as this template. ` +
+      `Task: ${job.prompt}\n` +
+      `Draw one sequential animation frame inside each cell of the grid. ` +
+      `Render exactly what the task describes and nothing more — ` +
+      `if the task is a visual effect/VFX (slash, explosion, magic, impact, etc.), ` +
+      `draw ONLY that effect with NO character or figure unless the task explicitly asks for one. ` +
+      `Each frame's content must be fully contained within its own cell. ` +
+      loopRule
+    );
+  }
+  // 그리드 템플릿 없음 (fallback)
+  return (
+    PROMPT_HEADER +
+    `Generate a single PNG containing a sprite sheet: ${job.prompt}. ` +
+    `Uniform cell size, evenly spaced grid, one animation frame per cell. ` +
+    `Render exactly what the task describes — if it is a visual effect/VFX, ` +
+    `draw ONLY the effect with no character unless explicitly requested. ` +
+    loopRule
+  );
+}
+
+function buildReskinPrompt(job: ImageJob): string {
+  // 3모드 분기 (server.ts reskin_image 핸들러가 결정):
+  //   (c) styleRefPath 있음 → inputImagePaths=[base, styleRef] 2장, 참조 화풍 전이
+  //   (b) paletteOnly=true  → 형태 100% 유지, 색 팔레트만 교체
+  //   (a) 그 외 (prompt만)  → 외형 교체 (포즈/실루엣/구도 유지, 색·재질·테마만)
+  // 스프라이트시트 대상이면 셀 구조·프레임수·포즈 유지 문구를 추가 (params.spritesheet).
+  const isSheet = job.params?.spritesheet === true;
+  const sheetRule = isSheet
+    ? `This is a SPRITE SHEET: preserve the exact grid layout, the same number of cells/frames, ` +
+      `and the per-frame poses. Re-skin every frame identically and keep each frame's character ` +
+      `fully inside its own cell. `
+    : "";
+
+  if (job.styleRefPath) {
+    // (c) 베이스(Image 1) = 포즈 소스, 참조(Image 2) = 외형 소스.
+    const extra = job.prompt ? `Additional guidance: ${job.prompt}. ` : "";
+    const refIsSheet = job.params?.refIsSheet === true;
+    if (isSheet) {
+      // 케이스 1: 베이스 시트 포즈 유지 × 참조 외형 교체 → 시트 출력
+      return (
+        PROMPT_HEADER +
+        `I am attaching TWO images:\n` +
+        `Image 1 = POSE SHEET — a base spritesheet. Each cell shows a DIFFERENT pose and direction. ` +
+        `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
+        `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+        `must COMPLETELY REPLACE the character in every cell of Image 1.\n\n` +
+        `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
+        `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
+        `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+        `Same grid dimensions as Image 1. Transparent background. ` +
+        extra
+      );
+    }
+    if (refIsSheet) {
+      // 케이스 3: 참조 시트 포즈 × 베이스 단일 외형 → 시트 출력.
+      // 입력 순서 [참조 시트(Image 1=포즈), 베이스(Image 2=외형)] (server.ts 가 구성).
+      return (
+        PROMPT_HEADER +
+        `I am attaching TWO images:\n` +
+        `Image 1 = POSE SHEET — a spritesheet showing multiple poses/directions. ` +
+        `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
+        `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+        `must fill every cell of Image 1's grid.\n\n` +
+        `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
+        `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
+        `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+        `Same grid dimensions as Image 1. Transparent background. ` +
+        extra
+      );
+    }
+    // 케이스 2: 베이스 단일 포즈 유지 × 참조 외형 교체 → 단일 출력
+    return (
+      PROMPT_HEADER +
+      `I am attaching TWO images:\n` +
+      `Image 1 = POSE REFERENCE — use its EXACT pose, body angle, and composition.\n` +
+      `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+      `must COMPLETELY REPLACE the character shown in Image 1.\n\n` +
+      `Task: Redraw Image 1's pose using Image 2's character. ` +
+      `The output character must look IDENTICAL to Image 2 — NOT Image 1. ` +
+      `Only the pose and body angle are taken from Image 1. ` +
+      `Same dimensions as Image 1. Transparent background. ` +
+      extra
+    );
+  }
+  if (job.paletteOnly) {
+    // (b) 팔레트만 교체
+    return (
+      PROMPT_HEADER +
+      `Recolor only: keep every shape/line/form pixel-identical; ` +
+      `change ONLY the color palette to ${job.prompt}. No structural changes. Same dimensions. ` +
+      sheetRule
+    );
+  }
+  // (a) 외형 교체
+  return (
+    PROMPT_HEADER +
+    `Re-skin the attached character to: ${job.prompt}. ` +
+    `Keep the EXACT same pose, silhouette, proportions, composition, framing — ` +
+    `change only colors, materials, textures, outfit theme. Same dimensions. ` +
+    sheetRule
+  );
+}
+
+function buildEmoteSheetPrompt(job: ImageJob): string {
+  const inputCount = job.inputImagePaths?.length ?? 0;
+  if (inputCount >= 2) {
+    // [0] 참조 캐릭터, [1] 그리드 템플릿
+    return (
+      PROMPT_HEADER +
+      `I am attaching TWO images:\n` +
+      `(1) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, and proportions in every cell.\n` +
+      `(2) GRID TEMPLATE — the OUTPUT CANVAS with thin gray cell lines. Your output PNG must match its exact pixel dimensions.\n\n` +
+      `Task: ${job.prompt}\n\n` +
+      `Rules: draw the SAME character in each cell, only the FACIAL EXPRESSION changes. ` +
+      `Keep the body pose, outfit, and proportions identical across all cells. ` +
+      `Transparent background.`
+    );
+  }
+  return PROMPT_HEADER + `Generate an emotion expression sheet: ${job.prompt}. Transparent background.`;
+}
+
+// mask/layer/external 은 외부 업로드·레이어 행이라 codex 로 생성되지 않음 — 도달 시 버그.
+// normal_map 은 sharp 결정적 처리(server.ts)라 codex 미경유.
+const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
+  text2img: (job) => PROMPT_HEADER + `Generate an image: ${job.prompt}`,
+  img2img: (job) => PROMPT_HEADER + `Use the attached image as a reference. Generate a new image: ${job.prompt}`,
+  inpaint: buildInpaintPrompt,
+  upscale: (job) => PROMPT_HEADER + `Upscale the attached image to higher resolution while preserving all detail. ${job.prompt}`,
+  remove_bg: (job) =>
+    PROMPT_HEADER +
+    `Regenerate the attached subject on a flat solid #00ff00 chroma-key background ` +
+    `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
+    `the post-processing pipeline will key out the green. ${job.prompt}`,
+  layer_extract: buildLayerExtractPrompt,
+  spritesheet: buildSpritesheetPrompt,
+  reskin: buildReskinPrompt,
+  emote_sheet: buildEmoteSheetPrompt,
+  tileset: (job) =>
+    PROMPT_HEADER +
+    `Generate a seamless tileable game texture: ${job.prompt}. ` +
+    `CRITICAL: this texture must tile perfectly in all 4 directions — left edge must seamlessly match ` +
+    `the right edge, top edge must match the bottom edge, with no visible seams when tiled. ` +
+    `Use flat uniform lighting with no vignettes, gradients, or darkening near the edges. ` +
+    `2D game-ready top-down or side-view tile asset.`,
+};
+
+function buildNaturalPrompt(job: ImageJob): string {
+  const builder = promptBuilders[job.kind];
+  if (builder) return builder(job);
+  throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);
 }
 
 /** stdout 한 줄을 보고 어떤 단계에 와 있는지 추정. */
