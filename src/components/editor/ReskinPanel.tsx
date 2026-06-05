@@ -385,12 +385,19 @@ export function ReskinPanel({
 
             {bMode === "ai" ? (
               <div className="space-y-1">
-                <div className="flex items-center gap-2">
+                <div className="relative flex items-center gap-2">
                   <label className="text-xs text-text-muted">원하는 색 팔레트</label>
                   <AiSuggestButton
                     loading={aiLoading && aiTarget === "prompt"}
                     onClick={() => handleAiSuggest("prompt")}
                   />
+                  {aiSuggestions && aiTarget === "prompt" && uiMode === "color" && (
+                    <AiSuggestDropdown
+                      suggestions={aiSuggestions}
+                      onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
+                      onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                    />
+                  )}
                 </div>
                 <textarea
                   value={prompt}
@@ -400,7 +407,7 @@ export function ReskinPanel({
                   className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
                 />
                 <AiSuggestResult
-                  show={aiTarget === "prompt"}
+                  show={aiTarget === "prompt" && uiMode === "color" && aiSuggestions === null}
                   result={aiResult}
                   error={aiError}
                   onApply={v => { setPrompt(v); setAiResult(null); }}
