@@ -99,7 +99,7 @@ function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A
   const depthY = side * DEPTH * walkY * cosp;
   // swing(공중) 다리 = 전진 중(각도 증가, d/dφ>0). 위상만으로 판정 — 방향 부호(walkX/walkY)에
   // 곱하면 LEFT/UP 등 음수 성분 방향에서 위상이 반전돼 frame 0 앞다리가 뒤바뀐다(버그).
-  const isSwing = -side * Math.sin(phase) > 0;
+  const isSwing = -side * Math.sin(phase) > 1e-10; // sin(π)≈1.22e-16 FP 노이즈 필터
   return { side, swingAngle, lateral, depthY, isSwing };
 }
 
@@ -117,13 +117,15 @@ export function computePose(frame: number, totalFrames: number, dirIndex: number
 }
 
 /** 정강이(lower leg) 각도. swing(공중) 다리는 굽혀 정강이 들어올림, stance는 곧게. */
-function lowerLegAngle(leg: LegPose, isRun: boolean): number {
+function lowerLegAngle(leg: LegPose, isRun: boolean, walkX = 1): number {
+  // shin 꺾임은 항상 진행 반대(뒤)로: 부호는 leg.side가 아니라 진행방향 sign(walkX).
+  const dir = Math.sign(walkX) || 1;
   if (isRun) {
-    // isSwing=FALSE → 접지/앞다리: shin 완만히 앞으로(0.5×). isSwing=TRUE → 스윙/뒷다리: heel kick(-0.9×).
-    return !leg.isSwing ? leg.swingAngle * 0.5 : leg.swingAngle * -0.9;
+    // isSwing=FALSE → 접지/앞다리: shin 완만히 앞으로(0.5×). isSwing=TRUE → 스윙/뒷다리: heel kick(뒤로).
+    return !leg.isSwing ? leg.swingAngle * 0.5 : leg.swingAngle - dir * 60;
   }
-  // walk: swing 다리는 정강이를 안쪽으로 굽혀 stance와 분리(passing 겹침 해소), stance는 곧게.
-  return leg.isSwing ? leg.swingAngle - leg.side * 26 : leg.swingAngle * 0.15;
+  // walk: swing 다리는 정강이를 뒤로 굽혀 stance와 분리(passing 겹침 해소), stance는 곧게.
+  return leg.isSwing ? leg.swingAngle - dir * 26 : leg.swingAngle * 0.15;
 }
 
 /**
@@ -216,7 +218,7 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
   function renderLeg(leg: LegPose, color: string, jointColor: string) {
     const hipX = CX + leg.lateral;
     const knee = endpoint(hipX, HIP_Y, leg.swingAngle, UPPER_LEG);
-    const shin = lowerLegAngle(leg, isRun);
+    const shin = lowerLegAngle(leg, isRun, walkX);
     const foot = endpoint(knee.x, knee.y, shin, LOWER_LEG);
     // 깊이: 전진발(전면)은 아래로, 후면은 위로. 발 + 발끝 y 동시 이동.
     const footY = foot.y + leg.depthY;
