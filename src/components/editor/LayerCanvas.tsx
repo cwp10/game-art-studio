@@ -49,6 +49,37 @@ export function LayerCanvas({
   const [parts, setParts] = useState<string[]>([]);
   const [input, setInput] = useState("");
 
+  // AI 제안
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<{ title: string; body: string }[] | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  async function handleAiSuggest() {
+    if (aiLoading) return;
+    setAiLoading(true);
+    setAiError(null);
+    const question = parts.length > 0
+      ? `이미 선택된 부위: ${parts.join(", ")} — 이를 참고해 다른 세트를 제안해주세요`
+      : "게임 캐릭터 스프라이트의 부위를 제안해주세요";
+    try {
+      const res = await fetch("/api/layer-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = (await res.json()) as { suggestions?: { title: string; body: string }[]; error?: string };
+      if (!res.ok || !data.suggestions?.length) {
+        setAiError(data.error ?? "제안 생성에 실패했습니다.");
+        return;
+      }
+      setAiSuggestions(data.suggestions);
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   function addPart(raw: string) {
     const value = raw.trim();
     if (!value) return;
@@ -258,7 +289,23 @@ export function LayerCanvas({
 
             {/* ③ 부위 입력 영역 */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-text-muted">분리할 부위</label>
+              <div className="relative flex items-center gap-2">
+                <label className="text-xs font-medium text-text-muted">분리할 부위</label>
+                <LayerAiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                {aiSuggestions && (
+                  <LayerAiSuggestDropdown
+                    suggestions={aiSuggestions}
+                    onSelect={v => {
+                      setParts(v.split(",").map(s => s.trim()).filter(Boolean).slice(0, MAX_PARTS));
+                      setAiSuggestions(null);
+                    }}
+                    onClose={() => setAiSuggestions(null)}
+                  />
+                )}
+              </div>
+              {aiError && (
+                <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
+              )}
               <div className="flex flex-wrap gap-1.5 rounded-lg border border-border p-2">
                 {parts.map((p, i) => (
                   <span
@@ -437,5 +484,69 @@ export function LayerCanvas({
         )}
       </footer>
     </aside>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AI 제안 서브컴포넌트
+
+function LayerAiSuggestButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`ml-auto flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] ${
+        loading
+          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+          : "border-border text-text-muted hover:text-text-primary"
+      } disabled:opacity-60`}
+    >
+      {loading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+      {loading ? "생각 중…" : "AI 제안"}
+    </button>
+  );
+}
+
+function LayerAiSuggestDropdown({
+  suggestions,
+  onSelect,
+  onClose,
+}: {
+  suggestions: { title: string; body: string }[];
+  onSelect: (body: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute right-0 top-full z-30 mt-1 w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+    >
+      {suggestions.map((s, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-text-primary">{s.title}</div>
+            <div className="mt-0.5 text-[11px] text-text-muted/80">{s.body}</div>
+          </div>
+          <button
+            onClick={() => onSelect(s.body)}
+            className="shrink-0 rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+          >
+            선택
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
