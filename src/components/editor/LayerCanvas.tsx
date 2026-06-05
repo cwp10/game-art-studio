@@ -290,56 +290,60 @@ export function LayerCanvas({
 
             {/* ③ 부위 입력 영역 */}
             <div className="flex flex-col gap-1.5">
-              <div className="relative flex items-center gap-2">
-                <label className="text-xs font-medium text-text-muted">분리할 부위</label>
-                <AiSuggestButton compact loading={aiLoading} onClick={handleAiSuggest} />
-                {aiSuggestions && (
-                  <AiSuggestDropdown
-                    suggestions={aiSuggestions}
-                    width="w-[320px]"
-                    onSelect={v => {
-                      setParts(v.split(",").map(s => s.trim()).filter(Boolean).slice(0, MAX_PARTS));
-                      setAiSuggestions(null);
-                    }}
-                    onClose={() => setAiSuggestions(null)}
+              <label className="text-xs font-medium text-text-muted">분리할 부위</label>
+              <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+                <div className="flex flex-wrap gap-1.5 p-2">
+                  {parts.map((p, i) => (
+                    <span
+                      key={`${p}-${i}`}
+                      className="flex items-center gap-1 rounded-full bg-[color:var(--accent)]/20 px-2 py-0.5 text-[11px] text-text-primary"
+                    >
+                      {p}
+                      <button
+                        onClick={() => removePart(i)}
+                        disabled={busy}
+                        className="rounded-full text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                        title="제거"
+                      >
+                        <X size={11} />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={input}
+                    onChange={e => setInput(e.target.value)}
+                    onKeyDown={onKeyDown}
+                    onBlur={commitInput}
+                    disabled={busy || parts.length >= MAX_PARTS}
+                    placeholder={
+                      parts.length >= MAX_PARTS
+                        ? `최대 ${MAX_PARTS}개`
+                        : "예: 머리띠, 얼굴, 몸통, 눈…"
+                    }
+                    className="h-6 min-w-[120px] flex-1 bg-transparent px-1 text-[12px] text-text-primary placeholder:text-text-muted/50 focus:outline-none disabled:cursor-not-allowed"
                   />
-                )}
+                </div>
+                <div className="flex items-center border-t border-border px-2 py-1.5">
+                  <div className="relative ml-auto">
+                    <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                    {aiSuggestions && (
+                      <AiSuggestDropdown
+                        suggestions={aiSuggestions}
+                        width="w-[320px]"
+                        onSelect={v => {
+                          setParts(v.split(",").map(s => s.trim()).filter(Boolean).slice(0, MAX_PARTS));
+                          setAiSuggestions(null);
+                        }}
+                        onClose={() => setAiSuggestions(null)}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
               {aiError && (
                 <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
               )}
-              <div className="flex flex-wrap gap-1.5 rounded-lg border border-border p-2">
-                {parts.map((p, i) => (
-                  <span
-                    key={`${p}-${i}`}
-                    className="flex items-center gap-1 rounded-full bg-[color:var(--accent)]/20 px-2 py-0.5 text-[11px] text-text-primary"
-                  >
-                    {p}
-                    <button
-                      onClick={() => removePart(i)}
-                      disabled={busy}
-                      className="rounded-full text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-                      title="제거"
-                    >
-                      <X size={11} />
-                    </button>
-                  </span>
-                ))}
-                <input
-                  type="text"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={onKeyDown}
-                  onBlur={commitInput}
-                  disabled={busy || parts.length >= MAX_PARTS}
-                  placeholder={
-                    parts.length >= MAX_PARTS
-                      ? `최대 ${MAX_PARTS}개`
-                      : "예: 머리띠, 얼굴, 몸통, 눈…"
-                  }
-                  className="h-6 min-w-[120px] flex-1 bg-transparent px-1 text-[12px] text-text-primary placeholder:text-text-muted/50 focus:outline-none disabled:cursor-not-allowed"
-                />
-              </div>
               <p className="text-[10px] leading-tight text-text-muted/70">
                 Enter 또는 쉼표(,)로 부위 추가 · {parts.length}/{MAX_PARTS}
               </p>

@@ -332,27 +332,31 @@ export function ReskinPanel({
         {/* 모드별 입력 */}
         {uiMode === "skin" && skinInput === "text" && (
           <div className="shrink-0 space-y-1">
-            <div className="relative flex items-center gap-2">
-              <label className="text-xs text-text-muted">새 스킨 설명</label>
-              <AiSuggestButton
-                loading={aiLoading && aiTarget === "prompt"}
-                onClick={() => handleAiSuggest("prompt")}
+            <label className="text-xs text-text-muted">새 스킨 설명</label>
+            <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+              <textarea
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                placeholder="예: 파란 갑옷의 기사, 은빛 검"
+                rows={3}
+                className="block min-h-[78px] w-full shrink-0 resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
               />
-              {aiSuggestions && aiTarget === "prompt" && (
-                <AiSuggestDropdown
-                  suggestions={aiSuggestions}
-                  onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
-                  onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                />
-              )}
+              <div className="flex items-center border-t border-border px-2 py-1.5">
+                <div className="relative ml-auto">
+                  <AiSuggestButton
+                    loading={aiLoading && aiTarget === "prompt"}
+                    onClick={() => handleAiSuggest("prompt")}
+                  />
+                  {aiSuggestions && aiTarget === "prompt" && (
+                    <AiSuggestDropdown
+                      suggestions={aiSuggestions}
+                      onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
+                      onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                    />
+                  )}
+                </div>
+              </div>
             </div>
-            <textarea
-              value={prompt}
-              onChange={e => setPrompt(e.target.value)}
-              placeholder="예: 파란 갑옷의 기사, 은빛 검"
-              rows={3}
-              className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
-            />
             <AiSuggestResult
               show={aiTarget === "prompt" && aiSuggestions === null}
               result={aiResult}
@@ -386,27 +390,31 @@ export function ReskinPanel({
 
             {bMode === "ai" ? (
               <div className="space-y-1">
-                <div className="relative flex items-center gap-2">
-                  <label className="text-xs text-text-muted">원하는 색 팔레트</label>
-                  <AiSuggestButton
-                    loading={aiLoading && aiTarget === "prompt"}
-                    onClick={() => handleAiSuggest("prompt")}
+                <label className="text-xs text-text-muted">원하는 색 팔레트</label>
+                <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+                  <textarea
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
+                    rows={3}
+                    className="block min-h-[78px] w-full shrink-0 resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
                   />
-                  {aiSuggestions && aiTarget === "prompt" && (
-                    <AiSuggestDropdown
-                      suggestions={aiSuggestions}
-                      onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
-                      onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                    />
-                  )}
+                  <div className="flex items-center border-t border-border px-2 py-1.5">
+                    <div className="relative ml-auto">
+                      <AiSuggestButton
+                        loading={aiLoading && aiTarget === "prompt"}
+                        onClick={() => handleAiSuggest("prompt")}
+                      />
+                      {aiSuggestions && aiTarget === "prompt" && (
+                        <AiSuggestDropdown
+                          suggestions={aiSuggestions}
+                          onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
+                          onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                        />
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <textarea
-                  value={prompt}
-                  onChange={e => setPrompt(e.target.value)}
-                  placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
-                  rows={3}
-                  className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
-                />
                 <AiSuggestResult
                   show={aiTarget === "prompt" && aiSuggestions === null}
                   result={aiResult}
@@ -642,27 +650,31 @@ export function ReskinPanel({
             )}
 
             <div className="space-y-1">
-              <div className="relative flex items-center gap-2">
-                <label className="text-xs text-text-muted">(선택) 추가 지시</label>
-                <AiSuggestButton
-                  loading={aiLoading && aiTarget === "extra"}
-                  onClick={() => handleAiSuggest("extra")}
+              <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+              <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+                <textarea
+                  value={extra}
+                  onChange={e => setExtra(e.target.value)}
+                  placeholder="예: 더 어둡고 차분하게"
+                  rows={2}
+                  className="block w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
                 />
-                {aiSuggestions && aiTarget === "extra" && (
-                  <AiSuggestDropdown
-                    suggestions={aiSuggestions}
-                    onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }}
-                    onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                  />
-                )}
+                <div className="flex items-center border-t border-border px-2 py-1.5">
+                  <div className="relative ml-auto">
+                    <AiSuggestButton
+                      loading={aiLoading && aiTarget === "extra"}
+                      onClick={() => handleAiSuggest("extra")}
+                    />
+                    {aiSuggestions && aiTarget === "extra" && (
+                      <AiSuggestDropdown
+                        suggestions={aiSuggestions}
+                        onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }}
+                        onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                      />
+                    )}
+                  </div>
+                </div>
               </div>
-              <textarea
-                value={extra}
-                onChange={e => setExtra(e.target.value)}
-                placeholder="예: 더 어둡고 차분하게"
-                rows={2}
-                className="block w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
-              />
               <AiSuggestResult
                 show={aiTarget === "extra" && aiSuggestions === null}
                 result={aiResult}
