@@ -256,7 +256,7 @@ export function ReskinPanel({
   const styleRefUrl = styleRefId ? `/api/images/${styleRefId}` : null;
 
   return (
-    <aside className="relative flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
+    <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
@@ -331,12 +331,19 @@ export function ReskinPanel({
         {/* 모드별 입력 */}
         {uiMode === "skin" && skinInput === "text" && (
           <div className="shrink-0 space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="relative flex items-center gap-2">
               <label className="text-xs text-text-muted">새 스킨 설명</label>
               <AiSuggestButton
                 loading={aiLoading && aiTarget === "prompt"}
                 onClick={() => handleAiSuggest("prompt")}
               />
+              {aiSuggestions && aiTarget === "prompt" && (
+                <AiSuggestDropdown
+                  suggestions={aiSuggestions}
+                  onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
+                  onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                />
+              )}
             </div>
             <textarea
               value={prompt}
@@ -346,7 +353,7 @@ export function ReskinPanel({
               className="block min-h-[78px] w-full shrink-0 resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
             />
             <AiSuggestResult
-              show={aiTarget === "prompt"}
+              show={aiTarget === "prompt" && aiSuggestions === null}
               result={aiResult}
               error={aiError}
               onApply={v => { setPrompt(v); setAiResult(null); }}
@@ -675,18 +682,6 @@ export function ReskinPanel({
         }
       />
 
-      {aiSuggestions && aiTarget && (
-        <AiSuggestPopup
-          suggestions={aiSuggestions}
-          onSelect={v => {
-            if (aiTarget === "prompt") setPrompt(v);
-            else setExtra(v);
-            setAiSuggestions(null);
-            setAiTarget(null);
-          }}
-          onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-        />
-      )}
     </aside>
   );
 }
@@ -741,7 +736,7 @@ function AiSuggestResult({
   );
 }
 
-function AiSuggestPopup({
+function AiSuggestDropdown({
   suggestions,
   onSelect,
   onClose,
@@ -750,37 +745,37 @@ function AiSuggestPopup({
   onSelect: (body: string) => void;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [onClose]);
+
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-bg-panel/95 backdrop-blur-sm">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Sparkles size={14} className="text-[color:var(--accent)]" />
-          스킨 아이디어 선택
-        </span>
-        <button
-          onClick={onClose}
-          className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+    <div
+      ref={ref}
+      className="absolute right-0 top-full z-30 mt-1 w-[340px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+    >
+      {suggestions.map((s, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
         >
-          <X size={14} />
-        </button>
-      </div>
-      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
-        {suggestions.map((s, i) => (
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-text-primary">{s.title}</div>
+            <div className="mt-0.5 text-[11px] text-text-muted/80">{s.body}</div>
+          </div>
           <button
-            key={i}
             onClick={() => onSelect(s.body)}
-            className="group flex flex-col gap-1 rounded-lg border border-border bg-bg-card px-4 py-3 text-left hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/5"
+            className="shrink-0 rounded border border-[color:var(--accent)]/50 px-2 py-0.5 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
           >
-            <span className="text-sm font-medium text-text-primary group-hover:text-[color:var(--accent)]">
-              {s.title}
-            </span>
-            <span className="text-xs text-text-muted">{s.body}</span>
+            선택
           </button>
-        ))}
-      </div>
-      <div className="border-t border-border px-4 py-2">
-        <p className="text-[11px] text-text-muted/60">카드를 클릭하면 텍스트 필드에 입력됩니다.</p>
-      </div>
+        </div>
+      ))}
     </div>
   );
 }
