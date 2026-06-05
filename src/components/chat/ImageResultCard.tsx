@@ -14,7 +14,6 @@ import {
   Map,
   Palette,
   RotateCw,
-  UserPlus,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -193,15 +192,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Layers size={12} /> 레이어
             </button>
-            {kind === "spritesheet" ? (
-              <button
-                onClick={() => onAction?.("overlay")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="캐릭터 입히기 — 캐릭터 이미지를 골라 시트의 모든 포즈에 입힘 (오버레이)"
-              >
-                <UserPlus size={12} /> 캐릭터
-              </button>
-            ) : (
+            {kind !== "spritesheet" && (
               <button
                 onClick={() => onAction?.("make_sheet", { subjectMode: spriteSubjectMode })}
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -219,13 +210,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 <Film size={12} /> 스프라이트
               </button>
             )}
-            <button
-              onClick={() => onAction?.("reskin")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경 / 참조 전이)"
-            >
-              <Palette size={12} /> 리스킨
-            </button>
+            {kind !== "spritesheet" && (
+              <button
+                onClick={() => onAction?.("reskin")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경)"
+              >
+                <Palette size={12} /> 리스킨
+              </button>
+            )}
             {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
               <button
                 onClick={() => onAction?.("make_normal_map")}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
+import { Grid3x3, Lightbulb, Loader2, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 
@@ -51,7 +51,9 @@ type Props = {
   onSubmit: (
     messages: Array<{ message: string; attachmentGenerationIds: string[] }>,
   ) => void;
+  busy?: boolean;
   onClose: () => void;
+  onCancel?: () => void;
 };
 
 const DIRECTION_LABELS: Record<Direction, string> = {
@@ -198,7 +200,9 @@ export function SpriteGenPanel({
   referencePrompt,
   initialSubjectMode,
   onSubmit,
+  busy = false,
   onClose,
+  onCancel,
 }: Props) {
   const [subjectType, setSubjectType] = useState<SubjectType>(initialSubjectMode ?? "character");
   const [direction, setDirection] = useState<Direction>(referenceImageUrl ? "REF" : "DOWN");
@@ -243,7 +247,7 @@ export function SpriteGenPanel({
   const [submitting, setSubmitting] = useState(false);
 
   const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
-  const canSubmit = actionPrompt.trim().length > 0 && !submitting;
+  const canSubmit = actionPrompt.trim().length > 0 && !submitting && !busy;
 
   function handleSubjectChange(s: SubjectType) {
     setSubjectType(s);
@@ -587,18 +591,22 @@ export function SpriteGenPanel({
 
       <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
         <button
-          onClick={onClose}
+          onClick={busy ? (onCancel ?? onClose) : onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
         >
-          ✕ 취소
+          {busy ? "■ 생성 취소" : "✕ 취소"}
         </button>
         <button
           onClick={handleSubmit}
           disabled={!canSubmit}
           className="flex h-9 flex-[2] items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          title={canSubmit ? "" : "동작 설명을 입력하세요"}
+          title={canSubmit ? "" : busy ? "" : "동작 설명을 입력하세요"}
         >
-          <Sparkles size={14} /> 생성하기
+          {busy ? (
+            <><Loader2 size={14} className="animate-spin" /> 생성 중…</>
+          ) : (
+            <><Sparkles size={14} /> 생성하기</>
+          )}
         </button>
       </footer>
     </aside>

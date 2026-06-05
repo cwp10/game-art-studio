@@ -8,17 +8,19 @@ import type { Generation } from "@/types/db";
 /**
  * ReskinPanel — 결과 카드의 [🎨 리스킨] 단축어가 여는 패널.
  *
- * 3개 모드(외형 교체 / 색만 변경 / 참조 전이)를 상단 세그먼트 토글로 전환.
- * 실행은 기존 단축어와 동일 — 모드별 자연어 메시지 + attachmentGenerationIds 를
- * onSubmit 으로 부모(ChatLayout)에 넘기면 부모가 handleSend 로 Claude → reskin_image 라우팅.
+ * 상단 탭 2개(외형 교체 / 색만 변경). "외형 교체"는 서브 토글(텍스트 / 이미지 참조)로
+ * 입력 방식을 분기 — 텍스트 = 기존 모드 a, 이미지 참조 = 기존 모드 c.
+ * 실행은 기존 단축어와 동일 — onSubmit 으로 ReskinSubmit(mode a/b/b-precise/c)을 부모(ChatLayout)에
+ * 넘기면 부모가 handleSend 로 Claude → reskin_image 라우팅. (UI만 재구성, 백엔드 계약 불변.)
  *
  * 자연어 문구는 system-orchestrator.md 라우팅과 정합:
- *  - (a) "…로 리스킨해줘" → prompt 모드
- *  - (b) "색 팔레트만 …로 바꿔줘. 형태는 그대로 유지." → paletteOnly 모드
- *  - (c) "첫 번째 이미지 + 두 번째 이미지의 화풍" + 두 첨부 → styleReferenceId 모드
+ *  - (a) "…로 리스킨해줘" → prompt 모드            (외형 교체 · 텍스트)
+ *  - (b) "색 팔레트만 …로 바꿔줘. 형태는 그대로 유지." → paletteOnly 모드 (색만 변경)
+ *  - (c) "첫 번째 이미지 + 두 번째 이미지의 화풍" + 두 첨부 → styleReferenceId 모드 (외형 교체 · 이미지 참조)
  */
 
-type Mode = "a" | "b" | "c";
+type UIMode = "skin" | "color";
+type SkinInput = "text" | "image";
 
 export type ReskinSubmit =
   | { mode: "a"; prompt: string }
@@ -40,18 +42,26 @@ type Props = {
   height: number;
   /** 시트면 셀 정렬·투명 후처리 안내 배너 표시. 미지정 시 치수로 추정. */
   kind?: string;
-  /** 진입 시 기본 모드. 캐릭터 오버레이 단축어는 "c"로 바로 연다. 미지정 시 "a". */
-  initialMode?: Mode;
-  /** 현재 세션 — 모드 c 의 참조 썸네일 그리드 조회용. */
+  /** 진입 시 기본 탭. 미지정 시 "skin"(외형 교체). */
+  initialMode?: UIMode;
+  /** "외형 교체" 탭의 기본 서브. 캐릭터 오버레이 단축어는 "image"로 바로 연다. 미지정 시 "text". */
+  initialSkinInput?: SkinInput;
+  /** 현재 세션 — 이미지 참조 서브의 참조 썸네일 그리드 조회용. */
   sessionId: string | null;
+  busy?: boolean;
   onSubmit: (payload: ReskinSubmit) => void;
   onClose: () => void;
+  onCancel?: () => void;
 };
 
-const MODE_LABELS: Record<Mode, string> = {
-  a: "외형 교체",
-  b: "색만 변경",
-  c: "참조 전이",
+const UI_MODE_LABELS: Record<UIMode, string> = {
+  skin: "외형 교체",
+  color: "색만 변경",
+};
+
+const SKIN_INPUT_LABELS: Record<SkinInput, string> = {
+  text: "텍스트",
+  image: "이미지 참조",
 };
 
 // 썸네일 그리드에서 제외할 비-이미지 kind.
@@ -64,11 +74,15 @@ export function ReskinPanel({
   height,
   kind,
   initialMode,
+  initialSkinInput,
   sessionId,
+  busy = false,
   onSubmit,
   onClose,
+  onCancel,
 }: Props) {
-  const [mode, setMode] = useState<Mode>(initialMode ?? "a");
+  const [uiMode, setUiMode] = useState<UIMode>(initialMode ?? "skin");
+  const [skinInput, setSkinInput] = useState<SkinInput>(initialSkinInput ?? "text");
   const [prompt, setPrompt] = useState("");
   const [extra, setExtra] = useState("");
   const [styleRefId, setStyleRefId] = useState<string | null>(null);
@@ -92,7 +106,7 @@ export function ReskinPanel({
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
 
-  // 참조 전이 탭: 사용자가 외부 이미지를 업로드해 참조로 사용.
+  // 이미지 참조 서브: 사용자가 외부 이미지를 업로드해 참조로 사용.
   async function handleUploadRef(file: File) {
     setUploading(true);
     try {
@@ -115,28 +129,36 @@ export function ReskinPanel({
   // 시트 여부: kind 우선, 없으면 치수에서 grid 감지(SpriteCanvas 와 동일 GCD 역산).
   const isSheet = kind === "spritesheet" || (!kind && detectSpriteGrid(width, height) !== null);
   const grid = detectSpriteGrid(width, height);
-  // 시트 베이스 + 참조 전이(c) = 캐릭터 오버레이 → 라벨/안내 리프레이밍(백엔드는 동일).
-  const overlay = isSheet && mode === "c";
+  // 시트 베이스 + 외형 교체·이미지 참조 서브 = 캐릭터 오버레이 → 라벨/안내 리프레이밍(백엔드는 동일).
+  const overlay = isSheet && uiMode === "skin" && skinInput === "image";
 
-  // 모드 c 진입 시 세션 이미지 목록 로드 — 원본 자신·마스크 제외.
+  // 선택한 참조 이미지가 시트인지 — 베이스가 아닌 "참조" 쪽 시트 감지(오버레이 안내·실행 라벨용).
+  const currentRefs = refScope === "session" ? refs : galleryRefs;
+  const selectedRef = currentRefs?.find(g => g.id === styleRefId);
+  const refIsSheet =
+    selectedRef?.kind === "spritesheet" ||
+    (!selectedRef?.kind &&
+      detectSpriteGrid(selectedRef?.width ?? 0, selectedRef?.height ?? 0) !== null);
+
+  // 이미지 참조 서브 진입 시 세션 이미지 목록 로드 — 원본 자신·마스크 제외.
   useEffect(() => {
-    if (mode !== "c" || refs !== null) return;
+    if (uiMode !== "skin" || skinInput !== "image" || refs !== null) return;
     listGenerations({ sessionId: sessionId ?? undefined, limit: 60 })
       .then(gens =>
         setRefs(gens.filter(g => g.id !== generationId && !NON_IMAGE_KINDS.has(g.kind))),
       )
       .catch(() => setRefs([]));
-  }, [mode, refs, sessionId, generationId]);
+  }, [uiMode, skinInput, refs, sessionId, generationId]);
 
   // 갤러리 전체 이미지 목록 로드 — refScope가 "gallery"로 전환 시.
   useEffect(() => {
-    if (mode !== "c" || refScope !== "gallery" || galleryRefs !== null) return;
+    if (uiMode !== "skin" || skinInput !== "image" || refScope !== "gallery" || galleryRefs !== null) return;
     listGenerations({ limit: 120 })
       .then(gens =>
         setGalleryRefs(gens.filter(g => g.id !== generationId && !NON_IMAGE_KINDS.has(g.kind))),
       )
       .catch(() => setGalleryRefs([]));
-  }, [mode, refScope, galleryRefs, generationId]);
+  }, [uiMode, skinInput, refScope, galleryRefs, generationId]);
 
   async function handleAiSuggest(target: "prompt" | "extra") {
     if (aiLoading) return;
@@ -145,12 +167,21 @@ export function ReskinPanel({
     setAiError(null);
     setAiResult(null);
     const currentVal = target === "prompt" ? prompt : extra;
-    const question = currentVal.trim() || (mode === "a" ? "새 스킨을 제안해주세요" : mode === "b" ? "색 변경을 제안해주세요" : "추가 지시를 제안해주세요");
+    const question =
+      currentVal.trim() ||
+      (uiMode === "skin" && skinInput === "text"
+        ? "새 스킨을 제안해주세요"
+        : uiMode === "color"
+        ? "색 변경을 제안해주세요"
+        : "추가 지시를 제안해주세요");
+    // /api/reskin-suggest 는 레거시 mode(a/b/c) 계약 — UI 상태를 그대로 매핑해 전달.
+    const apiMode: "a" | "b" | "c" =
+      uiMode === "color" ? "b" : skinInput === "image" ? "c" : "a";
     try {
       const res = await fetch("/api/reskin-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, question, isSheet, isOverlay: overlay }),
+        body: JSON.stringify({ mode: apiMode, question, isSheet, isOverlay: overlay }),
       });
       const data = (await res.json()) as { suggestion?: string; error?: string };
       if (!res.ok || !data.suggestion) {
@@ -189,18 +220,22 @@ export function ReskinPanel({
   );
 
   const canSubmit = useMemo(() => {
-    if (mode === "a") return prompt.trim().length > 0;
-    if (mode === "b") return bMode === "ai" ? prompt.trim().length > 0 : preciseMappings.length > 0;
-    return styleRefId !== null;
-  }, [mode, bMode, prompt, preciseMappings, styleRefId]);
+    if (uiMode === "skin" && skinInput === "text") return prompt.trim().length > 0;
+    if (uiMode === "skin" && skinInput === "image") return styleRefId !== null;
+    // color
+    return bMode === "ai" ? prompt.trim().length > 0 : preciseMappings.length > 0;
+  }, [uiMode, skinInput, bMode, prompt, preciseMappings, styleRefId]);
 
   function submit() {
     if (!canSubmit) return;
-    if (mode === "a") onSubmit({ mode: "a", prompt: prompt.trim() });
-    else if (mode === "b") {
+    if (uiMode === "skin" && skinInput === "text") {
+      onSubmit({ mode: "a", prompt: prompt.trim() });
+    } else if (uiMode === "skin" && skinInput === "image" && styleRefId) {
+      onSubmit({ mode: "c", styleReferenceId: styleRefId, extra: extra.trim() });
+    } else if (uiMode === "color") {
       if (bMode === "ai") onSubmit({ mode: "b", prompt: prompt.trim() });
       else onSubmit({ mode: "b-precise", mappings: preciseMappings, includeGrays });
-    } else if (styleRefId) onSubmit({ mode: "c", styleReferenceId: styleRefId, extra: extra.trim() });
+    }
   }
 
   const styleRefUrl = styleRefId ? `/api/images/${styleRefId}` : null;
@@ -216,7 +251,8 @@ export function ReskinPanel({
         </span>
         <button
           onClick={onClose}
-          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+          disabled={busy}
+          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary disabled:opacity-40"
           title="닫기"
         >
           <X size={14} />
@@ -224,19 +260,19 @@ export function ReskinPanel({
       </header>
 
       <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {/* 모드 세그먼트 토글 */}
+        {/* 상단 탭 세그먼트 토글 (외형 교체 / 색만 변경) */}
         <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
-          {(["a", "b", "c"] as const).map(m => (
+          {(["skin", "color"] as const).map(m => (
             <button
               key={m}
-              onClick={() => setMode(m)}
+              onClick={() => setUiMode(m)}
               className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
-                mode === m
+                uiMode === m
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
                   : "border-transparent text-text-muted hover:text-text-primary"
               }`}
             >
-              {MODE_LABELS[m]}
+              {UI_MODE_LABELS[m]}
             </button>
           ))}
         </div>
@@ -258,8 +294,27 @@ export function ReskinPanel({
           </div>
         </div>
 
+        {/* "외형 교체" 탭 내부 서브 토글 (텍스트 / 이미지 참조) */}
+        {uiMode === "skin" && (
+          <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
+            {(["text", "image"] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setSkinInput(s)}
+                className={`flex h-7 flex-1 items-center justify-center rounded border px-2 ${
+                  skinInput === s
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-transparent text-text-muted hover:text-text-primary"
+                }`}
+              >
+                {SKIN_INPUT_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* 모드별 입력 */}
-        {mode === "a" && (
+        {uiMode === "skin" && skinInput === "text" && (
           <div className="shrink-0 space-y-1">
             <div className="flex items-center gap-2">
               <label className="text-xs text-text-muted">새 스킨 설명</label>
@@ -287,7 +342,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {mode === "b" && (
+        {uiMode === "color" && (
           <div className="shrink-0 space-y-2">
             {/* AI(codex) vs 정밀(sharp) 하위 토글 */}
             <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
@@ -396,11 +451,16 @@ export function ReskinPanel({
           </div>
         )}
 
-        {mode === "c" && (
+        {uiMode === "skin" && skinInput === "image" && (
           <div className="shrink-0 space-y-2">
             {overlay && (
               <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
                 ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
+              </div>
+            )}
+            {refIsSheet && (
+              <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
+                ⓘ 참조 이미지가 스프라이트시트입니다. 베이스의 모든 포즈에 이 시트의 캐릭터 외형을 전 프레임에 입힙니다.
               </div>
             )}
             <div className="flex items-center justify-between">
@@ -586,18 +646,28 @@ export function ReskinPanel({
 
       <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
         <button
-          onClick={onClose}
+          onClick={busy ? (onCancel ?? onClose) : onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
         >
-          ✕ 취소
+          {busy ? "■ 생성 취소" : "✕ 취소"}
         </button>
         <button
           onClick={submit}
-          disabled={!canSubmit}
-          className="h-9 flex-[2] rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          title={canSubmit ? "" : mode === "c" ? "참조 이미지 선택 필요" : "설명 입력 필요"}
+          disabled={!canSubmit || busy}
+          className="flex h-9 flex-[2] items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+          title={
+            canSubmit || busy
+              ? ""
+              : uiMode === "skin" && skinInput === "image"
+              ? "참조 이미지 선택 필요"
+              : "설명 입력 필요"
+          }
         >
-          {overlay ? "오버레이 실행 ▸" : "리스킨 실행 ▸"}
+          {busy ? (
+            <><Loader2 size={14} className="animate-spin" /> 실행 중…</>
+          ) : (
+            overlay || refIsSheet ? "오버레이 실행 ▸" : "리스킨 실행 ▸"
+          )}
         </button>
       </footer>
     </aside>

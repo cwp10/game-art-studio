@@ -722,53 +722,83 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         const prompt = typeof args.prompt === "string" ? args.prompt : "";
 
         // 모드 결정: c(참조) > b(팔레트) > a(외형). c·b 외엔 prompt 가 사실상 필수.
+        // 참조(styleRef) = 외형 소스, 베이스(input) = 포즈 소스.
         let styleRefPath: string | undefined;
         const inputGenerationIds = [inputId];
         let overrideInputPaths: string[] | undefined;
+        const tmpCropPath: string | undefined = undefined; // (현재 미사용) finally 정리 호환 유지
+        const isSheet = inputGen.kind === "spritesheet";
+        // styleGen/refIsSheet 를 블록 밖(메타 상속·후처리)에서 참조하기 위해 스코프 확장.
+        let styleGen: ReturnType<typeof getGeneration> | undefined;
+        let refIsSheet = false;
         if (styleRefId) {
-          const styleGen = getGeneration(styleRefId);
+          styleGen = getGeneration(styleRefId);
           if (!styleGen) throw new Error(`style reference generation not found: ${styleRefId}`);
-          styleRefPath = path.join(DATA_DIR, styleGen.image_path);
-          // Codex 입력 순서: [base, styleRef] (codex-exec 의 reskin 분기와 일치).
-          overrideInputPaths = [inputPath, styleRefPath];
+          const rawStyleRefPath = path.join(DATA_DIR, styleGen.image_path);
+
+          refIsSheet =
+            styleGen.kind === "spritesheet" ||
+            (!!styleGen.width &&
+              !!styleGen.height &&
+              detectSpriteGrid(styleGen.width, styleGen.height) !== null);
+
+          styleRefPath = rawStyleRefPath;
+          if (refIsSheet && !isSheet) {
+            // 케이스 3: 베이스=단일, 참조=시트. 첫 프레임 크롭하지 않고 참조 시트 전체를
+            // 포즈 소스로 사용한다. 입력 순서 [참조 시트(포즈), 베이스(외형)] — Image 1 의
+            // 그리드/포즈가 결과 구조를 결정하므로 참조 시트를 Image 1 로 둔다.
+            overrideInputPaths = [rawStyleRefPath, inputPath];
+          } else {
+            // 케이스 1·2: [베이스(포즈 소스), 참조(외형 소스)]. 베이스를 Image 1 로 유지.
+            overrideInputPaths = [inputPath, rawStyleRefPath];
+          }
           inputGenerationIds.push(styleRefId);
         }
         if (!styleRefId && !prompt) {
           throw new Error("reskin_image requires either a prompt or a styleReferenceId");
         }
 
-        const isSheet = inputGen.kind === "spritesheet";
-        // 시트면 입력 배경 상속(투명 여부) — 후처리 chroma-key/정렬에 사용.
-        const wantsTransparent = isSheet ? await detectTransparentBg(inputPath) : false;
+        // 케이스 3: 베이스가 단일이지만 참조가 시트 → 결과도 시트.
+        const effectiveIsSheet = isSheet || Boolean(refIsSheet && !isSheet);
 
-        // reskin 은 입력 시트 치수를 보존하므로 부모의 sprite 그리드 메타를 그대로 상속해
-        // 영속한다(SpriteCanvas source-of-truth · 아틀라스 export). 구버전 시트는 값이
+        // 시트면 배경 상속(투명 여부) — 후처리 chroma-key/정렬에 사용. 케이스 3 은
+        // 포즈 소스(참조 시트)의 투명 여부를 따른다.
+        const wantsTransparent = effectiveIsSheet
+          ? await detectTransparentBg(isSheet ? inputPath : styleRefPath!)
+          : false;
+
+        // reskin 은 시트 치수를 보존하므로 sprite 그리드 메타를 그대로 상속해 영속한다
+        // (SpriteCanvas source-of-truth · 아틀라스 export). 케이스 1·2 는 베이스 시트,
+        // 케이스 3 은 참조 시트(styleGen)의 params 를 상속한다. 구버전 시트는 값이
         // undefined → JSON.stringify 시 빠져 GCD 폴백(회귀 없음).
-        const parentSheet =
+        const sheetParamsSource =
           isSheet && inputGen.params && typeof inputGen.params === "object"
             ? (inputGen.params as Record<string, unknown>)
-            : null;
-        const inheritedSheetParams = parentSheet
+            : !isSheet && refIsSheet && styleGen?.params && typeof styleGen.params === "object"
+              ? (styleGen.params as Record<string, unknown>)
+              : null;
+        const inheritedSheetParams = sheetParamsSource
           ? {
-              subjectType: parentSheet.subjectType,
-              anchorStrategy: parentSheet.anchorStrategy,
-              anchor: parentSheet.anchor,
-              directions: parentSheet.directions,
-              rows: parentSheet.rows,
-              cols: parentSheet.cols,
-              cellW: parentSheet.cellW,
-              cellH: parentSheet.cellH,
-              fps: parentSheet.fps,
+              subjectType: sheetParamsSource.subjectType,
+              anchorStrategy: sheetParamsSource.anchorStrategy,
+              anchor: sheetParamsSource.anchor,
+              directions: sheetParamsSource.directions,
+              rows: sheetParamsSource.rows,
+              cols: sheetParamsSource.cols,
+              cellW: sheetParamsSource.cellW,
+              cellH: sheetParamsSource.cellH,
+              fps: sheetParamsSource.fps,
             }
           : {};
 
+        try {
         const mcpResult = await runImageTool({
           name,
           kind: "reskin",
           // 시트를 리스킨한 결과는 그 자체가 시트 → 'spritesheet' 로 저장해야 재-리스킨·
           // 스프라이트 도구가 시트로 인식한다. 단일 입력은 'reskin' 유지. (codex 프롬프트는
-          // 위 kind='reskin' 으로 선택되므로 영향 없음.)
-          storeKind: isSheet ? "spritesheet" : "reskin",
+          // 위 kind='reskin' 으로 선택되므로 영향 없음.) 케이스 3 도 결과가 시트이므로 포함.
+          storeKind: effectiveIsSheet ? "spritesheet" : "reskin",
           prompt,
           inputGenerationIds,
           overrideInputPaths,
@@ -778,15 +808,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
             ...inheritedSheetParams,
             mode: styleRefId ? "style_ref" : paletteOnly ? "palette" : "appearance",
             styleReferenceId: styleRefId,
-            spritesheet: isSheet,
+            spritesheet: effectiveIsSheet,
+            refIsSheet: !isSheet && refIsSheet, // codex-exec 케이스 3 분기 플래그
           },
           sessionId,
           signal: extra.signal,
         });
 
-        // 스프라이트시트 입력이면 후처리: resize → chroma-key → normalizeSpritesheetCells.
+        // 결과가 시트(케이스 1·2·3)면 후처리: resize → chroma-key → normalizeSpritesheetCells.
         // grid 는 결과 치수에서 detectSpriteGrid 로 역산. 감지 실패 시 단일처럼 폴백(스킵).
-        if (isSheet) {
+        if (effectiveIsSheet) {
           const genId: string | undefined = mcpResult?.structuredContent?.generationId;
           if (genId) {
             const filePath = imagePathFor(genId);
@@ -821,8 +852,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
                     subjectType: reskinSubject,
                     log,
                   });
-                } else if (wantsTransparent) {
-                  // reskin 출력에 green 배경 없음(black RGB 등) → 원본 alpha 마스크 적용.
+                } else if (wantsTransparent && isSheet) {
+                  // 케이스 1·2(베이스=시트)에서만: reskin 출력에 green 배경 없음(black RGB 등)
+                  // → 베이스 시트의 원본 alpha 마스크를 적용. 케이스 3 은 베이스가 단일이라
+                  // 픽셀 인덱스가 시트와 불일치 → 이 폴백을 쓰지 않는다(아래 skip 으로 폴백).
                   // 원본을 결과와 동일 치수(canvasW×canvasH)로 리사이즈해서 읽어야 픽셀
                   // 인덱스가 일치한다(filePath 는 위에서 이미 canvasW×canvasH 로 리사이즈됨).
                   const { data: origData, info: origInfo } = await sharp(inputPath)
@@ -857,6 +890,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           }
         }
         return mcpResult;
+        } finally {
+          if (tmpCropPath && fs.existsSync(tmpCropPath)) {
+            try {
+              fs.unlinkSync(tmpCropPath);
+            } catch {
+              /* 임시 파일 정리 실패는 무시 */
+            }
+          }
+        }
       }
 
       case "make_emote_sheet": {

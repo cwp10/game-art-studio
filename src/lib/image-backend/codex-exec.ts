@@ -244,16 +244,56 @@ function buildNaturalPrompt(job: ImageJob): string {
         : "";
 
       if (job.styleRefPath) {
-        // (c) 참조 스타일 전이
+        // (c) 베이스(Image 1) = 포즈 소스, 참조(Image 2) = 외형 소스.
+        // img2img 특성상 Image 1 구조가 결과 포즈를 결정하므로 베이스를 Image 1 로 유지.
+        // 프롬프트에서 외형을 Image 2 로 완전 교체할 것을 강하게 지시.
+        const extra = job.prompt ? `Additional guidance: ${job.prompt}. ` : "";
+        const refIsSheet = job.params?.refIsSheet === true;
+        if (isSheet) {
+          // 케이스 1: 베이스 시트 포즈 유지 × 참조 외형 교체 → 시트 출력
+          return (
+            PROMPT_HEADER +
+            `I am attaching TWO images:\n` +
+            `Image 1 = POSE SHEET — a base spritesheet. Each cell shows a DIFFERENT pose and direction. ` +
+            `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
+            `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+            `must COMPLETELY REPLACE the character in every cell of Image 1.\n\n` +
+            `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
+            `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
+            `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+            `Same grid dimensions as Image 1. Transparent background. ` +
+            extra
+          );
+        }
+        if (refIsSheet) {
+          // 케이스 3: 참조 시트 포즈 × 베이스 단일 외형 → 시트 출력.
+          // 입력 순서 [참조 시트(Image 1=포즈), 베이스(Image 2=외형)] (server.ts 가 구성).
+          return (
+            PROMPT_HEADER +
+            `I am attaching TWO images:\n` +
+            `Image 1 = POSE SHEET — a spritesheet showing multiple poses/directions. ` +
+            `Preserve EVERY cell's unique pose, facing direction, body angle, and grid layout EXACTLY.\n` +
+            `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+            `must fill every cell of Image 1's grid.\n\n` +
+            `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
+            `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
+            `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+            `Same grid dimensions as Image 1. Transparent background. ` +
+            extra
+          );
+        }
+        // 케이스 2: 베이스 단일 포즈 유지 × 참조 외형 교체 → 단일 출력
         return (
           PROMPT_HEADER +
-          `I am attaching TWO images.\n` +
-          `Image 1 = base (keep its pose/structure/layout/composition).\n` +
-          `Image 2 = style reference.\n` +
-          `Re-skin image 1 with image 2's visual style/material/palette. ` +
-          `Keep image 1's exact pose and composition. Same dimensions. ` +
-          (job.prompt ? `Additional guidance: ${job.prompt}. ` : "") +
-          sheetRule
+          `I am attaching TWO images:\n` +
+          `Image 1 = POSE REFERENCE — use its EXACT pose, body angle, and composition.\n` +
+          `Image 2 = CHARACTER REFERENCE — this character's appearance (face, outfit, colors, proportions) ` +
+          `must COMPLETELY REPLACE the character shown in Image 1.\n\n` +
+          `Task: Redraw Image 1's pose using Image 2's character. ` +
+          `The output character must look IDENTICAL to Image 2 — NOT Image 1. ` +
+          `Only the pose and body angle are taken from Image 1. ` +
+          `Same dimensions as Image 1. Transparent background. ` +
+          extra
         );
       }
       if (job.paletteOnly) {

@@ -60,7 +60,7 @@ type Editing =
   | ({ mode: "inpaint" } & EditTarget)
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
-  | ({ mode: "reskin"; initialMode?: "a" | "b" | "c" } & EditTarget)
+  | ({ mode: "reskin"; initialMode?: "skin" | "color"; initialSkinInput?: "text" | "image" } & EditTarget)
   | ({ mode: "normal_map" } & EditTarget)
   | ({ mode: "image_tools" } & EditTarget)
   | null;
@@ -477,12 +477,13 @@ export function ChatLayout() {
           kind: payload.kind,
         });
       } else if (action === "overlay" && payload.generationId && payload.width && payload.height) {
-        // 캐릭터 오버레이 = 리스킨 모드 c(참조 전이)를 시트 베이스로 바로 오픈.
-        // 백엔드 동일 — 패널이 시트+모드c 일 때 "캐릭터 오버레이"로 리프레이밍.
+        // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
+        // 백엔드 동일 — 패널이 시트+이미지참조 서브일 때 "캐릭터 오버레이"로 리프레이밍.
         setSpriteGen(null);
         setEditing({
           mode: "reskin",
-          initialMode: "c",
+          initialMode: "skin",
+          initialSkinInput: "image",
           generationId: payload.generationId,
           imageUrl: `/api/images/${payload.generationId}`,
           width: payload.width,
@@ -628,7 +629,6 @@ export function ChatLayout() {
       const genId = editing.generationId;
       // 시트 베이스 + 모드 c = 캐릭터 오버레이 → 메시지 문구를 오버레이 맥락으로.
       const isSheetBase = editing.kind === "spritesheet";
-      setEditing(null);
       if (payload.mode === "b-precise") {
         // 결정적 색교체 — codex/Claude 우회, 전용 API 직접 호출 후 합성 결과 카드 삽입.
         try {
@@ -649,6 +649,7 @@ export function ChatLayout() {
         } catch (e) {
           console.error("[reskin-precise]", e);
         }
+        setEditing(null);
         return;
       }
       if (payload.mode === "a") {
@@ -676,7 +677,6 @@ export function ChatLayout() {
   // 순차 await 는 layer-split 와 동일한 검증된 패턴(각 완료 후 다음, generating 충돌 없음).
   const handleSpriteGen = useCallback(
     async (messages: Array<{ message: string; attachmentGenerationIds: string[] }>) => {
-      setSpriteGen(null);
       for (const m of messages) {
         await handleSend(m.message, { attachmentGenerationIds: m.attachmentGenerationIds });
       }
@@ -1146,9 +1146,12 @@ export function ChatLayout() {
             height={editing.height}
             kind={editing.kind}
             initialMode={editing.initialMode}
+            initialSkinInput={editing.initialSkinInput}
             sessionId={state.activeSessionId}
+            busy={state.generating}
             onSubmit={handleReskin}
             onClose={() => setEditing(null)}
+            onCancel={handleCancel}
           />
         </div>
       )}
@@ -1182,8 +1185,10 @@ export function ChatLayout() {
             referenceImageUrl={spriteGen.reference?.imageUrl}
             referencePrompt={spriteGen.reference?.prompt}
             initialSubjectMode={spriteGen.initialSubjectMode}
+            busy={state.generating}
             onSubmit={handleSpriteGen}
             onClose={() => setSpriteGen(null)}
+            onCancel={handleCancel}
           />
         </div>
       )}
