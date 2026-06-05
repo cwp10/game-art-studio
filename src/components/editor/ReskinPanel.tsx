@@ -107,6 +107,7 @@ export function ReskinPanel({
   const [aiTarget, setAiTarget] = useState<"prompt" | "extra" | null>(null);
   const [aiResult, setAiResult] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<{ title: string; body: string }[] | null>(null);
 
   // 이미지 참조 서브: 사용자가 외부 이미지를 업로드해 참조로 사용.
   async function handleUploadRef(file: File) {
@@ -185,12 +186,24 @@ export function ReskinPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode: apiMode, question, isSheet, isOverlay: overlay }),
       });
-      const data = (await res.json()) as { suggestion?: string; error?: string };
-      if (!res.ok || !data.suggestion) {
+      const data = (await res.json()) as {
+        suggestion?: string;
+        suggestions?: { title: string; body: string }[];
+        error?: string;
+      };
+      if (!res.ok) {
         setAiError(data.error ?? "제안 생성에 실패했습니다.");
         return;
       }
-      setAiResult(data.suggestion);
+      if (data.suggestions && data.suggestions.length > 0) {
+        setAiSuggestions(data.suggestions);
+        setAiResult(null);
+      } else if (data.suggestion) {
+        setAiResult(data.suggestion);
+        setAiSuggestions(null);
+      } else {
+        setAiError(data.error ?? "제안 생성에 실패했습니다.");
+      }
     } catch (e) {
       setAiError((e as Error).message);
     } finally {
@@ -243,7 +256,7 @@ export function ReskinPanel({
   const styleRefUrl = styleRefId ? `/api/images/${styleRefId}` : null;
 
   return (
-    <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
+    <aside className="relative flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
@@ -661,6 +674,19 @@ export function ReskinPanel({
             : "설명 입력 필요"
         }
       />
+
+      {aiSuggestions && aiTarget && (
+        <AiSuggestPopup
+          suggestions={aiSuggestions}
+          onSelect={v => {
+            if (aiTarget === "prompt") setPrompt(v);
+            else setExtra(v);
+            setAiSuggestions(null);
+            setAiTarget(null);
+          }}
+          onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+        />
+      )}
     </aside>
   );
 }
@@ -711,6 +737,50 @@ function AiSuggestResult({
           </button>
         </>
       )}
+    </div>
+  );
+}
+
+function AiSuggestPopup({
+  suggestions,
+  onSelect,
+  onClose,
+}: {
+  suggestions: { title: string; body: string }[];
+  onSelect: (body: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-bg-panel/95 backdrop-blur-sm">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+          <Sparkles size={14} className="text-[color:var(--accent)]" />
+          스킨 아이디어 선택
+        </span>
+        <button
+          onClick={onClose}
+          className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
+        {suggestions.map((s, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(s.body)}
+            className="group flex flex-col gap-1 rounded-lg border border-border bg-bg-card px-4 py-3 text-left hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/5"
+          >
+            <span className="text-sm font-medium text-text-primary group-hover:text-[color:var(--accent)]">
+              {s.title}
+            </span>
+            <span className="text-xs text-text-muted">{s.body}</span>
+          </button>
+        ))}
+      </div>
+      <div className="border-t border-border px-4 py-2">
+        <p className="text-[11px] text-text-muted/60">카드를 클릭하면 텍스트 필드에 입력됩니다.</p>
+      </div>
     </div>
   );
 }

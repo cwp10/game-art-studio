@@ -15,17 +15,21 @@ export const maxDuration = 120;
 
 const SYSTEM_PROMPTS: Record<"a" | "b" | "c", string> = {
   a: `당신은 게임 스프라이트 리스킨 전문가입니다.
-사용자의 요청을 "외형 교체" 입력 텍스트로 변환해주세요.
 
 [외형 교체 동작 방식]
-- Claude → reskin_image 도구(img2img): 원본의 포즈·실루엣·구도를 유지하면서 색·재질·테마를 교체
-- 스프라이트시트인 경우 모든 프레임에 일관된 외형이 적용됨
-- 투명 배경은 자동 유지
+- 원본의 포즈·실루엣·구도를 유지하면서 색·재질·테마를 교체
+- 스프라이트시트인 경우 모든 프레임에 일관된 외형 적용
 
-출력 규칙:
-- 새 스킨의 시각적 특징을 구체적으로: 색상, 재질, 무기, 장비 등
-- 2~3가지 핵심 특징을 쉼표로 나열하는 간결한 묘사 (1~2줄)
-- 기술 용어·파라미터 절대 언급 금지, 한국어 중심`,
+사용자의 요청에 어울리는 스킨 아이디어 5가지를 제안하세요.
+
+출력 형식: 아래 JSON 배열만 출력. 다른 텍스트·마크다운·설명 절대 없이.
+[{"title":"테마 이름","body":"색상·재질·장비 등 핵심 특징 묘사"}]
+
+규칙:
+- title: 짧은 테마 이름 (이모지 1개 포함 권장)
+- body: 2~3가지 시각 특징을 쉼표로 나열, 1~2줄, 한국어
+- 기술 용어·파라미터 언급 금지
+- 반드시 유효한 JSON 배열 5개 항목만 출력`,
 
   b: `당신은 게임 스프라이트 색 교체 전문가입니다.
 사용자의 요청을 "색만 변경" 입력 텍스트로 변환해주세요.
@@ -64,6 +68,8 @@ type Body = {
   isOverlay?: boolean;
 };
 
+export type SkinSuggestion = { title: string; body: string };
+
 export async function POST(req: NextRequest) {
   let body: Body;
   try {
@@ -96,6 +102,26 @@ export async function POST(req: NextRequest) {
     if (!suggestion) {
       return Response.json({ error: "empty suggestion" }, { status: 502 });
     }
+
+    // mode "a": JSON 배열 파싱 시도 → 구조화된 제안 목록 반환
+    if (mode === "a") {
+      const match = suggestion.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[0]) as unknown[];
+          const suggestions = parsed.filter(
+            (x): x is SkinSuggestion =>
+              typeof x === "object" && x !== null &&
+              typeof (x as SkinSuggestion).title === "string" &&
+              typeof (x as SkinSuggestion).body === "string",
+          );
+          if (suggestions.length > 0) {
+            return Response.json({ suggestions });
+          }
+        } catch { /* JSON 파싱 실패 시 단일 텍스트로 폴백 */ }
+      }
+    }
+
     return Response.json({ suggestion });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 502 });
