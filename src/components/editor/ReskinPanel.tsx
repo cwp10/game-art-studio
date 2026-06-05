@@ -634,12 +634,19 @@ export function ReskinPanel({
             )}
 
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="relative flex items-center gap-2">
                 <label className="text-xs text-text-muted">(선택) 추가 지시</label>
                 <AiSuggestButton
                   loading={aiLoading && aiTarget === "extra"}
                   onClick={() => handleAiSuggest("extra")}
                 />
+                {aiSuggestions && aiTarget === "extra" && (
+                  <AiSuggestDropdown
+                    suggestions={aiSuggestions}
+                    onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }}
+                    onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                  />
+                )}
               </div>
               <textarea
                 value={extra}
@@ -649,7 +656,7 @@ export function ReskinPanel({
                 className="block w-full resize-none rounded-lg border border-border bg-bg-card px-3 py-2 text-sm text-text-primary outline-none placeholder:text-text-muted/40 focus:border-[color:var(--accent)]/60"
               />
               <AiSuggestResult
-                show={aiTarget === "extra"}
+                show={aiTarget === "extra" && aiSuggestions === null}
                 result={aiResult}
                 error={aiError}
                 onApply={v => { setExtra(v); setAiResult(null); }}
