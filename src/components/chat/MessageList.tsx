@@ -8,6 +8,8 @@ import { ImageResultCard } from "./ImageResultCard";
 
 type Props = {
   items: ChatItem[];
+  /** 생성 진행 중 — orphaned 복구 UI 를 숨겨 중복 전송을 막는다. */
+  generating?: boolean;
   onAction?: (
     action:
       | "duplicate"
@@ -37,6 +39,10 @@ type Props = {
   ) => void;
   /** suggestions 카드 클릭 → 부모가 Composer prefill + dispatch suggestion_picked. */
   onPickSuggestion?: (suggestId: string, body: string) => void;
+  /** 중단된 세션(orphaned user) 재시도 — 부모가 동일 텍스트로 재전송. */
+  onRetryOrphaned?: (item: Extract<ChatItem, { kind: "user" }>) => void;
+  /** 실패한 도구 호출 재생성 — 직전 user 메시지를 재전송해 Claude 가 동일 도구를 재호출하도록. */
+  onRetryToolCall?: (assistantId: string) => void;
 };
 
 /** tc.args 에서 subjectType 을 안전하게 추출 — make_sheet 시 SpriteGenPanel 초기 모드 결정.
@@ -59,7 +65,7 @@ function extractSpriteSubjectMode(args: unknown): "character" | "object" | undef
   return undefined;
 }
 
-export function MessageList({ items, onAction, onPickSuggestion }: Props) {
+export function MessageList({ items, generating, onAction, onPickSuggestion, onRetryOrphaned, onRetryToolCall }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -70,10 +76,34 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
       {items.map((it, i) => {
         if (it.kind === "user") {
           return (
-            <div key={`${it.id}-${i}`} className="flex justify-end">
+            <div key={`${it.id}-${i}`} className="flex flex-col items-end">
+              {it.attachmentIds && it.attachmentIds.length > 0 && (
+                <div className="mb-1 flex flex-wrap justify-end gap-1">
+                  {it.attachmentIds.map(id => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={id}
+                      src={`/api/thumbnails/${id}`}
+                      alt="첨부"
+                      className="h-14 w-14 rounded border border-border object-cover bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/8px_8px]"
+                    />
+                  ))}
+                </div>
+              )}
               <div className="max-w-[80%] rounded-2xl rounded-br-sm bg-[color:var(--accent)]/20 px-4 py-2 text-sm leading-relaxed">
                 {it.text}
               </div>
+              {it.orphaned && !generating && (
+                <div className="mt-2 flex items-center gap-2 rounded-lg border border-[color:var(--accent)]/30 bg-[color:var(--accent)]/5 px-3 py-2 text-xs text-text-muted">
+                  <span>응답이 없습니다</span>
+                  <button
+                    onClick={() => onRetryOrphaned?.(it)}
+                    className="ml-auto rounded border border-[color:var(--accent)]/50 px-2 py-1 text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+                  >
+                    재시도 ▸
+                  </button>
+                </div>
+              )}
             </div>
           );
         }
@@ -185,7 +215,15 @@ export function MessageList({ items, onAction, onPickSuggestion }: Props) {
         return (
           <div key={`${it.id}-${i}`} className="space-y-3">
             {it.toolCalls.map(tc => (
-              <ToolCallBlock key={tc.toolCallId} state={tc} />
+              <ToolCallBlock
+                key={tc.toolCallId}
+                state={tc}
+                onRetry={
+                  tc.status === "failed" && onRetryToolCall
+                    ? () => onRetryToolCall(it.id)
+                    : undefined
+                }
+              />
             ))}
             {lastTool?.result && (
               <ImageResultCard

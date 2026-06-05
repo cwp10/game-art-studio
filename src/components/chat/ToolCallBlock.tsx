@@ -13,9 +13,9 @@ const STAGE_LABEL: Record<string, string> = {
   done: "완료",
 };
 
-type Props = { state: ToolCallState };
+type Props = { state: ToolCallState; onRetry?: () => void };
 
-export function ToolCallBlock({ state }: Props) {
+export function ToolCallBlock({ state, onRetry }: Props) {
   const [expanded, setExpanded] = useState(state.status !== "succeeded");
   const [elapsed, setElapsed] = useState(0);
   const startedAtRef = useRef<number | null>(null);
@@ -73,6 +73,14 @@ export function ToolCallBlock({ state }: Props) {
               <li className="text-[color:var(--danger)]">⚠ {state.error}</li>
             )}
           </ul>
+          {isError && onRetry && (
+            <button
+              onClick={onRetry}
+              className="mt-2 rounded border border-[color:var(--accent)]/50 px-3 py-1 text-xs text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+            >
+              재생성 ▸
+            </button>
+          )}
         </div>
       )}
     </div>

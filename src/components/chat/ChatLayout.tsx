@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
-import { chatReducer, initialState } from "./chat-state";
+import { chatReducer, initialState, type ChatItem } from "./chat-state";
 import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
@@ -414,6 +414,33 @@ export function ChatLayout() {
     abortRef.current?.abort();
   }, []);
 
+  // 중단된 세션 복구 — orphaned user 아이템을 동일 텍스트로 재전송.
+  // orphaned 마킹을 해제하고 handleSend 경로(마커 → route.ts → Claude)로 다시 보낸다.
+  // attachmentIds 가 있으면 첫 번째를 reference 첨부로 포함(다중 첨부는 첫 1개만 — 단순 복구).
+  const handleRetryOrphaned = useCallback(
+    async (item: Extract<ChatItem, { kind: "user" }>) => {
+      dispatch({ type: "clear_orphaned", itemId: item.id });
+      const refId = item.attachmentIds?.[0] ?? null;
+      await handleSend(item.text, refId ? { attachmentGenerationIds: [refId] } : undefined);
+    },
+    [handleSend],
+  );
+
+  // 실패한 도구 호출 재생성 — 해당 assistant 아이템 직전 user 메시지를 재전송해 Claude 가 동일 도구를 재호출하도록.
+  const handleRetryToolCall = useCallback(
+    async (assistantItemId: string) => {
+      const items = state.items;
+      const assistantIdx = items.findIndex(it => it.kind === "assistant" && it.id === assistantItemId);
+      if (assistantIdx <= 0) return;
+      const prevUser = items[assistantIdx - 1];
+      if (prevUser?.kind !== "user") return;
+      await handleSend(prevUser.text, prevUser.attachmentIds?.length
+        ? { attachmentGenerationIds: prevUser.attachmentIds }
+        : undefined);
+    },
+    [state.items, handleSend],
+  );
+
   // 편집/스프라이트 패널 닫기 — JSX inline 화살표 대신 안정 참조로 공유(원자적 상태 정리).
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
@@ -642,18 +669,18 @@ export function ChatLayout() {
         return;
       }
       if (payload.mode === "a") {
-        handleSend(`이 이미지를 ${payload.prompt} 로 리스킨해줘.`, {
+        await handleSend(`이 이미지를 ${payload.prompt} 로 리스킨해줘.`, {
           attachmentGenerationIds: [genId],
         });
       } else if (payload.mode === "b") {
-        handleSend(`이 이미지의 색 팔레트만 ${payload.prompt} 로 바꿔줘. 형태는 그대로 유지.`, {
+        await handleSend(`이 이미지의 색 팔레트만 ${payload.prompt} 로 바꿔줘. 형태는 그대로 유지.`, {
           attachmentGenerationIds: [genId],
         });
       } else {
         const msg = isSheetBase
           ? `베이스 시트(첫 번째 이미지)의 모든 포즈에 두 번째 이미지의 캐릭터를 입혀줘. 포즈·프레임 구성은 그대로 유지.${payload.extra ? ` ${payload.extra}` : ""}`
           : `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`;
-        handleSend(msg, { attachmentGenerationIds: [genId, payload.styleReferenceId] });
+        await handleSend(msg, { attachmentGenerationIds: [genId, payload.styleReferenceId] });
       }
       setEditing(null);
     },
@@ -1148,8 +1175,11 @@ export function ChatLayout() {
           {hasItems ? (
             <MessageList
               items={state.items}
+              generating={state.generating}
               onAction={handleAction}
               onPickSuggestion={handlePickSuggestion}
+              onRetryOrphaned={handleRetryOrphaned}
+              onRetryToolCall={handleRetryToolCall}
             />
           ) : (
             <EmptyState

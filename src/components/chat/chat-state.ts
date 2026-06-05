@@ -20,7 +20,7 @@ export type ToolCallState = {
 
 /** 화면에 그리는 단위. user message / assistant turn / suggestions 그리드. */
 export type ChatItem =
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; attachmentIds?: string[]; orphaned?: true }
   | {
       kind: "assistant";
       id: string;
@@ -100,6 +100,10 @@ export type ChatAction =
   | { type: "suggestions_received"; suggestId: string; items: Array<{ label: string; body: string }> }
   | { type: "suggestions_failed"; suggestId: string; error: string }
   | { type: "suggestion_picked"; suggestId: string; body: string }
+  | { type: "clear_orphaned"; itemId: string }
+  | { type: "retry_tool_call_start"; assistantId: string; toolCallId: string }
+  | { type: "retry_tool_call_success"; assistantId: string; toolCallId: string; result: ToolCallState["result"] }
+  | { type: "retry_tool_call_fail"; assistantId: string; toolCallId: string; error: string }
   | { type: "restore_in_progress" }
   | { type: "reset_items" };
 
@@ -184,20 +188,32 @@ function messagesToItems(messages: Message[]): ChatItem[] {
         items.push(currentAssistant);
         currentAssistant = null;
       }
-      const text = m.content.find((b): b is Extract<MessageBlock, { type: "text" }> => b.type === "text")?.text ?? "";
+      const raw = m.content.find((b): b is Extract<MessageBlock, { type: "text" }> => b.type === "text")?.text ?? "";
+      // [reference: <id>] / [mask: <id>] / [extract] 마커 제거 + reference id 수집.
+      // route.ts 가 user 본문에 prefix 한 마커를 재로드 시 칩으로 복원하기 위함.
+      const attachmentIds: string[] = [];
+      const text = raw
+        .replace(/\[reference:\s*([^\]]+)\]/g, (_, id: string) => {
+          attachmentIds.push(id.trim());
+          return "";
+        })
+        .replace(/\[mask:\s*[^\]]+\]/g, "")
+        .replace(/\[extract\]/g, "")
+        .trim();
+      const userExtra = attachmentIds.length ? { attachmentIds } : undefined;
       const batch = readBatchMeta(m.meta);
       if (batch) {
         // 같은 batchId 의 첫 멤버에서만 user 버블 + batch 그리드를 한 번 emit.
         let bi = batches.get(batch.id);
         if (!bi) {
-          items.push({ kind: "user", id: m.id, text });
+          items.push({ kind: "user", id: m.id, text, ...userExtra });
           bi = { kind: "batch", id: batch.id, prompt: text, total: batch.total, stopped: true, results: [] };
           batches.set(batch.id, bi);
           items.push(bi);
         }
         pendingBatch = bi; // 다음 assistant 결과가 이 그리드로 들어간다
       } else {
-        items.push({ kind: "user", id: m.id, text });
+        items.push({ kind: "user", id: m.id, text, ...userExtra });
         pendingBatch = null;
       }
     } else if (m.role === "assistant") {
@@ -258,7 +274,30 @@ function messagesToItems(messages: Message[]): ChatItem[] {
     }
   }
   if (currentAssistant) items.push(currentAssistant);
+  // 마지막 아이템이 user 면 응답(assistant)이 없는 것 → 중단된 세션. orphaned 마킹해
+  // 복구 UI(재시도)를 띄운다. batch user 는 그리드가 뒤따르므로 대상 아님.
+  const last = items[items.length - 1];
+  if (last?.kind === "user") {
+    items[items.length - 1] = { ...last, orphaned: true };
+  }
   return items;
+}
+
+/** assistant 아이템의 특정 toolCall 하나를 fn 으로 갱신해 새 state 반환. retry 액션 공용. */
+function updateToolCall(
+  state: ChatState,
+  assistantId: string,
+  toolCallId: string,
+  fn: (tc: ToolCallState) => ToolCallState,
+): ChatState {
+  return {
+    ...state,
+    items: state.items.map(it =>
+      it.kind === "assistant" && it.id === assistantId
+        ? { ...it, toolCalls: it.toolCalls.map(tc => (tc.toolCallId === toolCallId ? fn(tc) : tc)) }
+        : it,
+    ),
+  };
 }
 
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
@@ -350,6 +389,35 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             : it,
         ),
       };
+    case "clear_orphaned":
+      return {
+        ...state,
+        items: state.items.map(it =>
+          it.kind === "user" && it.id === action.itemId
+            ? { ...it, orphaned: undefined }
+            : it,
+        ),
+      };
+    case "retry_tool_call_start":
+      return updateToolCall(state, action.assistantId, action.toolCallId, tc => ({
+        ...tc,
+        status: "running",
+        error: undefined,
+        progress: [{ stage: "재생성 중" }],
+      }));
+    case "retry_tool_call_success":
+      return updateToolCall(state, action.assistantId, action.toolCallId, tc => ({
+        ...tc,
+        status: "succeeded",
+        result: action.result,
+        error: undefined,
+      }));
+    case "retry_tool_call_fail":
+      return updateToolCall(state, action.assistantId, action.toolCallId, tc => ({
+        ...tc,
+        status: "failed",
+        error: action.error,
+      }));
     case "external_upload": {
       // 가짜 assistant turn — toolCall 1개를 succeeded 로 채워 결과 카드 흐름 재사용.
       const fakeToolCallId = "ext-" + action.generationId;
