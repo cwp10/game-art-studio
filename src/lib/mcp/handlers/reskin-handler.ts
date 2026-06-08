@@ -204,5 +204,24 @@ export async function handleReskinImage(
       }
     }
   }
+
+  // 단일 이미지 리스킨: 원본이 투명 배경이었으면 결과에서도 복원.
+  // codex img2img 는 투명 영역을 green 으로 채워 반환하므로 chroma-key → fallback 순으로 제거.
+  if (!effectiveIsSheet) {
+    const genId: string | undefined = mcpResult?.structuredContent?.generationId;
+    if (genId) {
+      const hadTransparent = await detectTransparentBg(inputPath);
+      if (hadTransparent) {
+        const filePath = imagePathFor(genId);
+        try {
+          await applyTransparentPostProcess(filePath, "green");
+          log(`reskin_image: restored transparency gen=${genId}`);
+        } catch (e) {
+          log(`reskin_image transparent restore fail: ${(e as Error).message}`);
+        }
+      }
+    }
+  }
+
   return mcpResult;
 }
