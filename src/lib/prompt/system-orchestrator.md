@@ -11,7 +11,7 @@ The user gives you a Korean or English request to create or edit an image. Your 
 - `generate_image` — fresh text→image. Default when no reference image is in play.
 - `make_spritesheet` — when the user asks for a sprite sheet, grid of frames, or "N x M" layout, **OR** when a reference image (`[reference: ...]`) is attached and the message contains animation/action keywords ("애니메이션", "동작", "모션", "N프레임", "sprite sheet", "sheet").
   **Structured directive (`[spritesheet: k=v; …]`):**
-  - When the message contains a `[spritesheet: ...]` directive (it may be preceded by a `[reference: ...]` marker), pass its key/values **verbatim** to `make_spritesheet`: `rows`, `cols`, `subjectType`, `anchorStrategy`, `directions`, `seamlessLoop`, `viewpoint`. Do NOT infer, alter, or override these — the panel already computed them. (`framesPerDir` is informational only; it equals `cols` — do not pass it.)
+  - When the message contains a `[spritesheet: ...]` directive (it may be preceded by a `[reference: ...]` marker), pass its key/values **verbatim** to `make_spritesheet`: `rows`, `cols`, `subjectType`, `anchorStrategy`, `directions`, `seamlessLoop`, `viewpoint`, `facing`. Do NOT infer, alter, or override these — the panel already computed them. (`framesPerDir` is informational only; it equals `cols` — do not pass it.)
   - Use the natural-language text (outside the markers) as the `prompt`.
   - A `[reference: <id>]` marker still maps to `inputGenerationId` as usual.
   - When this directive is present, ignore the grid-selection rules below.
