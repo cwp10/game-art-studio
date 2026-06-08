@@ -803,14 +803,22 @@ export function buildSpriteMessage(
   const anchor = isCharacter ? "feet" : "center";
   const grid = FRAME_OPTS.find(f => f.value === state.frames) ?? { rows: 2, cols: 4 };
 
+  // UI에서 방향이 명시 선택된 경우(REF + 참조이미지 포함). 미설정이면 대화창이 결정.
+  const hasExplicitDirection =
+    isCharacter && (state.direction !== "REF" || !!referenceId);
+
   const viewpointClause =
     state.perspective && state.perspective !== "side"
       ? `; viewpoint=${state.perspective}`
       : "";
+  // 방향 명시 시 directive에도 facing 박아 LLM이 다방향으로 오해 못 하게 방지
+  const facingClause = hasExplicitDirection
+    ? `; facing=${state.direction}`
+    : "";
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
     `rows=${grid.rows}; cols=${grid.cols}; directions=1` +
-    `${viewpointClause}; seamlessLoop=${state.seamlessLoop}]`;
+    `${facingClause}${viewpointClause}; seamlessLoop=${state.seamlessLoop}]`;
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
@@ -821,9 +829,12 @@ export function buildSpriteMessage(
   };
   const perspPhrase = perspectivePhrase[state.perspective ?? "side"];
   if (perspPhrase) nlParts.push(perspPhrase);
-  // REF 방향은 참조 이미지가 실제로 첨부될 때만 의미가 있음
-  if (isCharacter && (state.direction !== "REF" || referenceId)) {
-    nlParts.push(facingPhrase(state.direction, state.perspective ?? "side"));
+  if (hasExplicitDirection) {
+    // 방향이 명시된 경우: 단일 방향임을 강하게 명시해 LLM이 미러/반대 방향 추가 못 하게 방지
+    const fp = facingPhrase(state.direction, state.perspective ?? "side");
+    nlParts.push(
+      `SINGLE DIRECTION ONLY — ${fp}. Every frame must face this same direction. Do NOT include mirrored, opposite, or any other facing variants`,
+    );
   }
   if (state.subjectType === "effect" && state.effectType) {
     const et = EFFECT_TYPES.find(e => e.value === state.effectType);
