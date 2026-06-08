@@ -164,6 +164,13 @@ const SCHEMAS = {
           "isometric=45도 아이소메트릭, 2.5d-topdown=2.5D 약간 위에서 내려보는 탑다운. " +
           "[spritesheet: ...] 디렉티브의 viewpoint 값을 그대로 전달.",
       },
+      facing: {
+        type: "string",
+        enum: ["DOWN", "LEFT", "RIGHT", "UP", "DOWN-LEFT", "DOWN-RIGHT", "UP-LEFT", "UP-RIGHT"],
+        description:
+          "(선택) 캐릭터가 바라보는 방향. directions=1(단일 방향) 시트에서 [spritesheet: facing=X] 디렉티브가 있을 때 전달. " +
+          "NL 프롬프트 방향 감지보다 우선 적용됨.",
+      },
       ...SESSION_PROP,
     },
     required: ["prompt", "rows", "cols"],

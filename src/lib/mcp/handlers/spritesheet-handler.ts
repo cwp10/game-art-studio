@@ -40,6 +40,8 @@ export async function handleMakeSpritesheet(
   const userPrompt = requireString(args.prompt, "prompt");
   const seamlessLoop = args.seamlessLoop === true;
   const viewpoint = typeof args.viewpoint === "string" ? args.viewpoint : "side";
+  // UI에서 명시한 facing 방향 — NL regex 감지보다 우선 적용 (오케스트레이터 방향 오해 방지)
+  const facing = typeof args.facing === "string" ? args.facing : null;
   const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
     ? args.inputGenerationId
     : null;
@@ -175,7 +177,7 @@ export async function handleMakeSpritesheet(
     userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
     wantsTransparent, chromaKeyColor, seamlessLoop,
     subjectType, resolvedAnchor, directions,
-    refPath, gridTemplatePath, viewpoint,
+    refPath, gridTemplatePath, viewpoint, facing,
   });
 
   const isCharacter = subjectType === "character";

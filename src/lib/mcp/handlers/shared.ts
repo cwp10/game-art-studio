@@ -120,6 +120,7 @@ export type SpritePromptInput = {
   refPath: string | null;
   gridTemplatePath: string;
   viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
+  facing?: string | null; // UI 명시 방향 — NL regex 감지보다 우선
 };
 
 /** 카메라 시점 규칙. side(기본)는 빈 문자열 — 모델 기본값 유지. */
@@ -152,7 +153,7 @@ export async function buildSpritePrompt(
 ): Promise<{ decorated: string; overrideInputPaths: string[] }> {
   const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
     wantsTransparent, chromaKeyColor, seamlessLoop,
-    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint } = p;
+    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint, facing } = p;
   const normalizedViewpoint = viewpoint ?? "side";
 
   const isCharacter = subjectType === "character";
@@ -163,7 +164,8 @@ export async function buildSpritePrompt(
   const cx = Math.round(cellW / 2);
   const cy = Math.round(cellH / 2);
 
-  const parsedWalkDir = isSingleDirection ? ((): string | null => {
+  // UI에서 명시한 facing 이 있으면 NL 파싱 없이 직접 사용 (오케스트레이터 방향 오해 방지)
+  function detectWalkDirFromNL(): string {
     if (/facing left|face left|to the left|왼쪽|left[\s-]facing/i.test(userPrompt)) return "LEFT";
     if (/facing right|face right|to the right|오른쪽|right[\s-]facing/i.test(userPrompt)) return "RIGHT";
     if (/facing down-left/i.test(userPrompt)) return "DOWN-LEFT";
@@ -173,7 +175,8 @@ export async function buildSpritePrompt(
     if (/facing down(?!-)|face down|front.?view|정면/i.test(userPrompt)) return "DOWN";
     if (/facing up(?!-)|face up|back.?view|후면/i.test(userPrompt)) return "UP";
     return "RIGHT";
-  })() : null;
+  }
+  const parsedWalkDir = isSingleDirection ? (facing || detectWalkDirFromNL()) : null;
   // side walk gait rules(toe direction)은 LEFT/RIGHT에만 적용
   const singleDirWalkDir = (parsedWalkDir === "LEFT" || parsedWalkDir === "RIGHT") ? parsedWalkDir : null;
 
