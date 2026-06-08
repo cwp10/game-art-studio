@@ -415,23 +415,23 @@ export function MaskCanvas({
           ref={toolbarRef}
           className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs"
         >
-          <div className="flex gap-1">
+          <div className="flex gap-1 rounded-lg border border-border bg-bg-panel p-1">
             <button
               onClick={() => setTool("brush")}
-              className={`flex h-7 flex-1 items-center justify-center gap-1 rounded border px-2 ${
+              className={`flex h-8 flex-1 items-center justify-center gap-1 rounded border px-2 ${
                 tool === "brush"
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border text-text-muted hover:text-text-primary"
+                  : "border-transparent text-text-muted hover:text-text-primary"
               }`}
             >
               <Brush size={12} /> 브러시
             </button>
             <button
               onClick={() => setTool("eraser")}
-              className={`flex h-7 flex-1 items-center justify-center gap-1 rounded border px-2 ${
+              className={`flex h-8 flex-1 items-center justify-center gap-1 rounded border px-2 ${
                 tool === "eraser"
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-border text-text-muted hover:text-text-primary"
+                  : "border-transparent text-text-muted hover:text-text-primary"
               }`}
             >
               <Eraser size={12} /> 지우개
