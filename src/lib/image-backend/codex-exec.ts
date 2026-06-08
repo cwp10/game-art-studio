@@ -31,7 +31,7 @@ import type {
 
 const BUF_MAX = 500_000;       // stdout/stderr 로그 최대 유지 바이트 (디버깅용)
 const KILL_DELAY_MS = 5_000;   // SIGTERM 후 SIGKILL 까지 대기 시간
-const CODEX_TIMEOUT_MS = 360_000; // Codex 실행 최대 대기 시간 (6분). 초과 시 SIGTERM → 에러.
+const CODEX_TIMEOUT_MS = 600_000; // Codex 실행 최대 대기 시간 (10분). 초과 시 SIGTERM → 에러.
 
 const PROMPT_HEADER =
   "Use the imagegen skill. " +
@@ -452,6 +452,7 @@ export class CodexExecBackend implements ImageBackend {
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
+      "-c", `model_reasoning_effort="high"`,
       ...attachedImages.flatMap(p => ["-i", p]),
       ...(attachedImages.length > 0 ? ["--"] : []),
       naturalPrompt,

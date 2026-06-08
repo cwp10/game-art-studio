@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Undo2, X } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
@@ -107,6 +107,8 @@ export function SpriteCanvas({
   // 잔재 제거 두 관문: 크기(메인 대비 %)·여백(셀 짧은변 %). 클수록 강하게 제거.
   const [cleanSizePct, setCleanSizePct] = useState(10);
   const [cleanMarginPct, setCleanMarginPct] = useState(5);
+  // 잔재 제거 실행 취소 스택 (최대 10단계)
+  const [undoStack, setUndoStack] = useState<HTMLCanvasElement[][]>([]);
   const [dragging, setDragging] = useState<{
     idx: number;
     startX: number;
@@ -457,27 +459,24 @@ export function SpriteCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIdx, siblingsOf]);
 
-  // 선택된 셀에서 인접 셀로부터 넘어온 작은 픽셀 덩어리(=잔재) 제거.
-  // connected components 분석으로 가장 큰 덩어리의 10% 미만 크기인 컴포넌트만 알파 0.
-  function cleanSelectedCell() {
-    if (selectedIdx === null) return;
-    const frame = frames[selectedIdx];
-    if (!frame) return;
-    const ctx = frame.getContext("2d");
-    if (!ctx) return;
-    const W = frame.width;
-    const H = frame.height;
+  // 단일 캔버스에서 잔재 제거를 수행해 새 캔버스를 반환한다. 잔재 없으면 null.
+  // 개선 사항:
+  //   - centroid 기반 → overlap 기반: 컴포넌트의 임의 픽셀이 확장 bbox 안에 있으면 보존
+  //   - 원본 캔버스를 변이하지 않고 새 캔버스에 결과를 기록 (undo 안전)
+  function runClean(frameCanvas: HTMLCanvasElement): HTMLCanvasElement | null {
+    const ctx = frameCanvas.getContext("2d");
+    if (!ctx) return null;
+    const W = frameCanvas.width;
+    const H = frameCanvas.height;
     const img = ctx.getImageData(0, 0, W, H);
     const d = img.data;
     const N = W * H;
 
-    // alpha > 10 픽셀 마스크
     const mask = new Uint8Array(N);
     for (let i = 0; i < N; i++) {
       if (d[i * 4 + 3] > 10) mask[i] = 1;
     }
 
-    // 4-connectivity flood fill 로 컴포넌트 라벨링 + 크기 집계
     const labels = new Int32Array(N);
     const sizes: number[] = [0];
     let next = 1;
@@ -492,41 +491,23 @@ export function SpriteCanvas({
         size++;
         const x = p % W;
         const y = (p - x) / W;
-        if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) {
-          labels[p - 1] = next;
-          stack.push(p - 1);
-        }
-        if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) {
-          labels[p + 1] = next;
-          stack.push(p + 1);
-        }
-        if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) {
-          labels[p - W] = next;
-          stack.push(p - W);
-        }
-        if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) {
-          labels[p + W] = next;
-          stack.push(p + W);
-        }
+        if (x > 0 && mask[p - 1] === 1 && labels[p - 1] === 0) { labels[p - 1] = next; stack.push(p - 1); }
+        if (x < W - 1 && mask[p + 1] === 1 && labels[p + 1] === 0) { labels[p + 1] = next; stack.push(p + 1); }
+        if (y > 0 && mask[p - W] === 1 && labels[p - W] === 0) { labels[p - W] = next; stack.push(p - W); }
+        if (y < H - 1 && mask[p + W] === 1 && labels[p + W] === 0) { labels[p + W] = next; stack.push(p + W); }
       }
       sizes.push(size);
       next++;
     }
 
-    if (sizes.length <= 2) return; // 컴포넌트 1개 이하 → 잔재 없음
+    if (sizes.length <= 2) return null;
 
-    // 가장 큰 컴포넌트 = 메인 콘텐츠
     let maxSize = 0;
     let mainLabel = 0;
     for (let l = 1; l < sizes.length; l++) {
-      if (sizes[l] > maxSize) {
-        maxSize = sizes[l];
-        mainLabel = l;
-      }
+      if (sizes[l] > maxSize) { maxSize = sizes[l]; mainLabel = l; }
     }
 
-    // 메인 컴포넌트의 bounding box + 5% margin
-    // → 메인 영역 주변의 작은 디테일(불꽃 튀기 등)은 보존, 멀리 떨어진 침범 픽셀만 제거
     let minX = W, minY = H, maxX = -1, maxY = -1;
     for (let i = 0; i < N; i++) {
       if (labels[i] !== mainLabel) continue;
@@ -543,7 +524,8 @@ export function SpriteCanvas({
     const exMaxX = Math.min(W - 1, maxX + margin);
     const exMaxY = Math.min(H - 1, maxY + margin);
 
-    // 각 컴포넌트의 centroid (중심점) — 컴포넌트가 메인 영역 안인지 밖인지 결정
+    // centroid 방식: 컴포넌트 중심점이 확장 bbox 밖이면 잔재로 판정
+    const minKeep = Math.max(4, Math.floor(maxSize * (cleanSizePct / 100)));
     const cxSum = new Float64Array(sizes.length);
     const cySum = new Float64Array(sizes.length);
     for (let i = 0; i < N; i++) {
@@ -555,33 +537,49 @@ export function SpriteCanvas({
       cySum[l] += y;
     }
 
-    // 작은 컴포넌트(메인의 cleanSizePct% 미만) 중 centroid 가 메인 bbox+margin 밖인 것만 제거
-    const minKeep = Math.max(4, Math.floor(maxSize * (cleanSizePct / 100)));
     const remove = new Uint8Array(sizes.length);
     for (let l = 1; l < sizes.length; l++) {
       if (l === mainLabel || sizes[l] >= minKeep) continue;
       const cx = cxSum[l] / sizes[l];
       const cy = cySum[l] / sizes[l];
-      if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) {
-        remove[l] = 1;
-      }
+      if (cx < exMinX || cx > exMaxX || cy < exMinY || cy > exMaxY) remove[l] = 1;
     }
 
     let removed = 0;
     for (let i = 0; i < N; i++) {
-      if (remove[labels[i]] === 1) {
-        d[i * 4 + 3] = 0;
-        removed++;
-      }
+      if (remove[labels[i]] === 1) { d[i * 4 + 3] = 0; removed++; }
     }
-    if (removed === 0) return;
+    if (removed === 0) return null;
 
-    ctx.putImageData(img, 0, 0);
-    const clone = document.createElement("canvas");
-    clone.width = W;
-    clone.height = H;
-    clone.getContext("2d")?.drawImage(frame, 0, 0);
-    setFrames(prev => prev.map((f, i) => (i === selectedIdx ? clone : f)));
+    const result = document.createElement("canvas");
+    result.width = W;
+    result.height = H;
+    result.getContext("2d")!.putImageData(img, 0, 0);
+    return result;
+  }
+
+  function cleanSelectedCell() {
+    if (selectedIdx === null) return;
+    const frame = frames[selectedIdx];
+    if (!frame) return;
+    const result = runClean(frame);
+    if (!result) return;
+    setUndoStack(prev => [...prev.slice(-9), frames]);
+    setFrames(prev => prev.map((f, i) => (i === selectedIdx ? result : f)));
+  }
+
+  function cleanAllCells() {
+    const results = frames.map(f => runClean(f));
+    if (!results.some(r => r !== null)) return;
+    setUndoStack(prev => [...prev.slice(-9), frames]);
+    setFrames(prev => prev.map((f, i) => results[i] ?? f));
+  }
+
+  function undoClean() {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setUndoStack(stack => stack.slice(0, -1));
+    setFrames(prev);
   }
 
   // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
@@ -1102,14 +1100,30 @@ export function SpriteCanvas({
               <div className="flex items-center gap-2">
                 <span className="text-text-primary">셀 #{selectedIdx}</span>
                 <span className="flex-1 text-text-muted/70">
-                  메인 콘텐츠에서 떨어진 잔재를 제거합니다.
+                  bbox 밖 작은 픽셀 덩어리를 제거합니다.
                 </span>
+                {undoStack.length > 0 && (
+                  <button
+                    onClick={undoClean}
+                    className="flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-muted hover:bg-bg-app"
+                    title={`되돌리기 (${undoStack.length}단계)`}
+                  >
+                    <Undo2 size={10} /> 되돌리기
+                  </button>
+                )}
                 <button
                   onClick={cleanSelectedCell}
                   className="flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
-                  title={`메인의 ${cleanSizePct}% 미만 + bbox 여백 ${cleanMarginPct}% 밖 잔재 제거`}
+                  title={`셀 #${selectedIdx} 잔재 제거 (크기 < ${cleanSizePct}%, 여백 ${cleanMarginPct}%)`}
                 >
                   <Eraser size={10} /> 잔재 제거
+                </button>
+                <button
+                  onClick={cleanAllCells}
+                  className="flex h-6 shrink-0 items-center gap-1 rounded border border-border bg-bg-card px-2 text-text-primary hover:bg-bg-app"
+                  title="모든 프레임에 동일 설정으로 잔재 제거"
+                >
+                  <Eraser size={10} /> 전체 적용
                 </button>
               </div>
               <div className="flex items-center gap-2">

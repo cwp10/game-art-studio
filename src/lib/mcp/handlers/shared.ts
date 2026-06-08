@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
+import { claudeRunSimple } from "../../cli/claude-cli.js";
 import { selectImageBackend, type ImageJob } from "../../image-backend/index.js";
 import {
   chromaKeyFile,
@@ -121,7 +122,33 @@ export type SpritePromptInput = {
   gridTemplatePath: string;
   viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
   facing?: string | null; // UI 명시 방향 — NL regex 감지보다 우선
+  refHandDescription?: string | null; // 참조 이미지에서 추출한 "LEFT HAND: X | RIGHT HAND: Y"
 };
+
+/**
+ * 참조 이미지에서 캐릭터의 양손에 든 오브젝트를 분석해 반환.
+ * claudeRunSimple(Read 도구)로 이미지를 비전 분석 → "LEFT HAND: X | RIGHT HAND: Y" 형식.
+ * 분석 실패 시 null 반환 (생성은 계속 진행).
+ */
+export async function analyzeRefHandObjects(refImagePath: string): Promise<string | null> {
+  try {
+    const result = await claudeRunSimple({
+      systemPrompt: `You are analyzing a game character image to identify objects held in each hand.
+Output ONLY a single line in this exact format (no extra text):
+LEFT HAND: <object> | RIGHT HAND: <object>
+Rules:
+- Be concise: 2-5 words per hand (e.g. "flaming torch", "blood-stained war axe", "wooden shield", "empty")
+- If a hand is empty or not visible, write "empty"
+- Describe the OBJECT itself, not the action`,
+      userMessage: `Analyze the character's hands in this image. Image path: ${refImagePath}`,
+      allowedTools: ["Read"],
+    });
+    const line = result.trim().split("\n").find(l => l.includes("LEFT HAND:") && l.includes("RIGHT HAND:"));
+    return line ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** 카메라 시점 규칙. side(기본)는 빈 문자열 — 모델 기본값 유지. */
 function buildViewpointRule(viewpoint: string): string {
@@ -153,7 +180,8 @@ export async function buildSpritePrompt(
 ): Promise<{ decorated: string; overrideInputPaths: string[] }> {
   const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
     wantsTransparent, chromaKeyColor, seamlessLoop,
-    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint, facing } = p;
+    subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint, facing,
+    refHandDescription } = p;
   const normalizedViewpoint = viewpoint ?? "side";
 
   const isCharacter = subjectType === "character";
@@ -188,13 +216,9 @@ export async function buildSpritePrompt(
     : "White background.";
 
   const loopInstruction = seamlessLoop
-    ? `INFINITE LOOP DESIGN (CRITICAL): These frames will play as [1→2→…→N→1→2→…] on repeat forever. ` +
-      `Frame N is the frame that plays IMMEDIATELY BEFORE Frame 1 — they are adjacent in the cycle. ` +
-      `Design a CLOSED CYCLE with no beginning and no end: ` +
-      `• Walk/run: Frame N's pose flows naturally back into Frame 1's pose. ` +
-      `• Idle/breathing: Frame N is a subtle mid-motion pose that flows directly into Frame 1's starting pose. ` +
-      `• Attack/action: Frame N is the very last moment of recovery — the character is already returning to ready stance, so Frame 1's ready pose follows naturally. ` +
-      `NEVER design a linear arc (wind-up → peak → stop). ALWAYS design a cycle (no visible start/end point). `
+    ? `INFINITE LOOP (CRITICAL): Frames play [1→2→…→N→1→2…] forever — Frame N leads directly back into Frame 1. ` +
+      `Design a CLOSED CYCLE: Walk/run — Frame N flows into Frame 1's pose. Idle — Frame N is mid-motion flowing into Frame 1. Attack — Frame N is the final recovery moment returning toward Frame 1's ready stance. ` +
+      `NEVER design a linear arc (wind-up → peak → stop). ALWAYS a seamless cycle. `
     : "";
 
   // ── 앵커·콘텐츠 규칙 ────────────────────────────────────────────────────
@@ -254,13 +278,29 @@ export async function buildSpritePrompt(
       `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
     : "";
   const equipmentRule = isCharacter
-    ? `OBJECT CONSISTENCY LOCK (non-negotiable): Every object the character holds, carries, or wears MUST appear fully visible and consistently present in EVERY SINGLE FRAME. ` +
-      `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
-      `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. ` +
-      `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, cloak, shield, backpack, wings, scabbard, or any item worn on the back) are part of the character silhouette and MUST remain visible in EVERY frame. ` +
-      `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. ` +
-      `ARM-MOUNTED ITEMS (shield, buckler, bracer, or any item strapped to an arm) MUST remain visible in EVERY frame even when that arm swings backward. ` +
-      `When the shield arm moves behind the body during a stride, the shield MUST still protrude visibly — do NOT let the body silhouette fully cover it. `
+    ? `OBJECT VISIBILITY: Every held, carried, or worn object MUST be fully visible in EVERY frame — never hidden, shrunk, or omitted, even mid-swing or when the limb faces away. ` +
+      `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, shield, backpack, wings, scabbard): MUST protrude from the back in every frame — never absorbed into the body outline in side, rear, or 3/4 poses. ` +
+      `ARM-MOUNTED ITEMS (shield, buckler, bracer): MUST remain visible even when that arm swings backward — never fully covered by the body silhouette. ` +
+      (() => {
+        if (refHandDescription) {
+          const left = refHandDescription.match(/LEFT HAND:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const right = refHandDescription.match(/RIGHT HAND:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const handParts: string[] = [];
+          if (left && left.toLowerCase() !== "empty") handParts.push(`character's LEFT hand holds "${left}"`);
+          if (right && right.toLowerCase() !== "empty") handParts.push(`character's RIGHT hand holds "${right}"`);
+          if (handParts.length > 0) {
+            return `PERMANENT HAND ASSIGNMENT (non-negotiable, from reference image): ${handParts.join("; ")}. ` +
+              `LEFT and RIGHT are from the CHARACTER'S own anatomical perspective. ` +
+              `Each object is LOCKED to that exact hand for the ENTIRE animation — it NEVER swaps to the other hand at any frame. ` +
+              `When that hand/arm swings or moves behind the body, the object MOVES WITH IT and stays visible. ` +
+              `Any cross-hand swap is a CRITICAL ERROR — verify against the reference image. `;
+          }
+        }
+        if (refPath) {
+          return `REFERENCE ARM LOCK: Every held object in the reference MUST stay in the SAME arm in ALL frames — no swaps at any point. `;
+        }
+        return `ARM CONSISTENCY: Whichever arm holds each object in frame 1 holds it in ALL frames — arm swaps are a CRITICAL ERROR. `;
+      })()
     : "";
 
   // ── 포즈 가이드 로딩 (걷기 캐릭터) ─────────────────────────────────────
@@ -363,7 +403,7 @@ export async function buildSpritePrompt(
       `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
       `(3) CONTACT — right leg fully forward, left leg fully back; ` +
       `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
-      `This 4-phase pattern repeats. For more frames, subdivide each phase. ` +
+      `This 4-phase pattern covers exactly ONE complete gait cycle. All ${cols * rows} frames must span EXACTLY ONE cycle — not a partial loop, not two repetitions. For more frames, subdivide each phase finely within that single cycle. ` +
       `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
       `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
       `LEG VISIBILITY (CRITICAL): In EVERY frame, BOTH legs must be clearly visible and spatially separated. ` +
@@ -415,6 +455,61 @@ export async function buildSpritePrompt(
           `. Every row MUST look visually DISTINCT from every other row — never copy or repeat poses across rows. `
         : "")
     : "";
+
+  // ── 액션 애니메이션 규칙 (걷기/달리기 외 캐릭터 동작) ──────────────────────
+  const actionPhaseDesc = (() => {
+    if (cols === 2)
+      return `Column 1 = wind-up (body weight BACK, weapon/limb drawn back, knees bent under tension). ` +
+             `Column 2 = strike/release (body FULLY EXTENDED FORWARD, weapon/limb at maximum reach, weight on front foot). `;
+    if (cols === 3)
+      return `Column 1 = anticipation (body weight BACK, weapon raised/drawn back, torso coiled). ` +
+             `Column 2 = strike apex (body LUNGED FULLY FORWARD, weapon at maximum extension, weight entirely on front foot, torso tilted into the blow). ` +
+             `Column 3 = recovery/follow-through (weapon past peak, body decelerating, weight rebalancing toward neutral). `;
+    if (cols === 4)
+      return `Column 1 = ready/neutral stance. ` +
+             `Column 2 = wind-up (body coiling back, weapon drawn). ` +
+             `Column 3 = strike apex (body fully lunged, weapon extended). ` +
+             `Column 4 = recovery (returning to neutral). `;
+    return `Spread the full action arc evenly across all ${cols} columns: start neutral → build anticipation → reach peak exertion → recover to neutral. `;
+  })();
+
+  const actionAnimRule = !isWalk && isCharacter && cols >= 2
+    ? `ACTION ANIMATION — DISTINCT POSES REQUIRED (CRITICAL): This is an action animation, NOT a static image. ` +
+      `Each of the ${cols * rows} frames MUST show a dramatically different body pose. ` +
+      `If any two frames look similar or identical, those frames are WRONG. ` +
+      (rows === 1 ? actionPhaseDesc : "") +
+      `The body pose change between consecutive frames MUST be OBVIOUS and EXAGGERATED — ` +
+      `subtle head tilts or minor arm shifts are NOT enough. Show full-body commitment to each phase. ` +
+      `All ${cols * rows} frames cover EXACTLY ONE complete action cycle from start to finish — not a partial action, not two repetitions. `
+    : "";
+
+  // ── 액션 다행 연속성 규칙 ─────────────────────────────────────────────
+  // 다행 공격 애니메이션: 모델이 각 행을 독립 사이클로 취급하는 것을 방지.
+  // walkCycleRule 의 MULTI-ROW CONTINUITY 와 동일 개념 — 공격 전용.
+  const actionMultiRowRule = (() => {
+    if (isWalk || !isCharacter || cols < 2 || rows <= 1) return "";
+    const total = cols * rows;
+    const getPhase = (idx: number): string => {
+      const t = (idx - 1) / (total - 1);
+      if (idx === 1) return "neutral/ready";
+      if (t < 0.25) return "anticipation";
+      if (t < 0.5) return "wind-up (peak tension)";
+      if (t < 0.65) return "STRIKE APEX (max extension)";
+      if (t < 0.82) return "follow-through";
+      return "recovery";
+    };
+    const rowDescs = Array.from({ length: rows }, (_, r) => {
+      const phases = Array.from({ length: cols }, (_, c) => {
+        const frameNum = r * cols + c + 1;
+        return `col${c + 1}=frame${frameNum}[${getPhase(frameNum)}]`;
+      }).join(", ");
+      return `Row ${r + 1}: ${phases}`;
+    }).join("; ");
+    return `ACTION CYCLE — ROW CONTINUITY (CRITICAL): All ${total} frames read left→right then top→bottom form ONE unbroken action cycle — NOT ${rows} separate cycles. ` +
+      `Row 2 starts exactly where Row 1 left off — it is NOT a reset or a new cycle. ` +
+      `PER-FRAME PHASE MAP: ${rowDescs}. ` +
+      `Every row MUST look completely different from every other row — identical row poses are a CRITICAL ERROR. `;
+  })();
 
   const poseRefInstruction = poseRefPath
     ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
@@ -475,7 +570,11 @@ export async function buildSpritePrompt(
           ? `This is a pure side view: the nose, face, chest, and leading foot all point ${singleDirWalkDir}, ` +
             `while the back, ponytail/hair, cape, and trailing limbs stream toward the OPPOSITE side. ` +
             `Do NOT mirror, flip, or reverse this orientation — if the character ends up facing the other way, the ENTIRE sheet is WRONG and must be redrawn facing ${singleDirWalkDir}. `
-          : `Keep this exact orientation in every frame — do NOT mirror or flip it. `)
+          : `Keep this exact orientation in every frame — do NOT mirror or flip it. `) +
+        (rows > 1
+          ? `ALL ${rows} rows in this sheet face the SAME direction: ${parsedWalkDir}. ` +
+            `Starting a new row does NOT change the facing direction — every row, every frame faces ${parsedWalkDir}. `
+          : "")
       : "";
 
   const decorated =
@@ -484,6 +583,8 @@ export async function buildSpritePrompt(
     viewpointRule +
     equipmentRule +
     walkCycleRule +
+    actionAnimRule +
+    actionMultiRowRule +
     poseRefInstruction +
     (overrideInputPaths.length > 1
       ? `The last attached image is a GRID TEMPLATE — a blank canvas with thin gray lines marking the exact ${cols}×${rows} cell layout (${canvasW}×${canvasH} pixels, each cell ${cellW}×${cellH} pixels). `
@@ -659,6 +760,144 @@ export async function runSpritesheetAttempts(
           `best fill ${lastStats.filledCells}/${lastStats.expected} cells (incomplete) — proceeding with best`,
       );
     }
+  }
+
+  return { best, cumulativeMs };
+}
+
+export type DirectionalSheetSpec = {
+  /** 방향별(행별) buildSpritePrompt 결과. dirList 순서와 1:1. */
+  rowDecorated: { decorated: string; overrideInputPaths: string[] }[];
+  /** 위→아래 행 순서의 facing 라벨(directions=2: [LEFT,RIGHT], directions=4: [DOWN,LEFT,RIGHT,UP]). */
+  dirList: string[];
+  refId: string | null;
+  spritesheetParams: Record<string, unknown>;
+  wantsTransparent: boolean;
+  chromaKeyColor: ChromaKeyColor;
+  rows: number;
+  cols: number;
+  /** 단일 행(rows=1) 생성 캔버스. canvasW = cols*cellPx, rowCanvasH = cellPx. */
+  canvasW: number;
+  rowCanvasH: number;
+  anchorStrategy: AnchorStrategy;
+  subjectType: SubjectType;
+  resolvedAnchor: Exclude<AnchorStrategy, "auto">;
+  finalCellPx: number;
+  sessionId: string | null;
+  signal?: AbortSignal;
+};
+
+/**
+ * 다방향 시트(directions>1)를 방향별 개별 Codex 호출 + 수직 stitch 로 생성.
+ *   1. dirList 각 방향마다 rows=1 단일 행 시트를 runImageTool 로 생성(재시도·후처리 없음).
+ *   2. 각 행 raw PNG 를 canvasW×rowCanvasH 로 정규화한 뒤 sharp 로 수직 stitch
+ *      → 첫 generation 파일(최종 결과)에 rows 행 시트를 1장으로 합성.
+ *   3. 합쳐진 시트에 후처리(chroma-key → normalize → 업스케일)를 1회만 적용.
+ *   4. 잉여 generation(2번째 이후)·임시 파일은 정리.
+ *
+ * 분리 호출 근거: 단일 호출은 모델이 행별 facing 을 혼동하고 4방향×384px=1536px 가
+ * gpt-image-2 장축 한계여서 방향 수가 늘면 캔버스가 한계에 막힌다.
+ */
+export async function runDirectionalSpritesheet(
+  spec: DirectionalSheetSpec,
+): Promise<{ best: Awaited<ReturnType<typeof runImageTool>> | null; cumulativeMs: number }> {
+  const {
+    rowDecorated, dirList, refId, spritesheetParams,
+    wantsTransparent, chromaKeyColor, rows, cols, canvasW, rowCanvasH,
+    anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId, signal,
+  } = spec;
+
+  const cellArea = Math.floor(canvasW / cols) * rowCanvasH;
+  const rowResults: Awaited<ReturnType<typeof runImageTool>>[] = [];
+  const rowPaths: string[] = [];
+  let cumulativeMs = 0;
+
+  // 각 방향(행) 생성 — rows=1 단일 행. 방향별 독립 호출(각 호출 CODEX_TIMEOUT_MS 적용).
+  for (let i = 0; i < dirList.length; i++) {
+    const { decorated, overrideInputPaths } = rowDecorated[i];
+    const rowResult = await runImageTool({
+      name: "make_spritesheet",
+      kind: "spritesheet",
+      prompt: decorated,
+      inputGenerationIds: refId ? [refId] : [],
+      overrideInputPaths,
+      params: spritesheetParams,
+      sessionId,
+      progressPrefix: `direction ${i + 1}/${dirList.length}: ${dirList[i]}`,
+      signal,
+    });
+    cumulativeMs += rowResult?.structuredContent?.elapsedMs ?? 0;
+    const gid = rowResult?.structuredContent?.generationId;
+    if (!gid) throw new Error(`make_spritesheet directional: row ${i} produced no generation`);
+    const fp = imagePathFor(gid);
+    // 각 행을 단일 행 캔버스(canvasW×rowCanvasH)로 정규화 — stitch 폭/높이 일치 보장.
+    const rowTmp = `${fp}.row.tmp`;
+    await sharp(fp)
+      .resize(canvasW, rowCanvasH, { kernel: "lanczos3", fit: "fill" })
+      .png()
+      .toFile(rowTmp);
+    fs.renameSync(rowTmp, fp);
+    rowResults.push(rowResult);
+    rowPaths.push(fp);
+    log(`make_spritesheet directional: row ${i + 1}/${dirList.length} (${dirList[i]}) gen=${gid}`);
+  }
+
+  // 첫 generation 파일을 최종 결과로 삼아 수직 stitch.
+  const best = rowResults[0];
+  const finalGenId = best?.structuredContent?.generationId;
+  if (!finalGenId) return { best: null, cumulativeMs };
+  const finalPath = imagePathFor(finalGenId);
+  const totalH = rowCanvasH * rows;
+
+  const rowBuffers = await Promise.all(rowPaths.map(p => sharp(p).toBuffer()));
+  const stitchTmp = `${finalPath}.stitch.tmp`;
+  await sharp({
+    create: { width: canvasW, height: totalH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .composite(rowBuffers.map((input, i) => ({ input, top: i * rowCanvasH, left: 0 })))
+    .png()
+    .toFile(stitchTmp);
+  fs.renameSync(stitchTmp, finalPath);
+  log(`make_spritesheet directional: stitched ${rows} rows → ${canvasW}x${totalH} gen=${finalGenId}`);
+
+  // 잉여 generation(2번째 행 이후) 파일·DB 정리.
+  for (let i = 1; i < rowResults.length; i++) {
+    const gid = rowResults[i]?.structuredContent?.generationId;
+    if (!gid) continue;
+    try {
+      const fp = imagePathFor(gid);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      deleteGeneration(gid);
+    } catch (e) {
+      log(`make_spritesheet directional cleanup fail gen=${gid}: ${(e as Error).message}`);
+    }
+  }
+
+  // 후처리 1회: chroma-key → normalize → 업스케일 (stitch 된 최종 시트에만).
+  try {
+    if (wantsTransparent) {
+      await applyTransparentPostProcess(finalPath, chromaKeyColor, cellArea);
+      log(`make_spritesheet directional chroma-keyed gen=${finalGenId} key=${chromaKeyColor}`);
+    }
+    await normalizeSpritesheetCells(finalPath, rows, cols, wantsTransparent, {
+      anchorStrategy,
+      subjectType,
+      log,
+    });
+    log(`make_spritesheet directional normalized gen=${finalGenId} (${rows}x${cols}) anchor=${resolvedAnchor}`);
+
+    const upW = cols * finalCellPx;
+    const upH = rows * finalCellPx;
+    const upTmp = `${finalPath}.up.tmp`;
+    await sharp(finalPath)
+      .resize(upW, upH, { kernel: "lanczos3", fit: "fill" })
+      .png()
+      .toFile(upTmp);
+    fs.renameSync(upTmp, finalPath);
+    setGenerationDimensions(finalGenId, upW, upH);
+    log(`make_spritesheet directional upscaled gen=${finalGenId} to ${upW}x${upH}`);
+  } catch (e) {
+    log(`make_spritesheet directional post-process fail: ${(e as Error).message}`);
   }
 
   return { best, cumulativeMs };

@@ -18,11 +18,13 @@ import {
 } from "../../image-backend/spritesheet-postprocess.js";
 import { inferSubjectType, type Directions } from "../spritesheet-classify.js";
 import {
+  analyzeRefHandObjects,
   buildSpritePrompt,
   detectTransparentBg,
   generateGridTemplate,
   requireInt,
   requireString,
+  runDirectionalSpritesheet,
   runSpritesheetAttempts,
   type HandlerContext,
   type HandlerExtra,
@@ -173,12 +175,11 @@ export async function handleMakeSpritesheet(
   const refGen = refId ? getGeneration(refId) : null;
   const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-  const { decorated, overrideInputPaths } = await buildSpritePrompt({
-    userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
-    wantsTransparent, chromaKeyColor, seamlessLoop,
-    subjectType, resolvedAnchor, directions,
-    refPath, gridTemplatePath, viewpoint, facing,
-  });
+  // 참조 이미지가 캐릭터 시트이면 양손 오브젝트를 미리 분석 → 프롬프트에 명시 주입.
+  const refHandDescription = (refPath && subjectType === "character")
+    ? await analyzeRefHandObjects(refPath)
+    : null;
+  if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
 
   const isCharacter = subjectType === "character";
   const cx = Math.round(cellW / 2);
@@ -209,12 +210,50 @@ export async function handleMakeSpritesheet(
     rows, cols, cellW: FINAL_CELL_PX, cellH: FINAL_CELL_PX, fps: 12,
   };
 
-  const { best, cumulativeMs } = await runSpritesheetAttempts({
-    name: "make_spritesheet", decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
-    wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
-    anchorStrategy, subjectType, resolvedAnchor,
-    finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
-  });
+  let best: ToolResponse | null;
+  let cumulativeMs: number;
+
+  if (directions && directions > 1) {
+    // ② 다방향 시트: 방향별 개별 Codex 호출 + 수직 stitch.
+    // 단일 호출은 모델이 행별 facing 을 혼동하고 4방향×384px=1536px 가 캔버스 장축
+    // 한계여서 방향 수가 늘면 막힌다 → 각 방향을 rows=1 단일 행으로 따로 생성한다.
+    const dirList = directions === 2 ? ["LEFT", "RIGHT"] : ["DOWN", "LEFT", "RIGHT", "UP"];
+    // 각 방향 호출은 cols×1 단일 행 — 그 행 전용 그리드 템플릿(cols×1)을 전달.
+    const rowGridTemplatePath = await generateGridTemplate(cols, 1, cellW, cellH);
+    const rowDecorated = await Promise.all(
+      dirList.map(dir =>
+        buildSpritePrompt({
+          userPrompt, rows: 1, cols, cellW, cellH, canvasW, canvasH: cellH,
+          wantsTransparent, chromaKeyColor, seamlessLoop,
+          subjectType, resolvedAnchor, directions: 1,
+          refPath, gridTemplatePath: rowGridTemplatePath, viewpoint, facing: dir,
+          refHandDescription,
+        }),
+      ),
+    );
+    ({ best, cumulativeMs } = await runDirectionalSpritesheet({
+      rowDecorated, dirList, refId, spritesheetParams,
+      wantsTransparent, chromaKeyColor, rows, cols,
+      canvasW, rowCanvasH: cellH,
+      anchorStrategy, subjectType, resolvedAnchor,
+      finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
+    }));
+  } else {
+    // directions=1(단일 방향) — 기존 단일 호출 흐름 그대로.
+    const { decorated, overrideInputPaths } = await buildSpritePrompt({
+      userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
+      wantsTransparent, chromaKeyColor, seamlessLoop,
+      subjectType, resolvedAnchor, directions,
+      refPath, gridTemplatePath, viewpoint, facing,
+      refHandDescription,
+    });
+    ({ best, cumulativeMs } = await runSpritesheetAttempts({
+      name: "make_spritesheet", decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
+      wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
+      anchorStrategy, subjectType, resolvedAnchor,
+      finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
+    }));
+  }
 
   if (best?.structuredContent) {
     best.structuredContent.elapsedMs = cumulativeMs;
