@@ -122,28 +122,28 @@ export type SpritePromptInput = {
   gridTemplatePath: string;
   viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
   facing?: string | null; // UI 명시 방향 — NL regex 감지보다 우선
-  refHandDescription?: string | null; // 참조 이미지에서 추출한 "LEFT HAND: X | RIGHT HAND: Y"
+  refHandDescription?: string | null; // 참조 이미지에서 추출한 "LEFT ARM: X | RIGHT ARM: Y"
 };
 
 /**
  * 참조 이미지에서 캐릭터의 양손에 든 오브젝트를 분석해 반환.
- * claudeRunSimple(Read 도구)로 이미지를 비전 분석 → "LEFT HAND: X | RIGHT HAND: Y" 형식.
+ * claudeRunSimple(Read 도구)로 이미지를 비전 분석 → "LEFT ARM: X | RIGHT ARM: Y" 형식.
  * 분석 실패 시 null 반환 (생성은 계속 진행).
  */
 export async function analyzeRefHandObjects(refImagePath: string): Promise<string | null> {
   try {
     const result = await claudeRunSimple({
-      systemPrompt: `You are analyzing a game character image to identify objects held in each hand.
+      systemPrompt: `You are analyzing a game character image to identify objects held in each arm/hand.
 Output ONLY a single line in this exact format (no extra text):
-LEFT HAND: <object> | RIGHT HAND: <object>
+LEFT ARM: <object> | RIGHT ARM: <object>
 Rules:
-- Be concise: 2-5 words per hand (e.g. "flaming torch", "blood-stained war axe", "wooden shield", "empty")
-- If a hand is empty or not visible, write "empty"
+- Be concise: 2-5 words per arm (e.g. "flaming torch", "blood-stained war axe", "wooden shield", "empty")
+- If an arm/hand is empty or not visible, write "empty"
 - Describe the OBJECT itself, not the action`,
-      userMessage: `Analyze the character's hands in this image. Image path: ${refImagePath}`,
+      userMessage: `Analyze the character's arms and hands in this image. Image path: ${refImagePath}`,
       allowedTools: ["Read"],
     });
-    const line = result.trim().split("\n").find(l => l.includes("LEFT HAND:") && l.includes("RIGHT HAND:"));
+    const line = result.trim().split("\n").find(l => l.includes("LEFT ARM:") && l.includes("RIGHT ARM:"));
     return line ?? null;
   } catch {
     return null;
@@ -283,17 +283,17 @@ export async function buildSpritePrompt(
       `ARM-MOUNTED ITEMS (shield, buckler, bracer): MUST remain visible even when that arm swings backward — never fully covered by the body silhouette. ` +
       (() => {
         if (refHandDescription) {
-          const left = refHandDescription.match(/LEFT HAND:\s*([^|]+)/i)?.[1]?.trim() ?? "";
-          const right = refHandDescription.match(/RIGHT HAND:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const left = refHandDescription.match(/LEFT ARM:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const right = refHandDescription.match(/RIGHT ARM:\s*([^|]+)/i)?.[1]?.trim() ?? "";
           const handParts: string[] = [];
-          if (left && left.toLowerCase() !== "empty") handParts.push(`character's LEFT hand holds "${left}"`);
-          if (right && right.toLowerCase() !== "empty") handParts.push(`character's RIGHT hand holds "${right}"`);
+          if (left && left.toLowerCase() !== "empty") handParts.push(`character's LEFT arm holds "${left}"`);
+          if (right && right.toLowerCase() !== "empty") handParts.push(`character's RIGHT arm holds "${right}"`);
           if (handParts.length > 0) {
-            return `PERMANENT HAND ASSIGNMENT (non-negotiable, from reference image): ${handParts.join("; ")}. ` +
+            return `PERMANENT ARM ASSIGNMENT (non-negotiable, from reference image): ${handParts.join("; ")}. ` +
               `LEFT and RIGHT are from the CHARACTER'S own anatomical perspective. ` +
-              `Each object is LOCKED to that exact hand for the ENTIRE animation — it NEVER swaps to the other hand at any frame. ` +
-              `When that hand/arm swings or moves behind the body, the object MOVES WITH IT and stays visible. ` +
-              `Any cross-hand swap is a CRITICAL ERROR — verify against the reference image. `;
+              `Each object is LOCKED to that exact arm for the ENTIRE animation — it NEVER swaps to the other arm at any frame. ` +
+              `When that arm swings or moves behind the body, the object MOVES WITH IT and stays visible. ` +
+              `Any cross-arm swap is a CRITICAL ERROR — verify against the reference image. `;
           }
         }
         if (refPath) {
