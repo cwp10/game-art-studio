@@ -34,6 +34,18 @@ import {
 } from "@/lib/api/client";
 import type { StylePreset } from "@/types/db";
 
+/** 내부 에러 메시지를 사용자 친화적 한국어로 변환. */
+function friendlyError(raw: string): string {
+  if (/timed out|timeout/i.test(raw))
+    return "죄송합니다, 생성 서버가 타임아웃되었습니다 — 잠시 후 다시 시도해 주세요.";
+  if (/aborted|abort/i.test(raw)) return "취소되었습니다.";
+  if (/rate.?limit|429/i.test(raw))
+    return "요청이 너무 많습니다. 잠시 기다린 후 다시 시도해 주세요.";
+  if (/network|ECONNREFUSED|ENOTFOUND|fetch/i.test(raw))
+    return "네트워크 오류가 발생했습니다. 연결 상태를 확인해 주세요.";
+  return raw;
+}
+
 /**
  * ChatLayout — 3-column shell (좌: 세션 / 중: 대화 / 우: 추후 패널).
  *
@@ -382,7 +394,7 @@ export function ChatLayout() {
             dispatch({ type: "sse", event: { type: "error", message: "취소되었습니다." } });
           } else {
             console.error(e);
-            dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+            dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
           }
         }
       } finally {
@@ -627,7 +639,7 @@ export function ChatLayout() {
         console.error("[edit]", e);
         dispatch({
           type: "sse",
-          event: { type: "error", message: (e as Error).message },
+          event: { type: "error", message: friendlyError((e as Error).message) },
         });
       }
     },
@@ -763,7 +775,7 @@ export function ChatLayout() {
         }
       } catch (e) {
         console.error("[layer-brush]", e);
-        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
       }
     },
     [editing, handleSend],
@@ -833,7 +845,7 @@ export function ChatLayout() {
         }
       } catch (e) {
         console.error("[crop]", e);
-        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
       }
     },
     [editing, handleSend],
@@ -865,7 +877,7 @@ export function ChatLayout() {
         }
       } catch (e) {
         console.error("[suggest]", e);
-        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
       }
     },
     [state.activeSessionId],
@@ -911,7 +923,7 @@ export function ChatLayout() {
         }));
       } catch (e) {
         console.error("[upload]", e);
-        dispatch({ type: "sse", event: { type: "error", message: (e as Error).message } });
+        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
       }
     },
     [state.activeSessionId],
