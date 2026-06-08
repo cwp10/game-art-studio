@@ -260,16 +260,16 @@ export function LayerCanvas({
             </div>
 
             {/* ② 탭 버튼 */}
-            <div className="flex overflow-hidden rounded-lg border border-border">
+            <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-sm">
               <button
                 onClick={() => setTab("input")}
-                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium bg-[color:var(--accent)] text-white"
+                className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded border border-[color:var(--accent)] bg-[color:var(--accent)]/20 px-2 text-text-primary"
               >
                 <Tags size={13} /> 입력으로 분리
               </button>
               <button
                 onClick={() => setTab("brush")}
-                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-sm text-text-muted hover:text-text-primary bg-bg-card"
+                className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded border border-transparent px-2 text-text-muted hover:text-text-primary"
               >
                 <Paintbrush size={13} /> 브러쉬로 분리
               </button>
@@ -393,16 +393,16 @@ export function LayerCanvas({
             </div>
 
             {/* 탭 버튼 */}
-            <div className="flex overflow-hidden rounded-lg border border-border">
+            <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-sm">
               <button
                 onClick={() => setTab("input")}
-                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-sm text-text-muted hover:text-text-primary bg-bg-card"
+                className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded border border-transparent px-2 text-text-muted hover:text-text-primary"
               >
                 <Tags size={13} /> 입력으로 분리
               </button>
               <button
                 onClick={() => setTab("brush")}
-                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-sm font-medium bg-[color:var(--accent)] text-white"
+                className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded border border-[color:var(--accent)] bg-[color:var(--accent)]/20 px-2 text-text-primary"
               >
                 <Paintbrush size={13} /> 브러쉬로 분리
               </button>
