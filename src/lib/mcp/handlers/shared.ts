@@ -412,10 +412,7 @@ export async function buildSpritePrompt(
           `The leading foot at the START of each row MUST be the OPPOSITE foot from the start of the previous row (alternating per row). ` +
           `row1col1 = L-CONTACT (left foot forward); row2col1 = R-CONTACT (right foot forward)` +
           (rows > 2 ? `; row3col1 = L-CONTACT again` : "") +
-          `. Every row MUST look visually DISTINCT from every other row — never copy or repeat poses across rows. ` +
-          `HEIGHT LOCK ACROSS ALL ROWS (CRITICAL): The character's total height, ground line, and vertical position MUST be IDENTICAL in every cell across ALL rows. ` +
-          `Row 2 is the SAME character at the SAME scale continuing to run — NEVER draw any row shorter, taller, more crouched, or at a different vertical position than Row 1. ` +
-          `If the character's head is at approximately Y in Row 1, it MUST be at the same Y in Row 2. Only the limb poses change between rows, NOT the body height or ground position. `
+          `. Every row MUST look visually DISTINCT from every other row — never copy or repeat poses across rows. `
         : "")
     : "";
 
@@ -434,8 +431,7 @@ export async function buildSpritePrompt(
             ? `ROW CONTINUITY (CRITICAL): This grid is ONE continuous animation sequence — each row continues from where the previous row ended. ` +
               `The leading foot at the start of each row alternates: row1col1 = L-CONTACT, row2col1 = R-CONTACT` +
               (rows > 2 ? `, row3col1 = L-CONTACT, and so on` : "") +
-              `. Every row MUST look visually DISTINCT from every other row — never copy, mirror, or repeat poses across rows. ` +
-              `HEIGHT LOCK ACROSS ALL ROWS (CRITICAL): The character's total height, ground line, and vertical position MUST be IDENTICAL in every cell across ALL rows — only limb poses change, NOT body height or ground position. `
+              `. Every row MUST look visually DISTINCT from every other row — never copy, mirror, or repeat poses across rows. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
