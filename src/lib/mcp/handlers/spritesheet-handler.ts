@@ -18,6 +18,7 @@ import {
 } from "../../image-backend/spritesheet-postprocess.js";
 import { inferSubjectType, type Directions } from "../spritesheet-classify.js";
 import {
+  analyzeRefFacing,
   analyzeRefHandObjects,
   buildSpritePrompt,
   detectTransparentBg,
@@ -43,7 +44,8 @@ export async function handleMakeSpritesheet(
   const seamlessLoop = args.seamlessLoop === true;
   const viewpoint = typeof args.viewpoint === "string" ? args.viewpoint : "side";
   // UI에서 명시한 facing 방향 — NL regex 감지보다 우선 적용 (오케스트레이터 방향 오해 방지)
-  const facing = typeof args.facing === "string" ? args.facing : null;
+  // let: 참조 이미지 방향과 모순되면 아래에서 참조에 맞춰 정렬(방안 A).
+  let facing = typeof args.facing === "string" ? args.facing : null;
   const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
     ? args.inputGenerationId
     : null;
@@ -175,11 +177,31 @@ export async function handleMakeSpritesheet(
   const refGen = refId ? getGeneration(refId) : null;
   const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-  // 참조 이미지가 캐릭터 시트이면 양손 오브젝트를 미리 분석 → 프롬프트에 명시 주입.
-  const refHandDescription = (refPath && subjectType === "character")
-    ? await analyzeRefHandObjects(refPath)
-    : null;
-  if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
+  // 참조 이미지가 캐릭터 시트이면 양손 오브젝트 + 바라보는 방향을 미리 분석(병렬).
+  //   - hand objects: 화면 좌/우 기준 오브젝트 → 프롬프트 ARM ASSIGNMENT 주입
+  //   - facing(방안 A): 정면 참조에 측면 요청 같은 모순을 참조 방향에 맞춰 정렬.
+  //     정면 참조는 모델의 강한 시각 앵커라 측면 텍스트 지시를 덮어쓰므로, 요청 facing 을 참조에 맞춘다.
+  //     단일 방향(directions≤1) 시트에만 적용 — 다방향 시트는 방향별로 따로 생성한다.
+  let refHandDescription: string | null = null;
+  if (refPath && subjectType === "character") {
+    const wantFacingCheck = !directions || directions === 1;
+    const [hands, refFacing] = await Promise.all([
+      analyzeRefHandObjects(refPath),
+      wantFacingCheck ? analyzeRefFacing(refPath) : Promise.resolve(null),
+    ]);
+    refHandDescription = hands;
+    if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
+    if (refFacing) {
+      const aligned = ({ FRONT: "DOWN", BACK: "UP", LEFT: "LEFT", RIGHT: "RIGHT" } as const)[refFacing];
+      if (facing && facing.toUpperCase() !== aligned) {
+        log(`make_spritesheet: 참조 방향 ${refFacing} ≠ 요청 facing ${facing} → ${aligned} 로 정렬`);
+        facing = aligned;
+      } else if (!facing) {
+        facing = aligned;
+        log(`make_spritesheet: facing 미지정 → 참조 방향 ${refFacing} 기준 ${aligned}`);
+      }
+    }
+  }
 
   const isCharacter = subjectType === "character";
   const cx = Math.round(cellW / 2);

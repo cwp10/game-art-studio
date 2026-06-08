@@ -122,29 +122,59 @@ export type SpritePromptInput = {
   gridTemplatePath: string;
   viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
   facing?: string | null; // UI 명시 방향 — NL regex 감지보다 우선
-  refHandDescription?: string | null; // 참조 이미지에서 추출한 "LEFT ARM: X | RIGHT ARM: Y"
+  refHandDescription?: string | null; // 참조에서 추출한 "SCREEN-LEFT: X | SCREEN-RIGHT: Y" (화면 좌/우 기준)
 };
 
 /**
- * 참조 이미지에서 캐릭터의 양손에 든 오브젝트를 분석해 반환.
- * claudeRunSimple(Read 도구)로 이미지를 비전 분석 → "LEFT ARM: X | RIGHT ARM: Y" 형식.
- * 분석 실패 시 null 반환 (생성은 계속 진행).
+ * 참조 이미지에서 캐릭터가 든 오브젝트를 화면 좌/우 기준으로 분석해 반환.
+ * 해부학적 좌우(거울 반전)는 정면 캐릭터에서 비전 모델이 혼동하므로, 모호함 없는
+ * "화면상 위치"로 추출한다 — 생성 모델도 같은 참조를 보므로 좌/우가 1:1로 맞는다.
+ * → "SCREEN-LEFT: X | SCREEN-RIGHT: Y" 형식. 분석 실패 시 null (생성은 계속).
  */
 export async function analyzeRefHandObjects(refImagePath: string): Promise<string | null> {
   try {
     const result = await claudeRunSimple({
-      systemPrompt: `You are analyzing a game character image to identify objects held in each arm/hand.
+      systemPrompt: `You are analyzing a game character image to identify objects the character holds.
+Report by SCREEN POSITION (which half of the image the object is on), NOT the character's anatomy.
 Output ONLY a single line in this exact format (no extra text):
-LEFT ARM: <object> | RIGHT ARM: <object>
+SCREEN-LEFT: <object> | SCREEN-RIGHT: <object>
 Rules:
-- Be concise: 2-5 words per arm (e.g. "flaming torch", "blood-stained war axe", "wooden shield", "empty")
-- If an arm/hand is empty or not visible, write "empty"
+- SCREEN-LEFT = the object on the LEFT half of the image; SCREEN-RIGHT = the object on the RIGHT half.
+- Be concise: 2-5 words per object (e.g. "flaming torch", "blood-stained war axe", "wooden shield", "empty")
+- If a side has no held object, write "empty"
 - Describe the OBJECT itself, not the action`,
-      userMessage: `Analyze the character's arms and hands in this image. Image path: ${refImagePath}`,
+      userMessage: `What does the character hold on each side of the image? Image path: ${refImagePath}`,
       allowedTools: ["Read"],
     });
-    const line = result.trim().split("\n").find(l => l.includes("LEFT ARM:") && l.includes("RIGHT ARM:"));
+    const line = result.trim().split("\n").find(l => l.includes("SCREEN-LEFT:") && l.includes("SCREEN-RIGHT:"));
     return line ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 참조 이미지에서 캐릭터가 바라보는 방향을 분석 → FRONT/BACK/LEFT/RIGHT, 실패 시 null.
+ * 정면 참조에 측면(facing RIGHT) 요청 같은 모순을, 핸들러가 참조 방향에 맞춰 정렬하는 데 사용.
+ * (정면 참조는 모델의 강한 시각 앵커라 텍스트 측면 지시를 덮어쓰므로, 요청 facing 을 참조에 맞춘다.)
+ */
+export async function analyzeRefFacing(
+  refImagePath: string,
+): Promise<"FRONT" | "BACK" | "LEFT" | "RIGHT" | null> {
+  try {
+    const result = await claudeRunSimple({
+      systemPrompt: `You determine which way a game character faces.
+Output ONLY one word: FRONT, BACK, LEFT, or RIGHT.
+- FRONT = faces the viewer (face and chest visible from the front)
+- BACK = faces away (you see the back of the head/body)
+- LEFT = pure side profile, facing screen-left
+- RIGHT = pure side profile, facing screen-right
+For a 3/4 view, pick the dominant component (mostly-front → FRONT, mostly-back → BACK).`,
+      userMessage: `Which way does the character face? Image path: ${refImagePath}`,
+      allowedTools: ["Read"],
+    });
+    const m = result.toUpperCase().match(/\b(FRONT|BACK|LEFT|RIGHT)\b/);
+    return (m?.[1] as "FRONT" | "BACK" | "LEFT" | "RIGHT") ?? null;
   } catch {
     return null;
   }
@@ -283,17 +313,19 @@ export async function buildSpritePrompt(
       `ARM-MOUNTED ITEMS (shield, buckler, bracer): MUST remain visible even when that arm swings backward — never fully covered by the body silhouette. ` +
       (() => {
         if (refHandDescription) {
-          const left = refHandDescription.match(/LEFT ARM:\s*([^|]+)/i)?.[1]?.trim() ?? "";
-          const right = refHandDescription.match(/RIGHT ARM:\s*([^|]+)/i)?.[1]?.trim() ?? "";
-          const handParts: string[] = [];
-          if (left && left.toLowerCase() !== "empty") handParts.push(`character's LEFT arm holds "${left}"`);
-          if (right && right.toLowerCase() !== "empty") handParts.push(`character's RIGHT arm holds "${right}"`);
-          if (handParts.length > 0) {
-            return `PERMANENT ARM ASSIGNMENT (non-negotiable, from reference image): ${handParts.join("; ")}. ` +
-              `LEFT and RIGHT are from the CHARACTER'S own anatomical perspective. ` +
-              `Each object is LOCKED to that exact arm for the ENTIRE animation — it NEVER swaps to the other arm at any frame. ` +
-              `When that arm swings or moves behind the body, the object MOVES WITH IT and stays visible. ` +
-              `Any cross-arm swap is a CRITICAL ERROR — verify against the reference image. `;
+          // 화면 좌/우 기준 — 요청 facing 은 참조 방향에 정렬돼 있으므로(handler 방안 A),
+          // 참조의 좌/우 위치가 생성 시트에도 그대로 보존된다. 해부학 좌우 단정은 피해 반전 버그 차단.
+          const sl = refHandDescription.match(/SCREEN-LEFT:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const sr = refHandDescription.match(/SCREEN-RIGHT:\s*([^|]+)/i)?.[1]?.trim() ?? "";
+          const parts: string[] = [];
+          if (sl && sl.toLowerCase() !== "empty") parts.push(`the arm on the LEFT side holds "${sl}"`);
+          if (sr && sr.toLowerCase() !== "empty") parts.push(`the arm on the RIGHT side holds "${sr}"`);
+          if (parts.length > 0) {
+            return `PERMANENT ARM ASSIGNMENT (non-negotiable, matched to the reference image): in the reference, ${parts.join("; ")} ` +
+              `(LEFT side / RIGHT side = which half of the image, same orientation as the reference). ` +
+              `Each object is LOCKED to that same arm and that same side of the body for the ENTIRE animation — it NEVER crosses to the other arm or the other side at any frame. ` +
+              `When the torso twists or the arm swings behind the body, the object MOVES WITH ITS ARM and stays visible on its side. ` +
+              `Any cross-over swap is a CRITICAL ERROR — verify against the reference image. `;
           }
         }
         if (refPath) {
