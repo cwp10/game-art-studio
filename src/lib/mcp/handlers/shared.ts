@@ -609,8 +609,20 @@ export async function buildSpritePrompt(
           : "")
       : "";
 
+  // userPrompt 안의 facing 문구를 실제 parsedWalkDir 에 맞춰 정규화.
+  // 오케스트레이터가 "facing RIGHT (side view)"를 접두사에 박았는데 handler 가 참조 방향에 맞춰
+  // facing 을 DOWN 으로 override 하면, 접두사(RIGHT)와 주입 블록(DOWN)이 한 프롬프트에서 충돌한다.
+  // 접두사의 facing 표현을 parsedWalkDir 기준으로 덮어써 모순을 제거. (replacer 함수로 $ 치환 회피.)
+  const sanitizedUserPrompt =
+    isCharacter && isSingleDirection && parsedWalkDir
+      ? userPrompt.replace(
+          /facing\s+(DOWN-LEFT|DOWN-RIGHT|UP-LEFT|UP-RIGHT|LEFT|RIGHT|UP|DOWN)\b(\s*\([^)]*\))?/gi,
+          () => `facing ${screenDirLabel[parsedWalkDir] ?? parsedWalkDir}`,
+        )
+      : userPrompt;
+
   const decorated =
-    `${userPrompt}. ` +
+    `${sanitizedUserPrompt}. ` +
     facingDirective +
     viewpointRule +
     equipmentRule +
