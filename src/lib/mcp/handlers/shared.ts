@@ -454,8 +454,33 @@ export async function buildSpritePrompt(
   overrideInputPaths.push(gridTemplatePath);
 
   const viewpointRule = buildViewpointRule(normalizedViewpoint);
+
+  // 단일 방향 시트: facing을 프롬프트 최우선 지시로 끌어올려 모델 기본 편향(측면 캐릭터를
+  // 반대로 그리는 경향)을 누른다. 흩어진 screen-DIR 문구보다 앞쪽 단일 블록이 더 강하게 먹힌다.
+  const screenDirLabel: Record<string, string> = {
+    RIGHT: "SCREEN-RIGHT — the viewer's right-hand side (the → direction)",
+    LEFT: "SCREEN-LEFT — the viewer's left-hand side (the ← direction)",
+    DOWN: "toward the viewer (front view, walking down the screen)",
+    UP: "away from the viewer (back view, walking up the screen)",
+    "DOWN-LEFT": "toward the viewer's lower-left (3/4 front-left)",
+    "DOWN-RIGHT": "toward the viewer's lower-right (3/4 front-right)",
+    "UP-LEFT": "away toward the viewer's upper-left (3/4 back-left)",
+    "UP-RIGHT": "away toward the viewer's upper-right (3/4 back-right)",
+  };
+  const facingDirective =
+    isCharacter && isSingleDirection && parsedWalkDir
+      ? `CRITICAL FACING DIRECTION (READ THIS FIRST — it overrides any default drawing tendency): ` +
+        `In EVERY single frame the character faces and moves toward ${screenDirLabel[parsedWalkDir] ?? parsedWalkDir}. ` +
+        (singleDirWalkDir
+          ? `This is a pure side view: the nose, face, chest, and leading foot all point ${singleDirWalkDir}, ` +
+            `while the back, ponytail/hair, cape, and trailing limbs stream toward the OPPOSITE side. ` +
+            `Do NOT mirror, flip, or reverse this orientation — if the character ends up facing the other way, the ENTIRE sheet is WRONG and must be redrawn facing ${singleDirWalkDir}. `
+          : `Keep this exact orientation in every frame — do NOT mirror or flip it. `)
+      : "";
+
   const decorated =
     `${userPrompt}. ` +
+    facingDirective +
     viewpointRule +
     equipmentRule +
     walkCycleRule +

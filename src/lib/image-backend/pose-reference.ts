@@ -169,13 +169,19 @@ function buildPoseSvg(frame: number, totalFrames = 8, transparent = false, dirIn
     ? (Math.atan2(walkX, walkY) * 180) / Math.PI
     : 0;
 
-  // facing 단서(코): 후면이 아니고 좌우 진행 성분이 있으면 머리에서 진행방향으로 짧게 돌출.
+  // facing 단서(화살표): 후면이 아니고 좌우 진행 성분이 있으면 머리에서 진행방향으로 화살표 돌출.
   // 순수 측면(LEFT↔RIGHT)·전면 대각은 머리·몸통이 대칭이라 발끝만으론 좌우 구분이 약함 →
-  // 모델이 facing을 안정적으로 읽도록 코를 추가. 정면/후면(walkX≈0)은 머리색으로 이미 구분.
+  // 모델이 facing을 확실히 읽도록 화살촉까지 그린다(짧은 nub보다 방향 신호가 강함).
+  // 정면/후면(walkX≈0)은 머리색으로 이미 구분.
   if (!isBack && Math.abs(walkX) > SIDE_WALKX_THRESHOLD) {
-    const noseStart = endpoint(CX, HEAD_Y, faceDeg, HEAD_R * 0.4);
-    const noseEnd   = endpoint(CX, HEAD_Y, faceDeg, HEAD_R + 8);
-    elements.push(line(noseStart.x, noseStart.y, noseEnd.x, noseEnd.y, headColor, 6));
+    const tail = endpoint(CX, HEAD_Y, faceDeg, HEAD_R * 0.4);
+    const tip  = endpoint(CX, HEAD_Y, faceDeg, HEAD_R + 14);
+    elements.push(line(tail.x, tail.y, tip.x, tip.y, headColor, 6));
+    // 화살촉: tip 에서 진행 반대방향(faceDeg±150°)으로 짧은 두 날개 → ">" 모양.
+    const barbL = endpoint(tip.x, tip.y, faceDeg + 150, 8);
+    const barbR = endpoint(tip.x, tip.y, faceDeg - 150, 8);
+    elements.push(line(tip.x, tip.y, barbL.x, barbL.y, headColor, 5));
+    elements.push(line(tip.x, tip.y, barbR.x, barbR.y, headColor, 5));
   }
 
   // 목 + 어깨 가로선
