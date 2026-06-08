@@ -258,7 +258,9 @@ export async function buildSpritePrompt(
       `Do NOT hide, shrink, omit, or occlude any held or worn object in any frame — even mid-swing or when the limb faces away from the viewer. ` +
       `If any carried object disappears or becomes invisible in a frame, that frame is incorrect. ` +
       `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, cloak, shield, backpack, wings, scabbard, or any item worn on the back) are part of the character silhouette and MUST remain visible in EVERY frame. ` +
-      `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. `
+      `Even in 3/4-back, side, or mid-stride poses where the torso rotates, back-mounted items MUST protrude from the character's back — never disappear or get absorbed into the body outline. ` +
+      `ARM-MOUNTED ITEMS (shield, buckler, bracer, or any item strapped to an arm) MUST remain visible in EVERY frame even when that arm swings backward. ` +
+      `When the shield arm moves behind the body during a stride, the shield MUST still protrude visibly — do NOT let the body silhouette fully cover it. `
     : "";
 
   // ── 포즈 가이드 로딩 (걷기 캐릭터) ─────────────────────────────────────
