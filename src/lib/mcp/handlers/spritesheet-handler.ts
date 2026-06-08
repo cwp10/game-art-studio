@@ -21,6 +21,7 @@ import {
   analyzeRefFacing,
   analyzeRefHandObjects,
   buildSpritePrompt,
+  generateRotatedReference,
   detectTransparentBg,
   generateGridTemplate,
   requireInt,
@@ -44,9 +45,10 @@ export async function handleMakeSpritesheet(
   const seamlessLoop = args.seamlessLoop === true;
   const viewpoint = typeof args.viewpoint === "string" ? args.viewpoint : "side";
   // UI에서 명시한 facing 방향 — NL regex 감지보다 우선 적용 (오케스트레이터 방향 오해 방지)
-  // let: 참조 이미지 방향과 모순되면 아래에서 참조에 맞춰 정렬(방안 A).
+  // let: facing 미지정 시 참조 방향으로 채움(방안 B). 명시 facing 은 회전으로 존중.
   let facing = typeof args.facing === "string" ? args.facing : null;
-  const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
+  // let: 참조 방향과 요청 방향이 다르면 참조를 회전 생성해 이 변수를 회전본으로 교체(방안 B).
+  let refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
     ? args.inputGenerationId
     : null;
 
@@ -175,32 +177,44 @@ export async function handleMakeSpritesheet(
     anchorStrategy !== "auto" ? anchorStrategy : (subjectType === "effect" || subjectType === "object") ? "center" : "feet";
 
   const refGen = refId ? getGeneration(refId) : null;
-  const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
+  let refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-  // 참조 이미지가 캐릭터 시트이면 양손 오브젝트 + 바라보는 방향을 미리 분석(병렬).
-  //   - hand objects: 화면 좌/우 기준 오브젝트 → 프롬프트 ARM ASSIGNMENT 주입
-  //   - facing(방안 A): 정면 참조에 측면 요청 같은 모순을 참조 방향에 맞춰 정렬.
-  //     정면 참조는 모델의 강한 시각 앵커라 측면 텍스트 지시를 덮어쓰므로, 요청 facing 을 참조에 맞춘다.
-  //     단일 방향(directions≤1) 시트에만 적용 — 다방향 시트는 방향별로 따로 생성한다.
+  // 참조 캐릭터 시트 — 방향 정렬(방안 B) + 손 오브젝트 분석.
+  //   1) 참조가 바라보는 방향(analyzeRefFacing) 감지
+  //   2) 요청 facing 과 다르면 → 참조를 요청 방향 단일 포즈로 회전 생성(generateRotatedReference)
+  //      후 그 회전본을 이후 모든 단계의 참조로 사용. (정면 참조로 측면 시트 요청 시 모델이
+  //      정면을 복사하는 문제를, 참조 자체를 측면으로 만들어 우회 — 요청 facing 그대로 존중.)
+  //   3) 최종 참조(회전됐으면 측면)로 손 오브젝트를 화면 좌/우 기준 분석 → ARM ASSIGNMENT 주입.
+  //   단일 방향(directions≤1) 시트에만 적용 — 다방향 시트는 방향별로 따로 생성한다.
   let refHandDescription: string | null = null;
-  if (refPath && subjectType === "character") {
-    const wantFacingCheck = !directions || directions === 1;
-    const [hands, refFacing] = await Promise.all([
-      analyzeRefHandObjects(refPath),
-      wantFacingCheck ? analyzeRefFacing(refPath) : Promise.resolve(null),
-    ]);
-    refHandDescription = hands;
-    if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
+  if (refPath && refId && subjectType === "character") {
+    const singleDir = !directions || directions === 1;
+    const refFacing = singleDir ? await analyzeRefFacing(refPath) : null;
     if (refFacing) {
-      const aligned = ({ FRONT: "DOWN", BACK: "UP", LEFT: "LEFT", RIGHT: "RIGHT" } as const)[refFacing];
-      if (facing && facing.toUpperCase() !== aligned) {
-        log(`make_spritesheet: 참조 방향 ${refFacing} ≠ 요청 facing ${facing} → ${aligned} 로 정렬`);
-        facing = aligned;
+      const mapped = ({ FRONT: "DOWN", BACK: "UP", LEFT: "LEFT", RIGHT: "RIGHT" } as const)[refFacing];
+      if (facing && facing.toUpperCase() !== mapped) {
+        // 충돌 → 참조를 요청 방향으로 회전 생성(방안 B)
+        log(`make_spritesheet: 참조 방향 ${refFacing}(${mapped}) ≠ 요청 facing ${facing} → 참조를 ${facing} 로 회전 생성`);
+        const rotatedId = await generateRotatedReference({
+          refId, targetFacing: facing.toUpperCase(),
+          wantsTransparent, chromaKeyColor, sessionId, signal: extra.signal,
+        });
+        const rg = rotatedId ? getGeneration(rotatedId) : null;
+        if (rotatedId && rg) {
+          refId = rotatedId;
+          refPath = path.join(DATA_DIR, rg.image_path);
+          log(`make_spritesheet: 회전 참조 생성 완료 gen=${rotatedId} — 이후 단계는 ${facing} 측면 참조 사용`);
+        } else {
+          log(`make_spritesheet: 회전 참조 생성 실패 — 원본 참조로 진행(측면 정확도 낮을 수 있음)`);
+        }
       } else if (!facing) {
-        facing = aligned;
-        log(`make_spritesheet: facing 미지정 → 참조 방향 ${refFacing} 기준 ${aligned}`);
+        facing = mapped; // facing 미지정 → 참조 방향으로 채움(회전 불필요)
+        log(`make_spritesheet: facing 미지정 → 참조 방향 ${refFacing} 기준 ${mapped}`);
       }
     }
+    // 최종 참조로 손 오브젝트 분석 (회전됐으면 회전본 기준 화면 좌/우)
+    refHandDescription = await analyzeRefHandObjects(refPath);
+    if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
   }
 
   const isCharacter = subjectType === "character";
