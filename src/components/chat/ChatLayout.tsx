@@ -60,7 +60,7 @@ type Editing =
   | ({ mode: "inpaint" } & EditTarget)
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
-  | ({ mode: "reskin"; initialMode?: "skin" | "color"; initialSkinInput?: "text" | "image" } & EditTarget)
+  | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image" } & EditTarget)
   | ({ mode: "normal_map" } & EditTarget)
   | ({ mode: "image_tools" } & EditTarget)
   | null;
@@ -676,6 +676,11 @@ export function ChatLayout() {
         await handleSend(`이 이미지의 색 팔레트만 ${payload.prompt} 로 바꿔줘. 형태는 그대로 유지.`, {
           attachmentGenerationIds: [genId],
         });
+      } else if (payload.mode === "d") {
+        await handleSend(
+          `이 이미지의 아트 스타일을 ${payload.styleName}으로 변환해줘. 구성·형태는 유지하고 화풍만 바꿔줘.`,
+          { attachmentGenerationIds: [genId] },
+        );
       } else {
         const msg = isSheetBase
           ? `베이스 시트(첫 번째 이미지)의 모든 포즈에 두 번째 이미지의 캐릭터를 입혀줘. 포즈·프레임 구성은 그대로 유지.${payload.extra ? ` ${payload.extra}` : ""}`

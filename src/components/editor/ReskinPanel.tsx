@@ -22,7 +22,7 @@ import type { Generation } from "@/types/db";
  *  - (c) "첫 번째 이미지 + 두 번째 이미지의 화풍" + 두 첨부 → styleReferenceId 모드 (외형 교체 · 이미지 참조)
  */
 
-type UIMode = "skin" | "color";
+type UIMode = "skin" | "color" | "style";
 type SkinInput = "text" | "image";
 
 export type ReskinSubmit =
@@ -34,7 +34,8 @@ export type ReskinSubmit =
       mode: "b-precise";
       mappings: Array<{ from: string; to: string }>;
       includeGrays: boolean;
-    };
+    }
+  | { mode: "d"; styleName: string };
 
 type Props = {
   /** 리스킨 대상 generationId. */
@@ -60,12 +61,24 @@ type Props = {
 const UI_MODE_LABELS: Record<UIMode, string> = {
   skin: "외형 교체",
   color: "색만 변경",
+  style: "화풍",
 };
 
 const SKIN_INPUT_LABELS: Record<SkinInput, string> = {
   text: "텍스트",
   image: "이미지 참조",
 };
+
+const STYLE_PRESETS = [
+  { label: "픽셀아트", value: "pixel art style" },
+  { label: "애니메이션", value: "anime illustration style" },
+  { label: "수채화", value: "watercolor painting style" },
+  { label: "스케치", value: "pencil sketch style" },
+  { label: "오일페인팅", value: "oil painting style" },
+  { label: "만화", value: "cartoon comic style" },
+  { label: "3D 렌더", value: "3D render style" },
+  { label: "포토리얼", value: "photorealistic style" },
+];
 
 // 썸네일 그리드에서 제외할 비-이미지 kind.
 const NON_IMAGE_KINDS = new Set(["mask"]);
@@ -102,6 +115,9 @@ export function ReskinPanel({
   const [extracting, setExtracting] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
+  // 화풍 변환 탭: 프리셋 선택(토글) + 커스텀 입력. 둘 중 하나라도 있으면 제출 가능.
+  const [stylePreset, setStylePreset] = useState<string | null>(null);
+  const [styleCustom, setStyleCustom] = useState("");
 
   // AI 제안
   const [aiLoading, setAiLoading] = useState(false);
@@ -177,6 +193,8 @@ export function ReskinPanel({
         ? "새 스킨을 제안해주세요"
         : uiMode === "color"
         ? "색 변경을 제안해주세요"
+        : uiMode === "style"
+        ? "아트 스타일 변환을 제안해주세요"
         : "추가 지시를 제안해주세요");
     // /api/reskin-suggest 는 레거시 mode(a/b/c) 계약 — UI 상태를 그대로 매핑해 전달.
     const apiMode: "a" | "b" | "c" =
@@ -238,9 +256,10 @@ export function ReskinPanel({
   const canSubmit = useMemo(() => {
     if (uiMode === "skin" && skinInput === "text") return prompt.trim().length > 0;
     if (uiMode === "skin" && skinInput === "image") return styleRefId !== null;
+    if (uiMode === "style") return stylePreset !== null || styleCustom.trim().length > 0;
     // color
     return bMode === "ai" ? prompt.trim().length > 0 : preciseMappings.length > 0;
-  }, [uiMode, skinInput, bMode, prompt, preciseMappings, styleRefId]);
+  }, [uiMode, skinInput, bMode, prompt, preciseMappings, styleRefId, stylePreset, styleCustom]);
 
   function submit() {
     if (!canSubmit) return;
@@ -251,6 +270,9 @@ export function ReskinPanel({
     } else if (uiMode === "color") {
       if (bMode === "ai") onSubmit({ mode: "b", prompt: prompt.trim() });
       else onSubmit({ mode: "b-precise", mappings: preciseMappings, includeGrays });
+    } else if (uiMode === "style") {
+      const styleName = styleCustom.trim() || stylePreset!;
+      onSubmit({ mode: "d", styleName });
     }
   }
 
@@ -276,9 +298,9 @@ export function ReskinPanel({
       </header>
 
       <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {/* 상단 탭 세그먼트 토글 (외형 교체 / 색만 변경) */}
+        {/* 상단 탭 세그먼트 토글 (외형 교체 / 색만 변경 / 화풍) */}
         <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
-          {(["skin", "color"] as const).map(m => (
+          {(["skin", "color", "style"] as const).map(m => (
             <button
               key={m}
               onClick={() => setUiMode(m)}
@@ -486,6 +508,69 @@ export function ReskinPanel({
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {uiMode === "style" && (
+          <div className="shrink-0 space-y-3">
+            {/* 프리셋 그리드 */}
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">스타일 프리셋</label>
+              <div className="grid grid-cols-4 gap-1">
+                {STYLE_PRESETS.map(p => (
+                  <button
+                    key={p.value}
+                    onClick={() => setStylePreset(prev => (prev === p.value ? null : p.value))}
+                    className={`rounded border px-2 py-1.5 text-[11px] transition-colors ${
+                      stylePreset === p.value
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                        : "border-border text-text-muted hover:border-[color:var(--accent)]/50 hover:text-text-primary"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 커스텀 입력 */}
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">직접 입력 (선택)</label>
+              <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+                <textarea
+                  value={styleCustom}
+                  onChange={e => setStyleCustom(e.target.value)}
+                  placeholder="예: 16비트 레트로 RPG 스타일"
+                  rows={2}
+                  className="block w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                />
+                <div className="flex items-center border-t border-border px-2 py-1.5">
+                  <div className="relative ml-auto">
+                    <AiSuggestButton
+                      loading={aiLoading && aiTarget === "prompt"}
+                      onClick={() => handleAiSuggest("prompt")}
+                    />
+                    {aiSuggestions && aiTarget === "prompt" && (
+                      <AiSuggestDropdown
+                        suggestions={aiSuggestions}
+                        onSelect={v => { setStyleCustom(v); setAiSuggestions(null); setAiTarget(null); }}
+                        onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+              <AiSuggestResult
+                show={aiTarget === "prompt" && aiSuggestions === null}
+                result={aiResult}
+                error={aiError}
+                onApply={v => { setStyleCustom(v); setAiResult(null); }}
+              />
+            </div>
+
+            <p className="text-[11px] text-text-muted/70">
+              구성·형태는 유지하고 화풍(재질·색조·렌더링 스타일)만 바꿉니다.
+            </p>
           </div>
         )}
 
@@ -699,12 +784,14 @@ export function ReskinPanel({
         onSubmit={submit}
         onClose={onClose}
         onCancel={onCancel}
-        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : "리스킨 실행 ▸"}
+        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
         submitTitle={
           canSubmit || busy
             ? ""
             : uiMode === "skin" && skinInput === "image"
             ? "참조 이미지 선택 필요"
+            : uiMode === "style"
+            ? "스타일 선택 또는 입력 필요"
             : "설명 입력 필요"
         }
       />
