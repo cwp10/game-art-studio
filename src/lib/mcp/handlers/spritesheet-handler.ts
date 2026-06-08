@@ -44,10 +44,12 @@ export async function handleMakeSpritesheet(
     ? args.inputGenerationId
     : null;
 
-  // ② 방향 시트: directions 가 주어지면 rows=directions 로 강제(각 행=한 방향),
-  // cols 는 방향당 프레임 수로 해석(그대로 사용). directions=1 은 단일 방향(기존 동작).
+  // ② 방향 시트: directions > 1 이면 rows=directions 로 강제(각 행=한 방향).
+  // directions=1(단일 방향)은 rows 를 레이아웃 행 수로 그대로 유지 — SpriteGenPanel
+  // 단일 동작 directive 에서 항상 directions=1 을 명시하므로 오케스트레이터가
+  // rows=2 를 "2방향"으로 오해해 다방향 시트를 생성하는 것을 방지한다.
   const directions: Directions | null = (args.directions as Directions | undefined) ?? null;
-  if (directions && rows !== directions) {
+  if (directions && directions > 1 && rows !== directions) {
     log(`make_spritesheet directions=${directions}: rows ${rows} → ${directions}`);
     rows = directions;
   }

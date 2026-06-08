@@ -809,7 +809,7 @@ export function buildSpriteMessage(
       : "";
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
-    `framesPerDir=${state.frames}; rows=${grid.rows}; cols=${grid.cols}` +
+    `rows=${grid.rows}; cols=${grid.cols}; directions=1` +
     `${viewpointClause}; seamlessLoop=${state.seamlessLoop}]`;
 
   const nlParts: string[] = [state.actionPrompt];
