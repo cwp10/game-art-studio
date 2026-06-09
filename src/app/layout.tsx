@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sprite Forge",
+  title: "Game Art Studio",
   description: "개인용 게임 에셋 이미지 생성기 (Codex imagegen + Claude CLI)",
 };
 

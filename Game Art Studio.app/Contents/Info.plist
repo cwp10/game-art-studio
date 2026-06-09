@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Sprite Forge</string>
+	<string>Game Art Studio</string>
 	<key>CFBundleExecutable</key>
-	<string>SpriteForge</string>
+	<string>GameArtStudio</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.local.spriteforge</string>
+	<string>com.local.gameartstudio</string>
 	<key>CFBundleName</key>
-	<string>Sprite Forge</string>
+	<string>Game Art Studio</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

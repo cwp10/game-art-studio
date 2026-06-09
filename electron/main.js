@@ -1,4 +1,4 @@
-// SpriteForge Electron 셸 — launch.sh 의 오케스트레이션을 네이티브 창으로 옮긴 것.
+// Game Art Studio Electron 셸 — launch.sh 의 오케스트레이션을 네이티브 창으로 옮긴 것.
 // Next 프로덕션 서버를 시스템 node 자식 프로세스로 띄우고(=네이티브 모듈 재빌드 불필요),
 // 포트가 열리면 BrowserWindow 로 전환한다. 우리가 띄운 서버는 종료 시 함께 정리한다.
 const { app, BrowserWindow, ipcMain, Menu, shell, nativeImage } = require("electron");
@@ -16,7 +16,7 @@ const STATE_FILE = path.join(PROJECT_DIR, "data", "window-state.json");
 // 도구 위치를 직접 넣는다. 이 PATH 는 spawn 한 Next 서버 → codex/claude 로 그대로 상속된다.
 process.env.PATH = `/opt/homebrew/bin:${process.env.HOME}/.local/bin:/usr/bin:/usr/sbin:/bin:${process.env.PATH || ""}`;
 
-app.setName("Sprite Forge");
+app.setName("Game Art Studio");
 
 let win = null;
 let serverProc = null; // 우리가 띄운 서버(이미 떠 있으면 null → 건드리지 않음)
@@ -124,7 +124,7 @@ function createWindow() {
     ...state,
     minWidth: 960,
     minHeight: 640,
-    title: "Sprite Forge",
+    title: "Game Art Studio",
     // 표준 macOS 타이틀바 — 트래픽 라이트가 네이티브 바에 위치해 어떤 페이지/풀스크린 모달과도
     // 겹치지 않는다(hiddenInset 은 콘텐츠 위에 오버레이돼 fixed inset-0 패널과 충돌). 드래그도 기본 지원.
     titleBarStyle: "default",

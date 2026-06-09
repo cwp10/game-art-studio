@@ -1184,7 +1184,7 @@ export function ChatLayout() {
           </div>
         )}
         <header className="flex h-14 items-center border-b border-border px-4">
-          <h1 className="font-mono text-sm text-text-muted">⌘ Sprite Forge</h1>
+          <h1 className="font-mono text-sm text-text-muted">⌘ Game Art Studio</h1>
           <span className="ml-auto mr-2 text-xs text-text-muted">개인용 · Codex imagegen</span>
           <StatusButton />
         </header>

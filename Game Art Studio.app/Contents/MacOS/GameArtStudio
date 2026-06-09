@@ -4,6 +4,6 @@
 # 이 PATH 는 Electron main → spawn 한 Next 서버 → codex/claude 로 그대로 상속된다.
 # exec 로 교체 실행하여 Electron 이 .app 의 포그라운드 프로세스로 남는다.
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/usr/sbin:/bin:$PATH"
-PROJECT_DIR="/Users/wonpyoung/Developer/workspace/image-generator"
+PROJECT_DIR="/Users/wonpyoung/Developer/workspace/game-art-studio"
 cd "$PROJECT_DIR" || exit 1
 exec "$PROJECT_DIR/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron" "$PROJECT_DIR/electron/main.js"
