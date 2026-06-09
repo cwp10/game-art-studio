@@ -21,7 +21,6 @@ import {
   analyzeRefFacing,
   analyzeRefHandObjects,
   buildSpritePrompt,
-  generateRotatedReference,
   detectTransparentBg,
   generateGridTemplate,
   requireInt,
@@ -45,10 +44,14 @@ export async function handleMakeSpritesheet(
   const seamlessLoop = args.seamlessLoop === true;
   const viewpoint = typeof args.viewpoint === "string" ? args.viewpoint : "side";
   // UI에서 명시한 facing 방향 — NL regex 감지보다 우선 적용 (오케스트레이터 방향 오해 방지)
-  // let: facing 미지정 시 참조 방향으로 채움(방안 B). 명시 facing 은 회전으로 존중.
-  let facing = typeof args.facing === "string" ? args.facing : null;
-  // let: 참조 방향과 요청 방향이 다르면 참조를 회전 생성해 이 변수를 회전본으로 교체(방안 B).
-  let refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
+  // MCP enum 8방향 밖의 값(예: UI 기본값 "REF" = 참조 방향 그대로)은 null 로 떨궈
+  // 아래에서 참조 방향(analyzeRefFacing)으로 채운다. let: 미지정 시에만 참조 방향으로 채움.
+  const FACING_ENUM = new Set(["DOWN", "LEFT", "RIGHT", "UP", "DOWN-LEFT", "DOWN-RIGHT", "UP-LEFT", "UP-RIGHT"]);
+  let facing =
+    typeof args.facing === "string" && FACING_ENUM.has(args.facing.toUpperCase())
+      ? args.facing
+      : null;
+  const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
     ? args.inputGenerationId
     : null;
 
@@ -177,42 +180,25 @@ export async function handleMakeSpritesheet(
     anchorStrategy !== "auto" ? anchorStrategy : (subjectType === "effect" || subjectType === "object") ? "center" : "feet";
 
   const refGen = refId ? getGeneration(refId) : null;
-  let refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
+  const refPath = refGen ? path.join(DATA_DIR, refGen.image_path) : null;
 
-  // 참조 캐릭터 시트 — 방향 정렬(방안 B) + 손 오브젝트 분석.
-  //   1) 참조가 바라보는 방향(analyzeRefFacing) 감지
-  //   2) 요청 facing 과 다르면 → 참조를 요청 방향 단일 포즈로 회전 생성(generateRotatedReference)
-  //      후 그 회전본을 이후 모든 단계의 참조로 사용. (정면 참조로 측면 시트 요청 시 모델이
-  //      정면을 복사하는 문제를, 참조 자체를 측면으로 만들어 우회 — 요청 facing 그대로 존중.)
-  //   3) 최종 참조(회전됐으면 측면)로 손 오브젝트를 화면 좌/우 기준 분석 → ARM ASSIGNMENT 주입.
-  //   단일 방향(directions≤1) 시트에만 적용 — 다방향 시트는 방향별로 따로 생성한다.
+  // 참조 캐릭터 시트 — 방향 채움(미지정 한정) + 손 오브젝트 분석.
+  //   - facing 이 명시(8방향)되어 있으면: 참조 방향과 다르더라도 회전하지 않고 그대로 둔다.
+  //     buildSpritePrompt 가 "참조는 디자인 레퍼런스일 뿐, 참조 방향 무시" 지시로
+  //     요청 방향 시트를 한 번에 생성한다. (불필요한 analyzeRefFacing LLM 호출도 생략.)
+  //   - facing 이 미지정(null)일 때만: analyzeRefFacing 으로 참조 방향을 감지해 채운다
+  //     (단일 방향 시트 한정). 매핑 {FRONT:DOWN, BACK:UP, LEFT:LEFT, RIGHT:RIGHT}.
+  //   - 참조의 손 오브젝트는 최종 참조로 분석해 refHandDescription 채우기(ARM ASSIGNMENT 주입).
   let refHandDescription: string | null = null;
   if (refPath && refId && subjectType === "character") {
     const singleDir = !directions || directions === 1;
-    const refFacing = singleDir ? await analyzeRefFacing(refPath) : null;
-    if (refFacing) {
-      const mapped = ({ FRONT: "DOWN", BACK: "UP", LEFT: "LEFT", RIGHT: "RIGHT" } as const)[refFacing];
-      if (facing && facing.toUpperCase() !== mapped) {
-        // 충돌 → 참조를 요청 방향으로 회전 생성(방안 B)
-        log(`make_spritesheet: 참조 방향 ${refFacing}(${mapped}) ≠ 요청 facing ${facing} → 참조를 ${facing} 로 회전 생성`);
-        const rotatedId = await generateRotatedReference({
-          refId, targetFacing: facing.toUpperCase(),
-          wantsTransparent, chromaKeyColor, sessionId, signal: extra.signal,
-        });
-        const rg = rotatedId ? getGeneration(rotatedId) : null;
-        if (rotatedId && rg) {
-          refId = rotatedId;
-          refPath = path.join(DATA_DIR, rg.image_path);
-          log(`make_spritesheet: 회전 참조 생성 완료 gen=${rotatedId} — 이후 단계는 ${facing} 측면 참조 사용`);
-        } else {
-          log(`make_spritesheet: 회전 참조 생성 실패 — 원본 참조로 진행(측면 정확도 낮을 수 있음)`);
-        }
-      } else if (!facing) {
-        facing = mapped; // facing 미지정 → 참조 방향으로 채움(회전 불필요)
-        log(`make_spritesheet: facing 미지정 → 참조 방향 ${refFacing} 기준 ${mapped}`);
+    if (!facing && singleDir) {
+      const refFacing = await analyzeRefFacing(refPath);
+      if (refFacing) {
+        facing = ({ FRONT: "DOWN", BACK: "UP", LEFT: "LEFT", RIGHT: "RIGHT" } as const)[refFacing];
+        log(`make_spritesheet: facing 미지정 → 참조 방향 ${refFacing} 기준 ${facing}`);
       }
     }
-    // 최종 참조로 손 오브젝트 분석 (회전됐으면 회전본 기준 화면 좌/우)
     refHandDescription = await analyzeRefHandObjects(refPath);
     if (refHandDescription) log(`make_spritesheet: ref hand objects = ${refHandDescription}`);
   }

@@ -180,62 +180,6 @@ For a 3/4 view, pick the dominant component (mostly-front → FRONT, mostly-back
   }
 }
 
-// 회전 참조 생성용 방향 문구 — 요청 facing(8방향) → 단일 포즈 회전 지시.
-const ROTATE_DIR_PHRASE: Record<string, string> = {
-  LEFT: "in a pure LEFT-facing side profile — the character faces screen-left (the ← direction), nose/face/chest pointing left",
-  RIGHT: "in a pure RIGHT-facing side profile — the character faces screen-right (the → direction), nose/face/chest pointing right",
-  DOWN: "in a front view, facing toward the viewer",
-  UP: "in a back view, facing away from the viewer (we see its back)",
-  "DOWN-LEFT": "in a 3/4 front-left view, facing toward the viewer's lower-left",
-  "DOWN-RIGHT": "in a 3/4 front-right view, facing toward the viewer's lower-right",
-  "UP-LEFT": "in a 3/4 back-left view, facing away toward the upper-left",
-  "UP-RIGHT": "in a 3/4 back-right view, facing away toward the upper-right",
-};
-
-/**
- * 정면(또는 다른 방향) 참조를 요청 facing 의 단일 포즈로 회전 생성(img2img). (방안 B)
- * codex 가 참조의 방향을 복사하는 습성을 역이용 — 측면 참조를 먼저 만들어 그걸 시트 참조로 쓴다.
- * 정면 참조에 측면 시트를 요청하면 모델이 정면을 따라가는 문제를, 참조 자체를 회전해 우회한다.
- * 반환: 회전된 참조의 generationId (실패 시 null → 호출부가 원본 참조 유지).
- */
-export async function generateRotatedReference(opts: {
-  refId: string;
-  targetFacing: string; // "LEFT" | "RIGHT" | "DOWN" | "UP" | 대각선
-  wantsTransparent: boolean;
-  chromaKeyColor: ChromaKeyColor;
-  sessionId: string | null;
-  signal?: AbortSignal;
-}): Promise<string | null> {
-  const { refId, targetFacing, wantsTransparent, chromaKeyColor, sessionId, signal } = opts;
-  const dirPhrase = ROTATE_DIR_PHRASE[targetFacing] ?? `facing ${targetFacing}`;
-  const bg = wantsTransparent
-    ? chromaKeyColor === "magenta"
-      ? "a SOLID FLAT pure magenta (#ff00ff) chroma-key background, no gradients, no shadows, crisp silhouette"
-      : "a SOLID FLAT pure green (#00ff00) chroma-key background, no gradients, no shadows, crisp silhouette"
-    : "a plain white background";
-  const prompt =
-    `Redraw the SAME character from the attached reference, but rotated so the character is ${dirPhrase}. ` +
-    `Preserve the character's identity EXACTLY: same outfit, armor, skin, colors, proportions, art style, ` +
-    `and EVERY object it holds or wears (weapons, torches, shields, accessories) — same objects in the same hands. ` +
-    `Draw ONE single full-body character in a neutral upright standing/ready pose (NOT an action pose), feet on the ground. ` +
-    `This is a clean turn-around reference, so the whole body and ALL held objects must be fully visible and unobstructed. ` +
-    `Use ${bg}.`;
-  try {
-    const res = await runImageTool({
-      name: "rotate_reference",
-      kind: "img2img",
-      prompt,
-      inputGenerationIds: [refId],
-      params: { rotatedFrom: refId, targetFacing },
-      sessionId,
-      signal,
-    });
-    return res.structuredContent?.generationId ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /** 카메라 시점 규칙. side(기본)는 빈 문자열 — 모델 기본값 유지. */
 function buildViewpointRule(viewpoint: string): string {
   if (viewpoint === "topdown") {
@@ -654,6 +598,9 @@ export async function buildSpritePrompt(
     isCharacter && isSingleDirection && parsedWalkDir
       ? `CRITICAL FACING DIRECTION (READ THIS FIRST — it overrides any default drawing tendency): ` +
         `In EVERY single frame the character faces and moves toward ${screenDirLabel[parsedWalkDir] ?? parsedWalkDir}. ` +
+        (refPath
+          ? `The attached reference image is a DESIGN reference ONLY — use it for the character's appearance, colors, outfit, equipment, and proportions, but IGNORE the reference's own facing and pose: redraw the character facing ${screenDirLabel[parsedWalkDir] ?? parsedWalkDir} even if the reference faces a different way. `
+          : "") +
         (singleDirWalkDir
           ? `This is a pure side view: the nose, face, chest, and leading foot all point ${singleDirWalkDir}, ` +
             `while the back, ponytail/hair, cape, and trailing limbs stream toward the OPPOSITE side. ` +
