@@ -117,7 +117,8 @@ const ACTION_FRAME_HINTS: Array<{ pattern: RegExp; frames: FrameCount; loop: boo
   { pattern: /공격|attack|slash|swing|때리|strike/, frames: 6, loop: false },
   { pattern: /점프|jump|도약|leap/, frames: 6, loop: false },
   { pattern: /사망|죽음|die|death|fall(ing)? down/, frames: 6, loop: false },
-  { pattern: /시전|cast(ing)?|마법|magic|spell/, frames: 8, loop: false },
+  { pattern: /시전|cast(ing)?|마법|magic|spell|스킬|skill/, frames: 8, loop: false },
+  { pattern: /피격|움찔|경직|hurt|flinch|knockback/, frames: 4, loop: false },
 ];
 
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
@@ -147,11 +148,12 @@ type ExampleKey = "character" | "object" | "effect";
 
 const EXAMPLES: Record<ExampleKey, Array<{ label: string; text: string }>> = {
   character: [
-    { label: "공격 모션", text: "짧은 예비동작 후 몸을 빠르게 앞으로 실으며 한 번 강하게 공격하고 자연스럽게 돌아오는 동작" },
-    { label: "걷기 모션", text: "자연스러운 보행 사이클, 팔과 다리가 번갈아 움직이며 부드럽게 전진하는 동작" },
-    { label: "점프 모션", text: "두 팔과 몸이 가볍게 위로 튀어 오르며 짧게 점프했다가 자연스럽게 착지하는 동작" },
-    { label: "달리기 모션", text: "몸을 약간 앞으로 기울이며 팔을 힘차게 흔들고 빠르게 달리는 동작" },
     { label: "대기 모션", text: "가만히 서서 아주 미세하게 호흡하고 몸이 살짝 흔들리는 자연스러운 대기 동작" },
+    { label: "공격 모션", text: "짧은 예비동작 후 몸을 빠르게 앞으로 실으며 한 번 강하게 공격하고 자연스럽게 돌아오는 동작" },
+    { label: "스킬 모션", text: "기를 모으듯 잠시 자세를 잡았다가 마법을 시전하며 강한 기운이 터져 나오는 스킬 동작" },
+    { label: "달리기 모션", text: "몸을 약간 앞으로 기울이며 팔을 힘차게 흔들고 빠르게 달리는 동작" },
+    { label: "피격 모션", text: "적의 일격에 몸이 뒤로 움찔 젖혀지며 잠깐 경직됐다가 자세를 회복하는 피격 동작" },
+    { label: "사망 모션", text: "치명타를 맞고 힘없이 비틀거리다 바닥으로 쓰러져 사망하는 동작" },
   ],
   object: [
     { label: "코인 회전", text: "동전이 Y축으로 빙글빙글 회전하며 반짝이는 동작" },
