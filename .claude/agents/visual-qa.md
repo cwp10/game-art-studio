@@ -28,6 +28,10 @@ skills:
 
 ## 실행 환경 주의
 
+- **스프라이트 로직 변경은 단위 테스트를 먼저 실행한다 (codex 없이 빠름):**
+  - `pnpm tsx scripts/test-directions.ts` — directionLabels/buildDirectionPrompt
+  - `pnpm tsx scripts/test-classify.ts` — inferSubjectType/classifyAnchor/isLocomotion
+  - `pnpm tsx scripts/test-sprite-marker.ts` — buildSpriteMessage 마커 직렬화
 - codex/claude CLI가 구독 한도 내에서만 동작한다. probe·생성 검증은 한 번에 최소 횟수로 (kind당 1장).
 - Next dev 서버가 필요한 검증은 `pnpm dev`(127.0.0.1:3000) 기동 후 진행. 별도 프로세스라 MCP 서버 로그는 `data/logs/mcp-server.log`.
 

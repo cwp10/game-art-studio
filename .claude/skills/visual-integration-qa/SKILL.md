@@ -22,10 +22,19 @@ pnpm tsx scripts/test-spritesheet.ts
 - 셀 정렬(발 라인·가로 중심), chroma-key 잔여 녹색, **cross-cell 캐릭터 보존**, seamless loop 연속성.
 
 ### 2. CLI 게이트
+
+**단위 테스트 (codex 없이 빠름 — 스프라이트 로직 변경 시 먼저 실행):**
 ```bash
-pnpm probe                              # M0: text→image, imagegen 스킬 자동 발동
-node scripts/probe-codex-img2img.mjs    # img2img 전제
-node scripts/probe-codex-inpaint.mjs    # 원본+마스크 빨간 영역만 재생성
+pnpm tsx scripts/test-directions.ts    # directionLabels/buildDirectionPrompt 검증
+pnpm tsx scripts/test-classify.ts      # inferSubjectType/classifyAnchor/isLocomotion 검증
+pnpm tsx scripts/test-sprite-marker.ts # buildSpriteMessage 마커 직렬화 검증
+```
+
+**생성 probe (codex 호출 — 구독 한도 내, kind당 1장):**
+```bash
+pnpm tsx scripts/probe-codex-imagegen.mjs   # text→image, imagegen 스킬 자동 발동
+node scripts/probe-codex-img2img.mjs        # img2img 전제
+node scripts/probe-codex-inpaint.mjs        # 원본+마스크 빨간 영역만 재생성
 ```
 
 ### 3. 빌드/타입/린트 게이트 (풀스택 변경 시)

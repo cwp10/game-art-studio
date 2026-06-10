@@ -19,7 +19,57 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 핵심 파일:
 - `src/lib/image-backend/index.ts` — `ImageBackend` 인터페이스, `ImageJob`/`ImageResult`/`ProgressCallback` 타입
 - `src/lib/image-backend/codex-exec.ts` — spawn 인자, `buildNaturalPrompt()`, stage 추론, output 회수, chroma-key
-- `src/lib/mcp/server.ts` — 도구 7종, `make_spritesheet` 후처리 파이프라인, `normalizeSpritesheetCells()`
+- `src/lib/mcp/server.ts` — 도구 라우팅 + 공통 생성 처리
+- `src/lib/mcp/handlers/spritesheet-handler.ts` — `make_spritesheet` 전체 흐름 (facing 결정, 그리드 검증, 다방향 stitch)
+- `src/lib/mcp/spritesheet-classify.ts` — 순수 함수 모듈: `inferSubjectType`, `classifyAnchor`, `isLocomotion`, `isRunning`, `directionLabels`, `buildDirectionPrompt`
+
+## 스프라이트 프롬프트 계층 — 깨지기 쉬운 불변식
+
+최근 커밋 중 약 절반이 스프라이트 facing/direction 버그였다. 수정 시 아래 불변식을 먼저 확인한다.
+
+### facing 이중 제약 (SpriteGenPanel + spritesheet-handler)
+
+방향 명시 시 **directive 와 자연어 양쪽에** 반드시 넣는다. 한쪽만 넣으면 LLM이 다방향으로 생성하거나 방향 문구가 서로 모순된다.
+
+- directive: `[spritesheet: ...; facing=DOWN; ...]`
+- 자연어: `SINGLE DIRECTION ONLY — facing DOWN (front view). Every frame must face this same direction. Do NOT include mirrored, opposite, or any other facing variants`
+
+`SpriteGenPanel.tsx`의 `buildSpriteMessage`가 이 두 부분을 동시에 생성한다. 한쪽만 수정하면 모순 발생.
+
+### facing 결정 우선순위 (spritesheet-handler.ts)
+
+1. **UI 명시 (args.facing)** — 8방향 enum 범위 내 값이면 무조건 우선
+2. **참조 이미지 방향 감지 (analyzeRefFacing)** — facing 미지정이고 directions=1일 때만 폴백
+3. **null** — 지정 안 됨, 오케스트레이터가 방향을 결정
+
+NL(자연어)에서 방향을 파싱하는 로직은 없다. 방향은 파라미터로만 전달된다.
+
+### 다방향 시트 = 방향별 별도 codex 호출 (spritesheet-handler.ts)
+
+`directions > 1` 이면 방향당 1번씩 codex를 호출하고 결과를 스티칭한다 — 단일 호출로 4방향을 그리지 않는다. 이유: 단일 호출은 24포즈를 한 번에 그려야 하므로 각 방향 품질이 희석된다.
+
+```
+directions=4 → ["DOWN","LEFT","RIGHT","UP"] 각각 codex 호출 → sharp로 행 stitch
+```
+
+`directions=1`이면 rows는 레이아웃 행 수 그대로 유지(강제 리셋 없음).
+
+### subjectType / anchor 분류 (`spritesheet-classify.ts`)
+
+`inferSubjectType(prompt, hasRef)` 가 `character | effect | object`를 결정한다:
+- 참조 이미지 있으면 항상 `character`
+- 캐릭터 키워드(캐릭터/기사/walk 등) 있으면 `character`
+- VFX 키워드만 있으면 `effect`
+- 오브젝트 키워드만 있으면 `object`
+- 모호하면 `character` (보수적)
+
+`effect`면 anchorStrategy=center(바닥 앵커 제거), 나머지는 feet.
+
+### 보행(gait) 프롬프트 주입 (`spritesheet-classify.ts`)
+
+`isLocomotion(prompt)` 이 참이면 gait 지시문이 주입된다. 변경 시 확인:
+- `buildDirectionPrompt`는 다방향 시트에서만 사용(단일 방향엔 빈 문자열)
+- gait 지시문과 loop 지시문은 중복되지 않아야 함 (서로 다른 관심사)
 
 ## codex spawn 규칙 (codex-exec.ts)
 
@@ -52,7 +102,8 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 2. 후처리 로직을 바꿨다면 → `_workspace/` 요약에 visual-qa 검증 항목 명시:
    - 어떤 kind/프롬프트/프레임수로 생성할지
    - 무엇을 눈으로 볼지 (셀 정렬, chroma 잔여, cross-cell 보존, loop 연속성)
-3. 로그 위치: `data/logs/codex-{jobId}.log`, `data/logs/mcp-server.log`.
+3. 스프라이트 프롬프트/facing 로직을 바꿨다면 → `scripts/test-directions.ts`, `scripts/test-classify.ts`, `scripts/test-sprite-marker.ts` 단위 테스트를 먼저 돌린다(codex 불필요, 빠름).
+4. 로그 위치: `data/logs/codex-{jobId}.log`, `data/logs/mcp-server.log`.
 
 ## 디버깅 진입점
 

@@ -14,19 +14,22 @@ skills:
 
 ## 핵심 역할
 
-`src/lib/image-backend/`(ImageBackend 인터페이스 + codex-exec 어댑터)와 `src/lib/mcp/server.ts`(MCP 도구 7종)의 생성·후처리 로직을 담당한다. 구체적으로:
+`src/lib/image-backend/`(ImageBackend 인터페이스 + codex-exec 어댑터), `src/lib/mcp/handlers/spritesheet-handler.ts`(make_spritesheet 흐름), `src/lib/mcp/spritesheet-classify.ts`(순수 함수 모듈)의 생성·후처리 로직을 담당한다. 구체적으로:
 
 - `codex exec` spawn 인자 구성 (`--sandbox`, `-i` 입력, `--` 종료자, 자연어 프롬프트 빌드)
 - sharp 기반 후처리: 정확 배수 리사이즈, chroma-key(greenness feather), 흰 배경 투명화
 - 스프라이트시트 `normalizeSpritesheetCells()` — 글로벌 connected-component 라벨링, cross-cell 캐릭터 보존, 셀 하단·중앙 정렬
 - 그리드 템플릿 생성, 배경 결정 우선순위, seamless loop 지시문
+- 스프라이트 프롬프트 계층: `facing` 결정, `directionLabels/buildDirectionPrompt`, `isLocomotion/buildGaitPrompt`, `inferSubjectType`
 
 ## 작업 원칙
 
 - **시각 결과가 진실이다.** 후처리 로직 변경은 코드 리뷰만으로 검증되지 않는다. 반드시 visual-qa에게 실제 생성·검증을 요청한다.
-- **최근 회귀 영역을 경계하라.** 커밋 #26~#30이 전부 스프라이트 후처리 버그(cell residue drift, cross-cell sprite 손실)였다. cell normalize·chroma-key를 건드릴 때는 기존 보존 불변식(컴포넌트를 통째로 한 셀에 배치, cross-cell 캐릭터 유지)을 깨지 않았는지 확인한다.
+- **최근 회귀 영역 1: sharp 후처리.** cell residue drift(cell 경계 전 글로벌 라벨링 필수), cross-cell 캐릭터 손실, chroma 잔여 포켓. image-pipeline-dev 스킬의 "sharp 후처리 불변식" 참조.
+- **최근 회귀 영역 2: 스프라이트 facing/direction.** facing이 directive와 자연어 중 한쪽에만 있으면 다방향 생성 또는 방향 모순 발생. image-pipeline-dev 스킬의 "facing 이중 제약" 참조.
 - **codex/sharp 경계를 지켜라.** resize_image처럼 결정적 작업은 sharp로, 생성·재해석이 필요한 작업만 codex로. 둘을 섞지 않는다.
 - CLAUDE.md의 단순성·외과적 변경 원칙을 따른다. 후처리 파이프라인은 이미 복잡하므로 새 추상화를 함부로 추가하지 않는다.
+- **spritesheet-classify.ts 는 순수 함수만.** DB·서버·MCP 등록 없음. server.ts나 handler가 import해 사용한다.
 
 ## 입력/출력 프로토콜
 
