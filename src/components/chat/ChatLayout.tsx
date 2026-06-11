@@ -783,12 +783,13 @@ export function ChatLayout() {
 
   const handleImageCrop = useCallback(
     async ({
-      srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters,
+      srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters, aiScale,
     }: {
       srcX: number; srcY: number; srcW: number; srcH: number;
       targetW: number; targetH: number;
       opacity: number;
       filters: FilterArg[];
+      aiScale: boolean;
     }) => {
       if (!editing || editing.mode !== "image_tools") return;
       const genId = editing.generationId;
@@ -841,6 +842,43 @@ export function ChatLayout() {
             // AI 처리
             const r = await handleSend(f.prompt, { attachmentGenerationIds: [lastId] });
             if (r) lastId = r.generationId;
+          }
+        }
+        // AI 스케일: 업스케일 방향일 때만 AI 적용 (다운스케일은 sharp가 품질 우위)
+        if (aiScale && srcW > 0 && srcH > 0 && (targetW > srcW || targetH > srcH)) {
+          const aiR = await handleSend(
+            "이 이미지를 고화질로 업스케일해줘. 선명도와 디테일을 향상시켜줘.",
+            { attachmentGenerationIds: [lastId] },
+          );
+          if (aiR) {
+            lastId = aiR.generationId;
+            // 치수가 정확히 targetW×targetH가 아니면 sharp로 보정
+            if (aiR.width !== targetW || aiR.height !== targetH) {
+              const fixResp = await fetch("/api/crop", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  generationId: lastId,
+                  srcX: 0, srcY: 0,
+                  srcW: aiR.width, srcH: aiR.height,
+                  targetW, targetH,
+                  opacity: 100,
+                }),
+              });
+              if (fixResp.ok) {
+                const fixResult = await fixResp.json() as { generationId: string; width: number; height: number };
+                dispatch({
+                  type: "add_result_card",
+                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                  userText: "✨ AI 스케일",
+                  generationId: fixResult.generationId,
+                  width: fixResult.width,
+                  height: fixResult.height,
+                  kind: "resize",
+                });
+                lastId = fixResult.generationId;
+              }
+            }
           }
         }
       } catch (e) {

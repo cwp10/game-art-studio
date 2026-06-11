@@ -46,6 +46,7 @@ type Props = {
     targetH: number;
     opacity: number;
     filters: FilterArg[];
+    aiScale: boolean;
   }) => Promise<void>;
   onCancel: () => void;
 };
@@ -95,6 +96,7 @@ export function ImageToolsPanel({
       });
   }, [generationId]);
   const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set());
+  const [aiScale, setAiScale] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
 
   const toggleFilter = useCallback((id: string) => {
@@ -381,11 +383,11 @@ export function ImageToolsPanel({
           return false;
         })
         .map(f => ({ id: f.id, prompt: f.prompt, param: filterParams[f.id] }));
-      await onCrop({ srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters });
+      await onCrop({ srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters, aiScale });
     } finally {
       setIsCropping(false);
     }
-  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, filterParams, onCrop]);
+  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, filterParams, aiScale, onCrop]);
 
   const disabled = isCropping || !!busy;
 
@@ -528,6 +530,13 @@ export function ImageToolsPanel({
           className={`rounded border px-3 py-2 text-sm transition-colors ${selectedFilters.has("removeBg") ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
         >
           배경제거
+        </button>
+        <button
+          onClick={() => setAiScale(v => !v)}
+          title="업스케일 시 AI로 고품질 생성 (다운스케일은 sharp)"
+          className={`rounded border px-3 py-2 text-sm transition-colors ${aiScale ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+        >
+          AI 스케일
         </button>
         <button
           disabled={disabled}
