@@ -48,10 +48,14 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 - 상단 툴바 한 줄: 출력규격 + 변형(반전/리셋) + 생성형 메뉴(배경제거/업스케일/여백제거/영역편집/레이어분리). **메뉴 클릭=즉시 실행 X → 하단 바에서 결정/실행**(단일 `tool` 상태, openTool/closeTool). 우측 레일=레이어+필터.
 - 푸터 제거(취소=상단 "대화로 돌아가기"와 중복). **합치기 버튼을 우측 레일 필터 아래 상시 노출**.
 
+**변형 다듬기(2026-06-21):** 핸들 고정크기(selBox 측정→scale 밖 렌더) · 센터 스냅+Shift 직선 · 불투명 슬라이더 레이어행→필터로 · 드래그 정렬 FLIP 애니메이션 · 면 늘리기 반대편 고정 버그 수정(원점=프레임중심→레이어중심) · 면 늘릴 때 캔버스 가장자리 스냅 · 박스 반치수를 그랩위치 근사→selBox 정확값(스냅 오차 제거).
+
+**정리 완료(2026-06-21):** 도달 불가 ImageToolsPanel·SceneComposer 제거(컴포넌트 파일 + ChatLayout image_tools/sceneOpen/add_to_scene/handleImageCrop 배선, MessageList/ImageResultCard Action union). 1102줄 삭제. 편집(MaskCanvas)·레이어분리(LayerCanvas) 결과카드 진입점은 빠른 단일이미지 경로로 유지.
+
 **다음 단계:**
-- **Step 3:** 편집 상태 영속화(DB) → 프로젝트처럼 재오픈.
-- **정리:** 도달 불가 ImageToolsPanel/SceneComposer 데드코드 제거(ChatLayout 배선 포함). 단 영역편집/분리가 인페인트(MaskCanvas)·레이어분리(LayerCanvas) 결과 카드 경로를 handleSend로 공유하므로, 구 패널 제거 시 그 경로 영향 없는지 확인.
-- **버그 정합:** composite route rotation drop 수정은 됐으나, SceneComposer 은퇴 전 회귀 없는지(현재 도달 불가).
+- **Step 3:** 편집 상태 영속화(DB) → 닫아도 레이어 배치 복원(프로젝트화). 현재는 휘발.
+- **(선택) 원래 과제:** 나머지 패널(리스킨·노멀맵·9-slice·버튼상태·스프라이트) 닫기/푸터/버튼 UX 일관성.
+- **(선택) 결과카드 편집/레이어 버튼**: 캔버스 영역편집/분리와 중복 — 은퇴할지 사장님 판단(빠른 경로로 남길 수도).
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.
