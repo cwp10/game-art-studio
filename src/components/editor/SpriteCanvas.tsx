@@ -1546,24 +1546,10 @@ export function SpriteCanvas({
         )}
       </div>
 
-      {/* 우측 레일 — 저장·내보내기(캔버스 우측 레일 자리). 나머지 컨트롤은 중앙 스크롤 유지. */}
-      <div className="flex w-[256px] flex-none flex-col gap-3 overflow-y-auto border-l border-border bg-bg-panel p-3 text-xs">
-        {/* ⑤ 보정본 저장 — 현재 오프셋 반영한 전체 시트를 새 generation 으로(원본 보존). */}
-        <button
-          onClick={saveCorrected}
-          disabled={frames.length === 0 || saving}
-          className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-        >
-          <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
-        </button>
-        {savedMsg && (
-          <span className={savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}>
-            {savedMsg}
-          </span>
-        )}
-        {/* Atlas 포맷 + 내보내기 */}
-        <div className="space-y-1.5">
-          <span className="text-text-muted">Atlas 포맷</span>
+      {/* 우측 레일 — 내보내기(위 스크롤) + 보정본 저장(하단 고정, 캔버스 합치기 자리). */}
+      <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
+        <div className="flex-1 space-y-1.5 overflow-y-auto p-3 text-xs">
+          <span className="block text-text-muted">Atlas 포맷</span>
           <select
             value={atlasFormat}
             onChange={e => setAtlasFormat(e.target.value as AtlasFormat)}
@@ -1597,6 +1583,21 @@ export function SpriteCanvas({
           >
             <Download size={14} /> {downloading === "gif" ? "..." : "GIF"}
           </button>
+        </div>
+        {/* 하단 고정 — 보정본 저장(주 액션, 현재 오프셋 반영한 전체 시트를 새 generation 으로). */}
+        <div className="flex-none border-t border-border p-3">
+          <button
+            onClick={saveCorrected}
+            disabled={frames.length === 0 || saving}
+            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+          >
+            <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
+          </button>
+          {savedMsg && (
+            <span className={`mt-1 block text-center text-xs ${savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}>
+              {savedMsg}
+            </span>
+          )}
         </div>
       </div>
       </div>
