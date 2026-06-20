@@ -543,6 +543,19 @@ export function CanvasEditor({
     [pushUndo, patchLayer, zp.zoom],
   );
 
+  // 휠/트랙패드 줌 — 커서 위치 기준(zoomAtPoint). 네이티브 리스너 + passive:false 로 페이지 스크롤 차단.
+  const { zoomAtPoint } = zp;
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      zoomAtPoint(el, e.clientX, e.clientY, e.deltaY < 0 ? 1 : -1);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAtPoint]);
+
   // ── 레이어 본체 드래그 = 이동 (선택). client delta → canvas px 는 zoom 으로 역산. ──────
   const moveDragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const onLayerBodyDown = useCallback(
@@ -696,6 +709,10 @@ export function CanvasEditor({
           <div
             ref={stageRef}
             className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]"
+            style={{ cursor: zp.panMode ? "grab" : "default" }}
+            onPointerDown={zp.onPanPointerDown}
+            onPointerMove={zp.onPanPointerMove}
+            onPointerUp={zp.onPanPointerUp}
             onDragOver={e => {
               if (!e.dataTransfer.types.includes("Files")) return;
               e.preventDefault();
@@ -728,21 +745,23 @@ export function CanvasEditor({
               style={{
                 transform: `translate(${zp.pan.x}px, ${zp.pan.y}px) scale(${zp.zoom})`,
                 transformOrigin: "center",
+                // 이동 모드: 캔버스 내용 클릭통과 → 스테이지가 팬. 편집 모드: 레이어가 이벤트 수신.
+                pointerEvents: zp.panMode ? "none" : "auto",
               }}
             >
-              {/* 출력 캔버스 프레임 — 종횡비 고정, 체커보드. 모든 레이어가 이 중심 기준 배치. */}
-              <div
-                data-canvas-frame
-                className="relative bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#303034_0%_50%)_50%/16px_16px] outline outline-2 outline-white/80"
-                style={{ width: "min(56vw, 640px)", aspectRatio: aspect }}
-                onPointerDown={() => setSelectedLayerId(null)}
-              >
-                {layers.map(layer => {
-                  const isSel = layer.id === selectedLayerId;
-                  return (
+              {/* 출력 캔버스 — 설정 사이즈를 종횡비로 표시. wrap 은 핸들 오버레이의 좌표 기준. */}
+              <div className="relative" style={{ width: "min(56vw, 640px)", aspectRatio: aspect }}>
+                {/* 아트보드(클립) — 체커보드 = 투명 배경. overflow-hidden 으로 캔버스 밖 픽셀을 잘라
+                    합성 출력(outputW/H 크롭)과 WYSIWYG. 핸들은 아래 오버레이(클립 밖)에서 렌더. */}
+                <div
+                  data-canvas-frame
+                  className="checkerboard absolute inset-0 overflow-hidden outline outline-2 outline-white/80"
+                  onPointerDown={() => setSelectedLayerId(null)}
+                >
+                  {layers.map(layer => (
                     <div
                       key={layer.id}
-                      className={isSel ? "cursor-move" : "cursor-pointer"}
+                      className={layer.id === selectedLayerId ? "cursor-move" : "cursor-pointer"}
                       style={{
                         position: "absolute",
                         left: "50%",
@@ -761,64 +780,70 @@ export function CanvasEditor({
                         style={{ filter: cssFilter(layer.filters), pointerEvents: "none" }}
                         draggable={false}
                       />
-                      {/* 선택 레이어 자유변형 핸들. transform 안에 있어 회전·스케일에 함께 따라감. */}
-                      {isSel && (
-                        <>
-                          <div className="pointer-events-none absolute inset-0 outline outline-[1.5px] [outline-style:dashed] outline-[color:var(--accent)]" />
-                          {/* 모서리(corner) — 균일 크기 */}
-                          {(["tl", "tr", "bl", "br"] as const).map(c => (
-                            <div
-                              key={c}
-                              onPointerDown={e => onHandleDown(e, "corner", layer)}
-                              className="absolute h-3 w-3 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                              style={{
-                                left: c.includes("l") ? -6 : undefined,
-                                right: c.includes("r") ? -6 : undefined,
-                                top: c.includes("t") ? -6 : undefined,
-                                bottom: c.includes("b") ? -6 : undefined,
-                                cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
-                              }}
-                            />
-                          ))}
-                          {/* 상·하 변(v) — 세로 늘이기 */}
-                          {(["t", "b"] as const).map(v => (
-                            <div
-                              key={v}
-                              onPointerDown={e => onHandleDown(e, v, layer)}
-                              className="absolute h-3 w-3 -translate-x-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                              style={{
-                                left: "50%",
-                                top: v === "t" ? -6 : undefined,
-                                bottom: v === "b" ? -6 : undefined,
-                                cursor: "ns-resize",
-                              }}
-                            />
-                          ))}
-                          {/* 좌·우 변(h) — 가로 늘이기 */}
-                          {(["l", "r"] as const).map(h => (
-                            <div
-                              key={h}
-                              onPointerDown={e => onHandleDown(e, h, layer)}
-                              className="absolute h-3 w-3 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                              style={{
-                                top: "50%",
-                                left: h === "l" ? -6 : undefined,
-                                right: h === "r" ? -6 : undefined,
-                                cursor: "ew-resize",
-                              }}
-                            />
-                          ))}
-                          {/* 상단 노브(rot) — 회전 */}
-                          <div
-                            onPointerDown={e => onHandleDown(e, "rot", layer)}
-                            className="absolute left-1/2 h-[13px] w-[13px] -translate-x-1/2 cursor-grab rounded-full border-[1.5px] border-[color:var(--accent)] bg-white"
-                            style={{ top: -30 }}
-                          />
-                        </>
-                      )}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+
+                {/* 선택 레이어 자유변형 핸들 — 클립 밖 오버레이라 캔버스 경계를 넘은 핸들도 잡힌다.
+                    숨김 이미지로 레이어 박스 크기를 맞춰 핸들 위치 기준을 잡는다. */}
+                {selected && (
+                  <div className="pointer-events-none absolute inset-0">
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: "50%",
+                        transform: layerTransform(selected),
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/images/${selected.generationId}`}
+                        alt=""
+                        aria-hidden
+                        className="block max-w-[min(56vw,640px)]"
+                        style={{ visibility: "hidden", pointerEvents: "none" }}
+                        draggable={false}
+                      />
+                      <div className="pointer-events-none absolute inset-0 outline outline-[1.5px] [outline-style:dashed] outline-[color:var(--accent)]" />
+                      {(["tl", "tr", "bl", "br"] as const).map(c => (
+                        <div
+                          key={c}
+                          onPointerDown={e => onHandleDown(e, "corner", selected)}
+                          className="pointer-events-auto absolute h-3 w-3 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                          style={{
+                            left: c.includes("l") ? -6 : undefined,
+                            right: c.includes("r") ? -6 : undefined,
+                            top: c.includes("t") ? -6 : undefined,
+                            bottom: c.includes("b") ? -6 : undefined,
+                            cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
+                          }}
+                        />
+                      ))}
+                      {(["t", "b"] as const).map(v => (
+                        <div
+                          key={v}
+                          onPointerDown={e => onHandleDown(e, v, selected)}
+                          className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                          style={{ left: "50%", top: v === "t" ? -6 : undefined, bottom: v === "b" ? -6 : undefined, cursor: "ns-resize" }}
+                        />
+                      ))}
+                      {(["l", "r"] as const).map(h => (
+                        <div
+                          key={h}
+                          onPointerDown={e => onHandleDown(e, h, selected)}
+                          className="pointer-events-auto absolute h-3 w-3 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                          style={{ top: "50%", left: h === "l" ? -6 : undefined, right: h === "r" ? -6 : undefined, cursor: "ew-resize" }}
+                        />
+                      ))}
+                      <div
+                        onPointerDown={e => onHandleDown(e, "rot", selected)}
+                        className="pointer-events-auto absolute left-1/2 h-[13px] w-[13px] -translate-x-1/2 cursor-grab rounded-full border-[1.5px] border-[color:var(--accent)] bg-white"
+                        style={{ top: -30 }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {/* 범례 */}
