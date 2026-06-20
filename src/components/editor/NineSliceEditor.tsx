@@ -96,7 +96,7 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Scissors size={14} /> 9-slice 편집기
         </span>
@@ -109,7 +109,7 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
         </button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[880px] flex-1 gap-4 overflow-y-auto p-4">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 gap-4 overflow-y-auto p-4">
         {/* 좌: 원본 미리보기 + 슬라이스 라인 오버레이 */}
         <div className="flex flex-1 flex-col gap-2">
           <p className="text-xs font-medium text-text-muted">원본 미리보기</p>
@@ -180,12 +180,12 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
       </div>
 
       {error && (
-        <p className="mx-auto w-full max-w-[880px] px-4 pb-2 text-[11px] text-[color:var(--danger)]">
+        <p className="mx-auto w-full max-w-[1200px] px-4 pb-2 text-[11px] text-[color:var(--danger)]">
           {error}
         </p>
       )}
 
-      <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[1200px] gap-2 border-t border-border p-3">
         <button
           onClick={onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"

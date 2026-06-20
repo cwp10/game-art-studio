@@ -22,6 +22,8 @@ type Props = {
   busyLabel?: string;
   /** 실행 버튼 title (비활성 사유 안내 등). */
   submitTitle?: string;
+  /** 비-busy 좌측 버튼 라벨(✕ 자동 prefix). 기본 "취소". 결과 확인 후 닫기 등 패널별 의미 구분용. */
+  closeLabel?: string;
 };
 
 export function PanelFooter({
@@ -33,14 +35,15 @@ export function PanelFooter({
   submitLabel = "실행 ▸",
   busyLabel = "실행 중…",
   submitTitle,
+  closeLabel = "취소",
 }: Props) {
   return (
-    <footer className="mx-auto flex w-full max-w-[880px] gap-2 border-t border-border p-3">
+    <footer className="mx-auto flex w-full max-w-[1200px] gap-2 border-t border-border p-3">
       <button
         onClick={busy ? (onCancel ?? onClose) : onClose}
         className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
       >
-        {busy ? "■ 생성 취소" : "✕ 취소"}
+        {busy ? "■ 생성 취소" : `✕ ${closeLabel}`}
       </button>
       <button
         onClick={onSubmit}

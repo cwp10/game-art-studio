@@ -292,7 +292,7 @@ export function ReskinPanel({
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
         </span>
@@ -309,7 +309,7 @@ export function ReskinPanel({
         </button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         {/* 2단계 진입: 모드 선택 후 뒤로가기 바, 그 전엔 진입 화면 큰 버튼. */}
         {entered ? (
           <button

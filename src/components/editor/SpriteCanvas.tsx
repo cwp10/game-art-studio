@@ -991,7 +991,7 @@ export function SpriteCanvas({
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Film size={14} /> 스프라이트 분할
         </span>
@@ -1019,7 +1019,7 @@ export function SpriteCanvas({
         </button>
       </header>
 
-      <div ref={sizerRef} className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
+      <div ref={sizerRef} className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">
           행·열을 지정해서 시트를 N×M 프레임으로 분할합니다. 다운로드는 클라이언트 처리,
           [보정본 저장]만 새 generation 으로 기록합니다(원본 보존).
@@ -1545,7 +1545,7 @@ export function SpriteCanvas({
         )}
       </div>
 
-      <footer className="mx-auto flex w-full max-w-[880px] flex-col gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[1200px] flex-col gap-2 border-t border-border p-3">
         {/* ⑤ 보정본 저장 — 현재 오프셋 반영한 전체 시트를 새 generation 으로(원본 보존). */}
         <div className="flex items-center gap-2">
           <button

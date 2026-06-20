@@ -52,7 +52,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
+      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
         <span className="flex items-center gap-1 font-medium text-text-primary">
           <Layers size={14} /> 노멀맵 생성
         </span>
@@ -61,7 +61,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
         </button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-4 overflow-y-auto p-3">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-4 overflow-y-auto p-3">
         {/* 원본 + 결과 나란히 */}
         <div className={`grid gap-3 ${result ? "grid-cols-2" : "grid-cols-1"}`}>
           <div className="space-y-1">
@@ -108,7 +108,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
         {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
       </div>
 
-      <footer className="mx-auto flex w-full max-w-[880px] flex-wrap gap-2 border-t border-border p-3">
+      <footer className="mx-auto flex w-full max-w-[1200px] flex-wrap gap-2 border-t border-border p-3">
         <button onClick={onClose} className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary">
           ✕ 닫기
         </button>
