@@ -17,7 +17,6 @@ type Props = {
       | "copy_prompt"
       | "resize"
       | "remove_bg"
-      | "edit"
       | "layer_split"
       | "sprite_split"
       | "reskin"

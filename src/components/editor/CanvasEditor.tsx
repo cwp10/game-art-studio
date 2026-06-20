@@ -111,8 +111,6 @@ type Props = {
     prompt: string,
     referenceGenerationId?: string | null,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
-  /** 진입 직후 자동으로 열 도구 — 결과카드 "편집"이 영역 편집으로 직진입할 때 사용. */
-  initialTool?: "inpaint";
 };
 
 let layerSeq = 0;
@@ -188,7 +186,6 @@ export function CanvasEditor({
   onUpscale,
   onExtract,
   onInpaint,
-  initialTool,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -528,16 +525,16 @@ export function CanvasEditor({
     },
     [],
   );
-  // 진입 직후 initialTool 자동 진입(결과카드 "편집" → 영역 편집 직진입). ran-once 가드로 1회만.
-  // 마운트 시 의도적 1회 자동 오픈이라 openTool(setState) 동기 호출 — set-state-in-effect 무시.
-  const initRanRef = useRef(false);
+  // 진입 시 출력 규격 기본값을 시드(첫 레이어) 원본 이미지 크기로 — 포토샵 라운드트립 없이 원본 그대로 편집.
+  // 프리셋은 0("자유")이라 customSize 가 곧 출력 규격. setState 는 onload(비동기) 안이라 set-state-in-effect 무관.
+  const sizeInitRef = useRef(false);
   useEffect(() => {
-    if (initRanRef.current || !initialTool) return;
-    initRanRef.current = true;
-    const seed = layers[0];
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (seed) openTool(initialTool, seed);
-  }, [initialTool, layers, openTool]);
+    if (sizeInitRef.current) return;
+    sizeInitRef.current = true;
+    const im = new window.Image();
+    im.onload = () => setCustomSize({ w: im.naturalWidth, h: im.naturalHeight });
+    im.src = `/api/images/${seedGenerationId}`;
+  }, [seedGenerationId]);
   const clearBrush = useCallback(() => {
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
@@ -1585,7 +1582,7 @@ export function CanvasEditor({
 
       {/* 도구 하단 바 — 선택한 메뉴를 여기서 실행(즉시 실행 X). tool 별로 내용 전환. */}
       {tool && selected && (
-        <div className="pointer-events-none absolute bottom-4 left-0 right-[256px] z-40 flex justify-center px-4">
+        <div className="pointer-events-none absolute bottom-6 left-0 right-[256px] z-40 flex justify-center px-4">
           <div className="pointer-events-auto flex max-w-[840px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
             {tool === "inpaint" ? (
               <>

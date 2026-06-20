@@ -16,7 +16,6 @@ import {
   Palette,
   RotateCw,
   Scissors,
-  Wand2,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -28,7 +27,6 @@ type Action =
   | "copy_prompt"
   | "resize"
   | "remove_bg"
-  | "edit"
   | "layer_split"
   | "sprite_split"
   | "reskin"
@@ -189,18 +187,11 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
           </div>
           <div className="flex flex-wrap gap-1">
             <button
-              onClick={() => onAction?.("edit")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="영역 편집 — 캔버스 에디터에서 브러시로 부분 재생성"
-            >
-              <Edit3 size={12} /> 편집
-            </button>
-            <button
               onClick={() => onAction?.("canvas_edit")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="캔버스 편집 — 레이어 합성·자유 변형·필터·크롭·배경제거·업스케일·여백제거"
+              title="편집 — 캔버스 에디터에서 레이어 합성·자유 변형·필터·크롭·영역편집·배경제거·업스케일·여백제거"
             >
-              <Wand2 size={12} /> 캔버스
+              <Edit3 size={12} /> 편집
             </button>
             <button
               onClick={() => onAction?.("layer_split")}

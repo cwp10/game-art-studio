@@ -89,8 +89,7 @@ export function ChatLayout() {
   // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
   const [buttonStateOpen, setButtonStateOpen] = useState<{ generationId: string } | null>(null);
   // 통합 캔버스 에디터 — 전체전환(inset-0). seedGenerationId 로 첫 레이어. null 이면 닫힘.
-  // initialTool 이 "inpaint" 면 진입 직후 영역 편집 도구를 자동으로 연다(결과카드 "편집" 진입).
-  const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string; initialTool?: "inpaint" } | null>(null);
+  const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -471,7 +470,7 @@ export function ChatLayout() {
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
   // resize / remove_bg 는 generationId 를 attach 해서 Claude 가 inputGenerationId 로
-  // 사용하도록 한다. edit (인페인트) 는 캔버스 에디터를 영역 편집 모드로 직진입시킨다.
+  // 사용하도록 한다. canvas_edit 는 전체전환 캔버스 에디터를 연다(결과카드 "편집" 버튼).
   const handleAction = useCallback(
     (
       action:
@@ -480,7 +479,6 @@ export function ChatLayout() {
         | "copy_prompt"
         | "resize"
         | "remove_bg"
-        | "edit"
         | "layer_split"
         | "sprite_split"
         | "reskin"
@@ -521,14 +519,13 @@ export function ChatLayout() {
         } as Editing);
       };
 
-      // 전체전환 캔버스 에디터 진입 — 다른 패널을 모두 닫고 연다. initialTool 이 있으면
-      // 진입 직후 해당 도구(영역 편집)를 자동으로 띄운다.
-      const openCanvas = (genId: string, initialTool?: "inpaint") => {
+      // 전체전환 캔버스 에디터 진입 — 다른 패널을 모두 닫고 연다.
+      const openCanvas = (genId: string) => {
         setEditing(null);
         setSpriteGen(null);
         setNineSliceOpen(null);
         setButtonStateOpen(null);
-        setCanvasOpen({ seedGenerationId: genId, initialTool });
+        setCanvasOpen({ seedGenerationId: genId });
       };
 
       const handlers: Partial<Record<typeof action, () => void>> = {
@@ -599,10 +596,6 @@ export function ChatLayout() {
               payload.subjectMode ??
               inferSubjectModeFromPrompt(payload.prompt),
           });
-        },
-        edit: () => {
-          if (!payload.generationId) return;
-          openCanvas(payload.generationId, "inpaint");
         },
         layer_split: () => {
           openEditPanel("layer");
@@ -1182,7 +1175,6 @@ export function ChatLayout() {
         // 전체전환(full-takeover) — CanvasEditor 가 내부에서 fixed inset-0 z-40 으로 렌더.
         <CanvasEditor
           seedGenerationId={canvasOpen.seedGenerationId}
-          initialTool={canvasOpen.initialTool}
           sessionId={state.activeSessionId}
           busy={state.generating}
           onClose={closeCanvas}

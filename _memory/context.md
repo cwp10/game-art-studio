@@ -64,6 +64,8 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 
 **보완(2026-06-21, CanvasEditor만)**: 통합 시 누락됐던 MaskCanvas의 원클릭 "오브젝트 지우기"를 영역편집 하단 바에 복원. `handleInpaintSubmit`을 `runInpaint(prompt, reference)`로 추출 → 채우기(사용자 프롬프트+참조)와 오브젝트 지우기(고정 `OBJECT_REMOVE_PROMPT`=MaskCanvas와 동일 seamless-background 문구, 참조 없음)가 공유. `brushPainted` 상태로 칠한 마스크 있을 때만 버튼 활성(onBrushDown set, clearBrush/closeTool 리셋). danger 스타일 Trash2 버튼. 검증: tsc 0 / build 성공 / lint 클린.
 
+**진입점 단일화 + 원본크기 기본(2026-06-21, 사용자 요청)**: 결과카드 "편집"(edit/initialTool 직진입) 버튼 제거, "캔버스"(canvas_edit) 버튼을 "편집"으로 리네임(Edit3 아이콘) → 진입은 일반 캔버스 1개로 통일. 직진입용 `initialTool` 기계(prop·init effect·openCanvas 인자·canvasOpen 필드·Action union "edit"·ImageResultCard Wand2 import) 전부 죽은 코드라 정리. **캔버스 진입 시 출력 규격 기본값=시드 원본 이미지 크기**(마운트 effect로 `setCustomSize(naturalW/H)`, 프리셋 0 "자유"가 customSize 따름). 하단 도구 바 살짝 띄움(bottom-4→bottom-6). 검증: tsc 0 / build 성공 / 변경파일 lint 클린(ChatLayout 2 error는 기존). 4파일(CanvasEditor·ChatLayout·ImageResultCard·MessageList).
+
 ## ▶ 다음 작업
 
 - **Step 3:** 편집 상태 영속화(DB) → 닫아도 레이어 배치 복원. 현재 휘발.
