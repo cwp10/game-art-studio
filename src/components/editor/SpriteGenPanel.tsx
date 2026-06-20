@@ -1,10 +1,9 @@
 "use client";
 
-import { ArrowLeft, Grid3x3, Lightbulb, Sparkles } from "lucide-react";
+import { ArrowLeft, Grid3x3, Lightbulb, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
-import { PanelFooter } from "@/components/editor/PanelFooter";
 
 
 /**
@@ -344,23 +343,9 @@ export function SpriteGenPanel({
         </span>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-4 overflow-y-auto p-3">
-        {/* 참조 이미지 — 있을 때만 */}
-        {referenceImageUrl && (
-          <div className="flex shrink-0 items-center gap-3 rounded-lg border border-border bg-bg-card p-2">
-            <div className="checkerboard overflow-hidden rounded border border-border">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={referenceImageUrl} alt="참조" className="block h-14 w-14 object-contain" />
-            </div>
-            <div className="min-w-0 flex-1 text-xs">
-              <div className="text-text-primary">참조 이미지</div>
-              <div className="truncate text-text-muted/70">{referenceId?.slice(0, 12)}…</div>
-            </div>
-          </div>
-        )}
-
-        {/* 3-way 탭 — 캐릭터 / 오브젝트 / 이펙트 */}
-        <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+      {/* 상단 툴스트립 — 캐릭터/오브젝트/이펙트(+이펙트 종류). 캔버스 도구 스트립 자리. */}
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2 text-xs">
+        <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5">
           {([
             { value: "character", label: "캐릭터" },
             { value: "object",    label: "오브젝트" },
@@ -369,7 +354,7 @@ export function SpriteGenPanel({
             <button
               key={opt.value}
               onClick={() => handleSubjectChange(opt.value)}
-              className={`flex h-7 flex-1 items-center justify-center rounded-md transition-colors ${
+              className={`flex h-7 items-center justify-center rounded-md px-4 transition-colors ${
                 subjectType === opt.value
                   ? "bg-[color:var(--accent)]/20 text-text-primary"
                   : "text-text-muted hover:text-text-primary"
@@ -379,80 +364,147 @@ export function SpriteGenPanel({
             </button>
           ))}
         </div>
-
-        {/* 이펙트 종류 — 이펙트일 때만 */}
         {subjectType === "effect" && (
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="text-xs text-text-muted">종류</span>
-            <div className="flex flex-wrap gap-1">
-              {EFFECT_TYPES.map(et => (
-                <button
-                  key={et.value}
-                  onClick={() => setEffectType(et.value)}
-                  className={`flex h-7 items-center px-3 rounded-md border text-xs transition-colors ${
-                    effectType === et.value
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                      : "border-border bg-bg-card text-text-muted hover:text-text-primary"
-                  }`}
-                >
-                  {et.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 시점 선택 */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-text-muted">시점</span>
-          <div className="flex rounded-lg border border-border bg-bg-card p-0.5 text-xs">
-            {(
-              [
-                { value: "side", label: "사이드" },
-                { value: "topdown", label: "탑다운" },
-                { value: "isometric", label: "아이소" },
-                { value: "2.5d-topdown", label: "2.5D" },
-              ] as { value: Perspective; label: string }[]
-            ).map(opt => (
+          <div className="flex items-center gap-1">
+            <span className="text-text-muted">종류</span>
+            {EFFECT_TYPES.map(et => (
               <button
-                key={opt.value}
-                onClick={() => setPerspective(opt.value)}
-                className={`flex h-7 items-center px-3 rounded-md transition-colors ${
-                  perspective === opt.value
-                    ? "bg-[color:var(--accent)]/20 text-text-primary"
-                    : "text-text-muted hover:text-text-primary"
+                key={et.value}
+                onClick={() => setEffectType(et.value)}
+                className={`flex h-7 items-center px-3 rounded-md border text-xs transition-colors ${
+                  effectType === et.value
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border bg-bg-card text-text-muted hover:text-text-primary"
                 }`}
               >
-                {opt.label}
+                {et.label}
               </button>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* 본문 — 중앙(참조 스테이지 + 동작 입력) + 우측 레일(옵션 + 생성하기). 캔버스 골격. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* 참조 이미지 스테이지 */}
+          <div className="relative m-3 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]">
+            {referenceImageUrl ? (
+              <div className="checkerboard overflow-hidden rounded-lg border border-border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={referenceImageUrl} alt="참조" className="block max-h-[56vh] max-w-full object-contain" />
+              </div>
+            ) : (
+              <p className="px-4 text-center text-xs text-text-muted/50">참조 이미지 없음 — 아래 텍스트 설명으로 생성합니다</p>
+            )}
+          </div>
+
+          {/* 동작 텍스트 입력 (하단) */}
+          <div className="flex-none space-y-1 border-t border-border p-3">
+            <label className="text-xs text-text-muted">동작</label>
+            <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
+              <textarea
+                value={actionPrompt}
+                onChange={e => setActionPrompt(e.target.value)}
+                placeholder={subjectType === "effect"
+                  ? "어떤 이펙트인지 설명하세요 (예: 불꽃 폭발이 퍼지며 연기로 사라짐)"
+                  : "어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
+                }
+                rows={2}
+                className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+              />
+              {/* 입력 헬퍼 — 예시·AI 제안(위로 열림). */}
+              <div className="flex items-center gap-1.5 border-t border-border px-2 py-1.5">
+                <div className="ml-auto flex items-center gap-1">
+                  <div className="relative">
+                    <button
+                      onClick={() => setExampleOpen(o => !o)}
+                      className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary"
+                    >
+                      <Lightbulb size={12} /> 예시
+                    </button>
+                    {exampleOpen && (
+                      <ExamplePopover
+                        exampleKey={exampleKey}
+                        placement="bottom"
+                        onPick={text => { setActionPrompt(text); setExampleOpen(false); }}
+                        onClose={() => setExampleOpen(false)}
+                      />
+                    )}
+                  </div>
+                  <div className="relative">
+                    <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                    {aiSuggestions && (
+                      <AiSuggestDropdown
+                        suggestions={aiSuggestions}
+                        placement="bottom"
+                        onSelect={v => { setActionPrompt(v); setAiSuggestions(null); }}
+                        onClose={() => setAiSuggestions(null)}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {!userSetFrames && actionPrompt.trim().length > 0 && (
+              <p className="text-[11px] leading-relaxed text-text-muted/60">
+                <span className="text-text-muted">{frames}프레임{seamlessLoop ? " · 루프" : ""}</span>으로 자동 설정됨 — 오른쪽에서 변경 가능
+              </p>
+            )}
+            {aiError && <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>}
+            {recents.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 pt-1">
+                <span className="text-[11px] text-text-muted/70">최근:</span>
+                {recents.map(r => (
+                  <button
+                    key={r}
+                    onClick={() => setActionPrompt(r)}
+                    title={r}
+                    className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
+                  >
+                    {r.length > 15 ? r.slice(0, 15) + "…" : r}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* 동작 프롬프트 */}
-        <div className="shrink-0 space-y-1">
-          <label className="text-xs text-text-muted">동작</label>
-
-          {/* 통합 입력 박스 — textarea + 옵션 툴바 */}
-          <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
-            <textarea
-              value={actionPrompt}
-              onChange={e => setActionPrompt(e.target.value)}
-              placeholder={subjectType === "effect"
-                ? "어떤 이펙트인지 설명하세요 (예: 불꽃 폭발이 퍼지며 연기로 사라짐)"
-                : "어떤 동작을 만들지 설명하세요 (예시·AI 제안 활용 가능)"
-              }
-              rows={3}
-              className="block min-h-[78px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
-            />
-            {/* 옵션 툴바 — 참조·프레임·스타일·루프 */}
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-2 py-1.5">
-              {/* 방향 — 캐릭터 탭만 */}
-              {subjectType === "character" && (
+        {/* 우측 레일 — 생성 옵션(시점·방향·프레임·루프) + 하단 생성하기. */}
+        <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
+          <div className="flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+            {/* 시점 */}
+            <div className="space-y-1">
+              <span className="block text-text-muted">시점</span>
+              <div className="flex flex-wrap gap-0.5 rounded-lg border border-border bg-bg-card p-0.5">
+                {([
+                  { value: "side", label: "사이드" },
+                  { value: "topdown", label: "탑다운" },
+                  { value: "isometric", label: "아이소" },
+                  { value: "2.5d-topdown", label: "2.5D" },
+                ] as { value: Perspective; label: string }[]).map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPerspective(opt.value)}
+                    className={`flex h-7 items-center rounded-md px-2.5 transition-colors ${
+                      perspective === opt.value
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* 방향 — 캐릭터만 */}
+            {subjectType === "character" && (
+              <div className="space-y-1">
+                <span className="block text-text-muted">방향</span>
                 <div className="relative">
                   <button
                     onClick={() => { setDirOpen(o => !o); setFrameOpen(false); }}
-                    className="flex h-7 items-center gap-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
+                    className="flex h-7 w-full items-center justify-between rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
                   >
                     {DIRECTION_LABELS[direction]}
                   </button>
@@ -465,12 +517,15 @@ export function SpriteGenPanel({
                     />
                   )}
                 </div>
-              )}
-              {/* 프레임 */}
+              </div>
+            )}
+            {/* 프레임 */}
+            <div className="space-y-1">
+              <span className="block text-text-muted">프레임</span>
               <div className="relative">
                 <button
                   onClick={() => { setFrameOpen(o => !o); setDirOpen(false); }}
-                  className="flex h-7 items-center gap-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
+                  className="flex h-7 w-full items-center justify-between rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
                 >
                   {frames}프레임 {grid.rows}×{grid.cols}
                 </button>
@@ -478,111 +533,56 @@ export function SpriteGenPanel({
                   <FramePopover
                     selected={frames}
                     opts={subjectType === "effect" ? EFFECT_FRAME_OPTS : undefined}
-                    onSelect={f => {
-                      setFrames(f);
-                      setUserSetFrames(true);
-                      setFrameOpen(false);
-                    }}
+                    onSelect={f => { setFrames(f); setUserSetFrames(true); setFrameOpen(false); }}
                     onClose={() => setFrameOpen(false)}
                   />
                 )}
               </div>
-              {/* 루프 */}
-              <button
-                type="button"
-                onClick={() => setSeamlessLoop(v => !v)}
-                className={`flex h-7 items-center px-2 rounded-md border text-xs transition-colors ${
-                  seamlessLoop
-                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                    : "border-border bg-bg-panel text-text-muted hover:text-text-primary"
-                }`}
-              >
-                루프
-              </button>
-              {/* 프레임 한계 경고 */}
               {(() => {
                 const info = frameCanvasInfo(grid.rows, grid.cols);
                 if (info.status === "safe") return null;
                 const mpx = (info.totalPx / 1_000_000).toFixed(1);
                 return (
-                  <span className={`text-[10px] ${info.status === "over" ? "text-red-400" : "text-orange-400"}`}>
+                  <span className={`block text-[10px] ${info.status === "over" ? "text-red-400" : "text-orange-400"}`}>
                     ⚠ {info.w}×{info.h} = {mpx}M px {info.status === "over" ? "(초과)" : "(근접)"}
                   </span>
                 );
               })()}
-              {/* 예시·AI 제안 — 오른쪽 끝 */}
-              <div className="ml-auto flex items-center gap-1">
-                <div className="relative">
-                  <button
-                    onClick={() => setExampleOpen(o => !o)}
-                    className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary"
-                  >
-                    <Lightbulb size={12} /> 예시
-                  </button>
-                  {exampleOpen && (
-                    <ExamplePopover
-                      exampleKey={exampleKey}
-                      onPick={text => {
-                        setActionPrompt(text);
-                        setExampleOpen(false);
-                      }}
-                      onClose={() => setExampleOpen(false)}
-                    />
-                  )}
-                </div>
-                <div className="relative">
-                  <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
-                  {aiSuggestions && (
-                    <AiSuggestDropdown
-                      suggestions={aiSuggestions}
-                      onSelect={v => { setActionPrompt(v); setAiSuggestions(null); }}
-                      onClose={() => setAiSuggestions(null)}
-                    />
-                  )}
-                </div>
-              </div>
             </div>
+            {/* 루프 */}
+            <button
+              type="button"
+              onClick={() => setSeamlessLoop(v => !v)}
+              className={`flex h-7 w-full items-center justify-center rounded-md border text-xs transition-colors ${
+                seamlessLoop
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                  : "border-border bg-bg-panel text-text-muted hover:text-text-primary"
+              }`}
+            >
+              루프 {seamlessLoop ? "ON" : "OFF"}
+            </button>
           </div>
-
-          {/* 자동 프레임 추천 힌트 */}
-          {!userSetFrames && actionPrompt.trim().length > 0 && (
-            <p className="text-[11px] text-text-muted/60 leading-relaxed">
-              <span className="text-text-muted">{frames}프레임{seamlessLoop ? " · 루프" : ""}</span>으로 자동 설정됨 — 툴바에서 직접 변경 가능
-            </p>
-          )}
-
-          {aiError && (
-            <p className="text-[11px] text-[color:var(--danger)]">{aiError}</p>
-          )}
-
-          {/* 최근 동작 chips */}
-          {recents.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1 pt-1">
-              <span className="text-[11px] text-text-muted/70">최근:</span>
-              {recents.map(r => (
-                <button
-                  key={r}
-                  onClick={() => setActionPrompt(r)}
-                  title={r}
-                  className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
-                >
-                  {r.length > 15 ? r.slice(0, 15) + "…" : r}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* 하단 — 생성하기(생성 중엔 중단). 캔버스 합치기 자리. */}
+          <div className="flex-none space-y-2 border-t border-border p-3">
+            {busy && onCancel && (
+              <button
+                onClick={onCancel}
+                className="h-9 w-full rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
+              >
+                ■ 생성 취소
+              </button>
+            )}
+            <button
+              onClick={handleSubmit}
+              disabled={!canSubmit || busy}
+              title={canSubmit || busy ? "" : "동작 설명을 입력하세요"}
+              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              {busy ? <><Loader2 size={14} className="animate-spin" /> 생성 중…</> : <><Sparkles size={14} /> 생성하기</>}
+            </button>
+          </div>
         </div>
       </div>
-
-      <PanelFooter
-        busy={busy}
-        canSubmit={canSubmit}
-        onSubmit={handleSubmit}
-        onCancel={onCancel}
-        submitLabel={<><Sparkles size={14} /> 생성하기</>}
-        busyLabel="생성 중…"
-        submitTitle={canSubmit || busy ? "" : "동작 설명을 입력하세요"}
-      />
     </aside>
   );
 }
@@ -732,17 +732,19 @@ function ExamplePopover({
   exampleKey,
   onPick,
   onClose,
+  placement = "top",
 }: {
   exampleKey: ExampleKey;
   onPick: (text: string) => void;
   onClose: () => void;
+  placement?: "top" | "bottom";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useOutsideClose(ref, onClose);
   return (
     <div
       ref={ref}
-      className="absolute right-0 top-full z-30 mt-1 w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl"
+      className={`absolute right-0 z-30 ${placement === "bottom" ? "bottom-full mb-1" : "top-full mt-1"} w-[320px] space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl`}
     >
       {EXAMPLES[exampleKey].map((ex, i) => (
         <div
