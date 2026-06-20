@@ -28,7 +28,12 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 4. 레이어 추가 3경로 — 피커 탭 "이 세션"/"갤러리(전체 listGenerations)" + "⬆ 업로드"(uploadImage) 버튼 + 캔버스 이미지 드롭(dropOver 오버레이). 백엔드 변경 0.
 검증: tsc 0 / build exit0 / CanvasEditor lint 클린 / 기존 패널 회귀 0.
 
-**다음 단계:** 사용자 브라우저 확인(인터랙션, 특히 #1 드래그·#2 한쪽늘이기 회전 상태) → OK면 진입점 교체(D1) 검토 → 2단계(분리·브러시 영역편집 생성형) 흡수.
+**2차 피드백 반영(2026-06-20, CanvasEditor만):**
+1. 출력 캔버스에 `overflow-hidden` → 체커보드 아트보드로 클립(합성 출력 outputW/H 크롭과 WYSIWYG). 핸들이 잘리지 않게 선택 레이어 핸들을 클립 밖 오버레이로 분리(숨김 이미지로 박스 크기 맞춤).
+2. 커서 기준 휠/트랙패드 줌 추가(`zoomAtPoint`, 네이티브 wheel + passive:false). 기존 우하단 줌 버튼·팬 모드 유지.
+검증: tsc 0 / build exit0 / CanvasEditor lint 클린 / 기존 패널 회귀 0.
+
+**다음 단계:** 사용자 브라우저 확인(인터랙션) → OK면 진입점 교체(D1) 검토 → 2단계(분리·브러시 영역편집 생성형) 흡수.
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.
