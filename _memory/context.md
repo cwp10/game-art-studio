@@ -37,10 +37,14 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 
 **Step 1 완료(진입점 통합, 2026-06-20):** 결과카드 "이미지"→"캔버스"(canvas_edit), ⋯의 "씬에 추가"·"캔버스 편집" 제거. ImageToolsPanel/SceneComposer는 UI 도달 불가(코드 잔존, 추후 정리). 회귀 0(캔버스가 슈퍼셋이라 기능 손실 없음).
 
+**Step 2 완료(생성형 흡수, 2026-06-21):** 편집·이미지·씬·레이어분리 4기능이 한 캔버스로 통합.
+- **2a 분리(오려내기):** 선택 레이어에서 부위명(쉼표) 입력 → AI 추출(extractObject, 마스크 없음) → 각각 새 레이어로 추가. onExtract prop.
+- **2b 영역 편집(generative fill):** "영역 편집" → 평면 오버레이에서 브러시로 마스크 칠 + 프롬프트 → 그 영역만 재생성, 레이어 교체. 소스해상도 캔버스 #ff0000 → export 검정+빨강(MaskCanvas 포맷), rectRatioPoint 소스픽셀 매핑. onInpaint prop(uploadMask+handleSend).
+- ⚠️ 브러시 정밀도/느낌은 헤드리스 검증 불가 — 사용자 인터랙션 테스트 필요(변형 핸들처럼 반복 가능).
+
 **다음 단계:**
-- **Step 2(미진행, 큰 작업):** 편집(인페인트)·레이어 분리를 캔버스 에디터에 생성형 브러시 도구로 흡수(영역 채우기/분리). 브러시 UI + 마스크 업로드 + 비동기 채팅 연동 — 가장 크고 위험.
 - **Step 3:** 편집 상태 영속화(DB) → 프로젝트처럼 재오픈.
-- **정리:** 도달 불가가 된 ImageToolsPanel/SceneComposer 데드코드 제거(ChatLayout 배선 포함).
+- **정리:** 도달 불가 ImageToolsPanel/SceneComposer 데드코드 제거(ChatLayout 배선 포함). 단 영역편집/분리가 인페인트(MaskCanvas)·레이어분리(LayerCanvas) 결과 카드 경로를 handleSend로 공유하므로, 구 패널 제거 시 그 경로 영향 없는지 확인.
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.
