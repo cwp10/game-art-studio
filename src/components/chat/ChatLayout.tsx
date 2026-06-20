@@ -9,13 +9,11 @@ import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
 import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
 import { CanvasEditor } from "@/components/editor/CanvasEditor";
-import { ImageToolsPanel, POST_FILTER_DEFS, type FilterArg } from "@/components/editor/ImageToolsPanel";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
-import { SceneComposer } from "@/components/editor/SceneComposer";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
 import { CompareSheet } from "@/components/library/CompareSheet";
@@ -78,7 +76,6 @@ type Editing =
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image" } & EditTarget)
   | ({ mode: "normal_map" } & EditTarget)
-  | ({ mode: "image_tools" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -89,8 +86,6 @@ export function ChatLayout() {
   const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget; initialSubjectMode?: "character" | "object" } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
-  // 씬 합성 오버레이 — seedGenerationId 로 첫 레이어 미리채움. null 이면 닫힘.
-  const [sceneOpen, setSceneOpen] = useState<{ seedGenerationId?: string } | null>(null);
   // 9-slice 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
   const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
   // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
@@ -470,7 +465,6 @@ export function ChatLayout() {
   // 편집/스프라이트 패널 닫기 — JSX inline 화살표 대신 안정 참조로 공유(원자적 상태 정리).
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
-  const closeScene = useCallback(() => setSceneOpen(null), []);
   const closeNineSlice = useCallback(() => setNineSliceOpen(null), []);
   const closeButtonState = useCallback(() => setButtonStateOpen(null), []);
   const closeCanvas = useCallback(() => setCanvasOpen(null), []);
@@ -488,14 +482,12 @@ export function ChatLayout() {
         | "resize"
         | "remove_bg"
         | "edit"
-        | "image_tools"
         | "layer_split"
         | "sprite_split"
         | "reskin"
         | "overlay"
         | "make_sheet"
         | "make_normal_map"
-        | "add_to_scene"
         | "open_nine_slice"
         | "open_button_states"
         | "canvas_edit"
@@ -512,7 +504,7 @@ export function ChatLayout() {
       },
     ) => {
       // 우측 편집 패널을 여는 공통 진입 — generationId·width·height 가드 후 editing 상태 set.
-      // (edit/layer_split/sprite_split/reskin/image_tools/normal_map/overlay 가 공유)
+      // (edit/layer_split/sprite_split/reskin/normal_map/overlay 가 공유)
       const openEditPanel = (
         mode: Exclude<Editing, null>["mode"],
         extra?: Partial<Exclude<Editing, null>>,
@@ -562,18 +554,11 @@ export function ChatLayout() {
           });
         },
         make_normal_map: () => openEditPanel("normal_map"),
-        add_to_scene: () => {
-          if (!payload.generationId) return;
-          setEditing(null);
-          setSpriteGen(null);
-          setSceneOpen({ seedGenerationId: payload.generationId });
-        },
         canvas_edit: () => {
           if (!payload.generationId) return;
           // 전체전환 캔버스 에디터 — 다른 패널을 모두 닫고 진입.
           setEditing(null);
           setSpriteGen(null);
-          setSceneOpen(null);
           setNineSliceOpen(null);
           setButtonStateOpen(null);
           setCanvasOpen({ seedGenerationId: payload.generationId });
@@ -611,7 +596,6 @@ export function ChatLayout() {
               inferSubjectModeFromPrompt(payload.prompt),
           });
         },
-        image_tools: () => openEditPanel("image_tools"),
         edit: () => openEditPanel("inpaint"),
         layer_split: () => {
           openEditPanel("layer");
@@ -832,114 +816,6 @@ export function ChatLayout() {
     [editing, handleSend],
   );
 
-  const handleImageCrop = useCallback(
-    async ({
-      srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters, aiScale,
-    }: {
-      srcX: number; srcY: number; srcW: number; srcH: number;
-      targetW: number; targetH: number;
-      opacity: number;
-      filters: FilterArg[];
-      aiScale: boolean;
-    }) => {
-      if (!editing || editing.mode !== "image_tools") return;
-      const genId = editing.generationId;
-      try {
-        const resp = await fetch("/api/crop", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ generationId: genId, srcX, srcY, srcW, srcH, targetW, targetH, opacity }),
-        });
-        if (!resp.ok) throw new Error(await resp.text());
-        const result = await resp.json() as { generationId: string; width: number; height: number };
-        dispatch({
-          type: "add_result_card",
-          tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-          userText: "✂️ 크롭",
-          generationId: result.generationId,
-          width: result.width,
-          height: result.height,
-          kind: "resize",
-        });
-        // 선택된 필터를 POST_FILTER_DEFS 순서대로 순차 적용
-        let lastId = result.generationId;
-        for (const f of POST_FILTER_DEFS) {
-          const arg = filters.find(x => x.id === f.id);
-          if (!arg) continue;
-          if (f.sharp) {
-            // sharp 서버 처리 — 알파채널 완전 보존
-            const fr = await fetch("/api/filter", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ generationId: lastId, filter: f.id, param: arg.param }),
-            });
-            if (fr.ok) {
-              const r = await fr.json() as { generationId: string; width: number; height: number };
-              dispatch({
-                type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: `✨ ${f.label}`,
-                generationId: r.generationId,
-                width: r.width,
-                height: r.height,
-                kind: "resize",
-              });
-              lastId = r.generationId;
-            } else {
-              const err = await fr.json().catch(() => ({ error: `HTTP ${fr.status}` })) as { error?: string };
-              throw new Error(`필터 적용 실패 (${f.label}): ${err.error ?? fr.status}`);
-            }
-          } else if (f.prompt) {
-            // AI 처리
-            const r = await handleSend(f.prompt, { attachmentGenerationIds: [lastId] });
-            if (r) lastId = r.generationId;
-          }
-        }
-        // AI 스케일: 업스케일 방향일 때만 AI 적용 (다운스케일은 sharp가 품질 우위)
-        if (aiScale && srcW > 0 && srcH > 0 && (targetW > srcW || targetH > srcH)) {
-          const aiR = await handleSend(
-            "이 이미지를 고화질로 업스케일해줘. 선명도와 디테일을 향상시켜줘.",
-            { attachmentGenerationIds: [lastId] },
-          );
-          if (aiR) {
-            lastId = aiR.generationId;
-            // 치수가 정확히 targetW×targetH가 아니면 sharp로 보정
-            if (aiR.width !== targetW || aiR.height !== targetH) {
-              const fixResp = await fetch("/api/crop", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  generationId: lastId,
-                  srcX: 0, srcY: 0,
-                  srcW: aiR.width, srcH: aiR.height,
-                  targetW, targetH,
-                  opacity: 100,
-                }),
-              });
-              if (fixResp.ok) {
-                const fixResult = await fixResp.json() as { generationId: string; width: number; height: number };
-                dispatch({
-                  type: "add_result_card",
-                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                  userText: "✨ AI 스케일",
-                  generationId: fixResult.generationId,
-                  width: fixResult.width,
-                  height: fixResult.height,
-                  kind: "resize",
-                });
-                lastId = fixResult.generationId;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error("[crop]", e);
-        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
-      }
-    },
-    [editing, handleSend],
-  );
-
   // [✨ 제안] — 사용자 입력을 LLM 으로 다양화한 3-4개 컨셉을 chat 에 카드로 표시.
   // active session 없으면 신규 생성. dispatch suggestions_requested → API 호출 →
   // suggestions_received. 카드 클릭은 onPickSuggestion 으로 Composer prefill.
@@ -1107,19 +983,6 @@ export function ChatLayout() {
               onCancel={closeEditing}
             />
           );
-        case "image_tools":
-          return (
-            <ImageToolsPanel
-              key={editing.generationId}
-              generationId={editing.generationId}
-              imageUrl={editing.imageUrl}
-              imageWidth={editing.width}
-              imageHeight={editing.height}
-              busy={state.generating}
-              onCrop={handleImageCrop}
-              onCancel={closeEditing}
-            />
-          );
         case "sprite":
           return (
             <SpriteCanvas
@@ -1219,7 +1082,6 @@ export function ChatLayout() {
   const editorPanelOpen =
     editing !== null ||
     spriteGen !== null ||
-    sceneOpen !== null ||
     nineSliceOpen !== null ||
     buttonStateOpen !== null ||
     canvasOpen !== null;
@@ -1330,27 +1192,6 @@ export function ChatLayout() {
             onSubmit={handleSpriteGen}
             onClose={closeSpriteGen}
             onCancel={handleCancel}
-          />
-        </div>
-      )}
-      {sceneOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
-          <SceneComposer
-            seedGenerationId={sceneOpen.seedGenerationId}
-            sessionId={state.activeSessionId}
-            onClose={closeScene}
-            onComposited={res => {
-              dispatch({
-                type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: "🎬 씬 합성",
-                generationId: res.generationId,
-                width: res.width,
-                height: res.height,
-                kind: "composite",
-              });
-              closeScene();
-            }}
           />
         </div>
       )}
