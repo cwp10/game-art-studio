@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Clapperboard,
   Columns2,
   Copy,
   Download,
@@ -9,7 +8,6 @@ import {
   Film,
   Gamepad2,
   Grid3x3,
-  Image,
   Layers,
   Link2,
   Loader2,
@@ -200,11 +198,11 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               <Edit3 size={12} /> 편집
             </button>
             <button
-              onClick={() => onAction?.("image_tools")}
+              onClick={() => onAction?.("canvas_edit")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="업스케일 · 크롭 · 배경 제거"
+              title="캔버스 편집 — 레이어 합성·자유 변형·필터·크롭·배경제거·업스케일·여백제거"
             >
-              <Image size={12} /> 이미지
+              <Wand2 size={12} /> 캔버스
             </button>
             <button
               onClick={() => onAction?.("layer_split")}
@@ -277,20 +275,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                     title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
                   >
                     <Columns2 size={12} /> 비교
-                  </button>
-                  <button
-                    onClick={() => { onAction?.("add_to_scene"); setMenuOpen(false); }}
-                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                    title="씬 합성에 추가 — 여러 이미지를 레이어로 쌓아 한 장으로 병합"
-                  >
-                    <Clapperboard size={12} /> 씬에 추가
-                  </button>
-                  <button
-                    onClick={() => { onAction?.("canvas_edit"); setMenuOpen(false); }}
-                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                    title="캔버스 편집 — 여러 레이어를 자유 변형·필터하며 한 장으로 합치는 통합 캔버스"
-                  >
-                    <Wand2 size={12} /> 🎨 캔버스 편집
                   </button>
                   {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
                   {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (
