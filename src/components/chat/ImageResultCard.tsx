@@ -191,7 +191,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             <button
               onClick={() => onAction?.("edit")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="인페인트 — 영역을 brush 로 칠해서 부분 편집"
+              title="영역 편집 — 캔버스 에디터에서 브러시로 부분 재생성"
             >
               <Edit3 size={12} /> 편집
             </button>

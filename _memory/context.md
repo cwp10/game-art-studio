@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-21 (통합 캔버스 에디터 — Step 2 + 정리 / ▶다음: 편집→캔버스 통합)
+마지막 업데이트: 2026-06-21 (편집(MaskCanvas)→캔버스 영역편집 통합 완료 + MaskCanvas 은퇴 / ▶다음: Step 3 영속화)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -52,25 +52,20 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 
 **정리 완료(2026-06-21):** 도달 불가 ImageToolsPanel·SceneComposer 제거(컴포넌트 파일 + ChatLayout image_tools/sceneOpen/add_to_scene/handleImageCrop 배선, MessageList/ImageResultCard Action union). 1102줄 삭제. 편집(MaskCanvas)·레이어분리(LayerCanvas) 결과카드 진입점은 빠른 단일이미지 경로로 유지.
 
-## ▶ 다음 작업 (새 세션에서 이어서 — 사용자 합의됨)
+### 편집→캔버스 영역편집 통합 + MaskCanvas 은퇴 완료 — 2026-06-21
+편집(MaskCanvas 인페인트)을 캔버스 에디터 "영역편집"으로 합치고 참조 이미지를 이식한 뒤 MaskCanvas를 완전 은퇴. 이미지/씬 통합과 동일 패턴. **사용자 결정: 지우개 + 스트로크 undo 둘 다 포함.** 백엔드 변경 0(참조 인페인트는 백엔드 기존 지원).
+- **CanvasEditor.tsx**: `onInpaint` 4-arg화(+`referenceGenerationId?`) · `initialTool?: "inpaint"` prop(마운트 1회 init effect로 `openTool("inpaint", layers[0])` 자동, set-state-in-effect 의도적 disable) · 지우개(brushTool, onBrush*에서 `destination-out`/`source-over` 토글) · 스트로크 undo(onBrushDown 첫 stamp 전 `getImageData` 스냅샷 push 상한30, pop→putImageData, clearBrush/closeTool 리셋) · 참조 picker(하단 바 팝오버, 세션/갤러리 탭, `listGenerations` 재사용, kind!=="mask"+자기 제외) · 하단 바 UI(브러시/지우개 토글·되돌리기·전체지우기·참조). import +Brush/Eraser/Image as ImageIcon.
+- **ChatLayout.tsx**: `canvasOpen`에 `initialTool?` 추가 · `handleAction`에 `openCanvas(genId, initialTool?)` 헬퍼 추출(canvas_edit/edit 공유) · `edit: openCanvas(genId,"inpaint")`(기존 openEditPanel("inpaint") 대체) · CanvasEditor 렌더에 `initialTool` + onInpaint 참조 배선(`ref?[genId,ref]:[genId]`) · **MaskCanvas 은퇴**(import·Editing 타입 inpaint 멤버·handleInpaint·renderEditPanel case "inpaint" 제거).
+- **ImageResultCard.tsx**: "편집" 버튼 title만 갱신(action "edit" 유지 — 이제 canvas로 라우팅).
+- **삭제**: `src/components/editor/MaskCanvas.tsx`.
+- **검증(visual-qa PASS)**: tsc 0 / build 성공 / 변경파일 lint 클린(ChatLayout 2 error는 pre-existing — 145 activeSessionIdRef refs, 1299 EmptyState set-state, git stash 베이스라인 HEAD 146/1374에서 확인). 경계면(onInpaint 4-arg·initialTool·참조 순서) 일치 · 진입 사슬(편집→openCanvas→initialTool→init effect→openTool→영역편집 바) 무결 · 나머지 13개 액션 회귀 0 · MaskCanvas 실코드 참조 0(남은 문자열은 포맷/훅 계보 주석뿐).
+- ⚠️ **헤드리스 한계**: 브러시/지우개 정밀도·스트로크 undo 체감·참조 첨부 실제 생성은 사용자 인터랙션 테스트 필요(변형 핸들과 동일).
+- 산출물: `_workspace/contract_inpaint-merge.md`, `_workspace/fullstack_inpaint-merge_summary.md`, `_workspace/qa_inpaint-merge_summary.md`.
 
-**편집(MaskCanvas 인페인트)을 캔버스 에디터 "영역편집"으로 통합 → MaskCanvas 은퇴.**
-이미지/씬 통합과 동일 패턴. 캔버스 "영역편집"이 이미 인페인트(브러시 마스크+프롬프트)를 함.
-사용자가 "합치고 싶다"고 했고, **참조 이미지 포함해서** 합치기로 가닥. 미결정: 지우개/스트로크 undo 포함 여부(사용자에게 물어볼 것).
+**보완(2026-06-21, CanvasEditor만)**: 통합 시 누락됐던 MaskCanvas의 원클릭 "오브젝트 지우기"를 영역편집 하단 바에 복원. `handleInpaintSubmit`을 `runInpaint(prompt, reference)`로 추출 → 채우기(사용자 프롬프트+참조)와 오브젝트 지우기(고정 `OBJECT_REMOVE_PROMPT`=MaskCanvas와 동일 seamless-background 문구, 참조 없음)가 공유. `brushPainted` 상태로 칠한 마스크 있을 때만 버튼 활성(onBrushDown set, clearBrush/closeTool 리셋). danger 스타일 Trash2 버튼. 검증: tsc 0 / build 성공 / lint 클린.
 
-**선결: 참조 이미지 이식 (회귀 0의 핵심).** 백엔드는 이미 참조 인페인트 지원
-(현재 `ChatLayout.handleInpaint`가 `referenceGenerationId`를 두 번째 attachment로 넘김 → MCP inpaint_image).
-캔버스 영역편집엔 참조 첨부 UI가 없음 → MaskCanvas의 참조 picker(세션/갤러리 탭, `refId` 상태)를 캔버스 하단 영역편집 바로 이식.
+## ▶ 다음 작업
 
-**구현 단계:**
-1. `CanvasEditor.tsx` 영역편집 하단 바에 "참조 첨부" 추가(MaskCanvas 참조 picker 참고). `onInpaint` prop 시그니처에 optional `referenceGenerationId` 추가.
-2. `ChatLayout.tsx`의 CanvasEditor `onInpaint` 배선: `uploadMask` + `handleSend(prompt, { attachmentGenerationIds: ref ? [genId, ref] : [genId], maskGenerationId })` (참조 있으면 둘째 첨부).
-3. *(선택)* 지우개 + 스트로크 undo 이식.
-4. 결과카드 **"편집" 버튼 → 캔버스 에디터를 영역편집 모드로 바로 열기**(시드 이미지=첫 레이어). ChatLayout `handleAction`의 `edit: () => openEditPanel("inpaint")`를 canvas 진입+영역편집 활성으로 변경. *(편집 진입 시 tool="inpaint" 자동 세팅 필요 — CanvasEditor에 초기 tool prop 또는 openTool 자동호출.)*
-5. **MaskCanvas 은퇴**: `editing.mode==="inpaint"` 렌더 case + `handleInpaint` + MaskCanvas import + Editing 타입 inpaint 멤버 + Action/MessageList union의 "edit" 정리. `MaskCanvas.tsx` 파일 삭제. (이미지/씬 정리 커밋 49c28ee 와 동일 절차)
-- 트레이드오프: 한 방 인페인트 흐름이 길어짐(캔버스→브러시→채우기→레이어→합치기). 완화: 영역편집 모드 직진입 + 단일 레이어 인페인트 자동 카드화 고려.
-
-**이후 단계:**
 - **Step 3:** 편집 상태 영속화(DB) → 닫아도 레이어 배치 복원. 현재 휘발.
 - **(선택)** 나머지 패널(리스킨·노멀맵·9-slice·버튼상태·스프라이트) UX 일관성(원래 과제).
 - **(선택)** 결과카드 "레이어" 버튼도 캔버스 분리와 중복 — 은퇴 검토.

@@ -2,9 +2,12 @@
 
 import {
   ArrowLeft,
+  Brush,
+  Eraser,
   Eye,
   EyeOff,
   GripVertical,
+  Image as ImageIcon,
   Loader2,
   Plus,
   Redo2,
@@ -101,12 +104,15 @@ type Props = {
     generationId: string,
     prompt: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
-  /** 영역 편집(generative fill) — generationId + 마스크(dataUrl) + prompt 로 칠한 영역 재생성. */
+  /** 영역 편집(generative fill) — generationId + 마스크(dataUrl) + prompt(+선택 참조)로 칠한 영역 재생성. */
   onInpaint: (
     generationId: string,
     maskDataUrl: string,
     prompt: string,
+    referenceGenerationId?: string | null,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  /** 진입 직후 자동으로 열 도구 — 결과카드 "편집"이 영역 편집으로 직진입할 때 사용. */
+  initialTool?: "inpaint";
 };
 
 let layerSeq = 0;
@@ -168,6 +174,10 @@ function cssFilter(f: LayerFilters): string {
   return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) hue-rotate(${f.hue}deg) blur(${f.blur}px)`;
 }
 
+/** 오브젝트 지우기 고정 프롬프트 — 칠한 영역을 주변 배경으로 메워 오브젝트를 없앤다(은퇴한 MaskCanvas 와 동일 문구). */
+const OBJECT_REMOVE_PROMPT =
+  "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there";
+
 export function CanvasEditor({
   seedGenerationId,
   sessionId,
@@ -178,6 +188,7 @@ export function CanvasEditor({
   onUpscale,
   onExtract,
   onInpaint,
+  initialTool,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -212,6 +223,19 @@ export function CanvasEditor({
   const brushCanvasRef = useRef<HTMLCanvasElement>(null);
   const brushDrawingRef = useRef(false);
   const brushLastRef = useRef<{ x: number; y: number } | null>(null);
+  // 브러시 도구 — 칠하기/지우개. 지우개는 stamp 시 destination-out 으로 칠한 빨강을 깎아낸다.
+  const [brushTool, setBrushTool] = useState<"brush" | "eraser">("brush");
+  // 마스크에 한 번이라도 칠했는지 — "오브젝트 지우기"(고정 프롬프트) 버튼 활성 가드.
+  const [brushPainted, setBrushPainted] = useState(false);
+  // 스트로크 단위 undo — 브러시 down 직전 마스크 캔버스 ImageData 스냅샷을 적재(상한 30).
+  const brushUndoRef = useRef<ImageData[]>([]);
+  const [brushUndoCount, setBrushUndoCount] = useState(0);
+  // 참조 이미지(MaskCanvas 이식) — 선택 시 인페인트 attachment 둘째로 전달. 하단 바 팝오버로 고름.
+  const [refOpen, setRefOpen] = useState(false);
+  const [refScope, setRefScope] = useState<"session" | "gallery">("session");
+  const [sessionRefs, setSessionRefs] = useState<Generation[] | null>(null);
+  const [galleryRefs, setGalleryRefs] = useState<Generation[] | null>(null);
+  const [refId, setRefId] = useState<string | null>(null);
   // 선택 레이어 이미지의 변형 전 표시 크기(px) — 핸들 박스를 scale 밖에서 일정 크기로 그리기 위해.
   const [selBox, setSelBox] = useState<{ w: number; h: number } | null>(null);
   // 드래그 중 센터 스냅 가이드(세로/가로 선) 표시.
@@ -341,6 +365,22 @@ export function CanvasEditor({
       .catch(() => {});
   }, [pickerTab, galleryAssets.length]);
 
+  // 참조 이미지 목록(MaskCanvas 이식) — 영역 편집 도구가 열렸을 때만, 캐시 유지(재로딩 X).
+  // mask noise 와 현재 선택 레이어 자신은 제외(자기 참조 의미 없음).
+  const selectedGenId = selected?.generationId ?? null;
+  useEffect(() => {
+    if (tool !== "inpaint" || sessionRefs !== null) return;
+    listGenerations({ sessionId: sessionId ?? undefined, limit: 60 })
+      .then(gens => setSessionRefs(gens.filter(g => g.kind !== "mask" && g.id !== selectedGenId)))
+      .catch(() => setSessionRefs([]));
+  }, [tool, sessionRefs, sessionId, selectedGenId]);
+  useEffect(() => {
+    if (tool !== "inpaint" || refScope !== "gallery" || galleryRefs !== null) return;
+    listGenerations({ limit: 120 })
+      .then(gens => setGalleryRefs(gens.filter(g => g.kind !== "mask" && g.id !== selectedGenId)))
+      .catch(() => setGalleryRefs([]));
+  }, [tool, refScope, galleryRefs, selectedGenId]);
+
   const removeLayer = useCallback(
     (id: string) => {
       pushUndo();
@@ -464,6 +504,12 @@ export function CanvasEditor({
     setInpaintPrompt("");
     setInpaintNat(null);
     setExtractInput("");
+    setBrushTool("brush");
+    setBrushPainted(false);
+    setRefId(null);
+    setRefOpen(false);
+    brushUndoRef.current = [];
+    setBrushUndoCount(0);
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   }, []);
@@ -482,9 +528,32 @@ export function CanvasEditor({
     },
     [],
   );
+  // 진입 직후 initialTool 자동 진입(결과카드 "편집" → 영역 편집 직진입). ran-once 가드로 1회만.
+  // 마운트 시 의도적 1회 자동 오픈이라 openTool(setState) 동기 호출 — set-state-in-effect 무시.
+  const initRanRef = useRef(false);
+  useEffect(() => {
+    if (initRanRef.current || !initialTool) return;
+    initRanRef.current = true;
+    const seed = layers[0];
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (seed) openTool(initialTool, seed);
+  }, [initialTool, layers, openTool]);
   const clearBrush = useCallback(() => {
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+    brushUndoRef.current = [];
+    setBrushUndoCount(0);
+    setBrushPainted(false);
+  }, []);
+  // 스트로크 단위 되돌리기 — 마지막 스냅샷 복원(없으면 빈 캔버스).
+  const undoBrushStroke = useCallback(() => {
+    const c = brushCanvasRef.current;
+    const ctx = c?.getContext("2d");
+    if (!c || !ctx) return;
+    const snap = brushUndoRef.current.pop();
+    if (snap) ctx.putImageData(snap, 0, 0);
+    else ctx.clearRect(0, 0, c.width, c.height);
+    setBrushUndoCount(brushUndoRef.current.length);
   }, []);
   // 화면 포인터 → 레이어 원본 픽셀 좌표(점 단위 역변환 — 비트맵 회전 없이 정밀).
   // 레이어 중심은 회전과 무관하게 캔버스 bbox 중심과 일치 → 거기서 un-flip → un-rotate → un-scale.
@@ -522,7 +591,14 @@ export function CanvasEditor({
       if (!ctx || !canvas.width) return;
       e.preventDefault();
       e.stopPropagation();
+      // 스트로크 시작 전 현재 마스크를 스냅샷으로 적재 — 되돌리기 단위(상한 30, 메모리 보호).
+      brushUndoRef.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+      if (brushUndoRef.current.length > 30) brushUndoRef.current.shift();
+      setBrushUndoCount(brushUndoRef.current.length);
+      setBrushPainted(true);
       brushDrawingRef.current = true;
+      // 지우개=destination-out(칠한 빨강의 alpha 만 깎음), 브러시=source-over. fillStyle 은 빨강 유지.
+      ctx.globalCompositeOperation = brushTool === "eraser" ? "destination-out" : "source-over";
       ctx.fillStyle = "#ff0000";
       const p = screenToSource(canvas, e.clientX, e.clientY, layer);
       stampEllipse(ctx, p.x, p.y, p.rx, p.ry);
@@ -531,13 +607,15 @@ export function CanvasEditor({
         canvas.setPointerCapture(e.pointerId);
       } catch {}
     },
-    [screenToSource],
+    [screenToSource, brushTool],
   );
   const onBrushMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>, layer: Layer) => {
       if (!brushDrawingRef.current) return;
       const ctx = e.currentTarget.getContext("2d");
       if (!ctx) return;
+      ctx.globalCompositeOperation = brushTool === "eraser" ? "destination-out" : "source-over";
+      ctx.fillStyle = "#ff0000";
       const p = screenToSource(e.currentTarget, e.clientX, e.clientY, layer);
       const last = brushLastRef.current ?? { x: p.x, y: p.y };
       // last → 현재 점 사이를 타원으로 보간 스탬프(끊김 없이 균일 굵기).
@@ -551,7 +629,7 @@ export function CanvasEditor({
       }
       brushLastRef.current = { x: p.x, y: p.y };
     },
-    [screenToSource],
+    [screenToSource, brushTool],
   );
   const onBrushUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     brushDrawingRef.current = false;
@@ -561,35 +639,46 @@ export function CanvasEditor({
     } catch {}
   }, []);
 
-  const handleInpaintSubmit = useCallback(async () => {
-    const layer = layers.find(l => l.id === selectedLayerId);
-    const canvas = brushCanvasRef.current;
-    if (!layer || !canvas || inpaintBusy || !inpaintPrompt.trim()) return;
-    // export: 소스 해상도 검정 배경 + 빨강 칠.
-    const out = document.createElement("canvas");
-    out.width = canvas.width;
-    out.height = canvas.height;
-    const octx = out.getContext("2d");
-    if (!octx) return;
-    octx.fillStyle = "#000000";
-    octx.fillRect(0, 0, out.width, out.height);
-    octx.drawImage(canvas, 0, 0);
-    const maskDataUrl = out.toDataURL("image/png");
-    setInpaintBusy(true);
-    setError(null);
-    try {
-      const r = await onInpaint(layer.generationId, maskDataUrl, inpaintPrompt.trim());
-      if (r) {
-        pushUndo();
-        patchLayer(layer.id, { generationId: r.generationId });
-        closeTool();
+  // 칠한 마스크 + 프롬프트로 인페인트 실행 — 채우기(사용자 프롬프트+참조)와 오브젝트 지우기(고정 프롬프트)가 공유.
+  const runInpaint = useCallback(
+    async (prompt: string, reference: string | null) => {
+      const layer = layers.find(l => l.id === selectedLayerId);
+      const canvas = brushCanvasRef.current;
+      if (!layer || !canvas || inpaintBusy || !prompt.trim()) return;
+      // export: 소스 해상도 검정 배경 + 빨강 칠.
+      const out = document.createElement("canvas");
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const octx = out.getContext("2d");
+      if (!octx) return;
+      octx.fillStyle = "#000000";
+      octx.fillRect(0, 0, out.width, out.height);
+      octx.drawImage(canvas, 0, 0);
+      const maskDataUrl = out.toDataURL("image/png");
+      setInpaintBusy(true);
+      setError(null);
+      try {
+        const r = await onInpaint(layer.generationId, maskDataUrl, prompt.trim(), reference);
+        if (r) {
+          pushUndo();
+          patchLayer(layer.id, { generationId: r.generationId });
+          closeTool();
+        }
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setInpaintBusy(false);
       }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setInpaintBusy(false);
-    }
-  }, [layers, selectedLayerId, inpaintBusy, inpaintPrompt, onInpaint, pushUndo, patchLayer, closeTool]);
+    },
+    [layers, selectedLayerId, inpaintBusy, onInpaint, pushUndo, patchLayer, closeTool],
+  );
+  // 채우기 — 사용자 프롬프트 + 선택 참조로 재생성.
+  const handleInpaintSubmit = useCallback(
+    () => runInpaint(inpaintPrompt, refId),
+    [runInpaint, inpaintPrompt, refId],
+  );
+  // 오브젝트 지우기 — 칠한 영역을 주변 배경으로 메워 오브젝트 제거(고정 프롬프트, 참조 없음).
+  const handleObjectRemove = useCallback(() => runInpaint(OBJECT_REMOVE_PROMPT, null), [runInpaint]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -1502,22 +1591,125 @@ export function CanvasEditor({
               <>
                 <Wand2 size={14} className="text-[color:var(--accent)]" />
                 <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
-                <span className="text-[11px] text-text-muted">레이어 위에 다시 그릴 영역을 칠하세요</span>
-                <span className="ml-1 text-[11px] text-text-muted">브러시</span>
+                {/* 브러시/지우개 토글 — 지우개는 destination-out 으로 칠한 빨강을 깎아낸다. */}
+                <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                  <button
+                    onClick={() => setBrushTool("brush")}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      brushTool === "brush"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="브러시 — 다시 그릴 영역을 칠하기"
+                  >
+                    <Brush size={12} /> 브러시
+                  </button>
+                  <button
+                    onClick={() => setBrushTool("eraser")}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      brushTool === "eraser"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="지우개 — 칠한 영역 깎아내기"
+                  >
+                    <Eraser size={12} /> 지우개
+                  </button>
+                </div>
                 <input
                   type="range"
                   min={5}
                   max={120}
                   value={inpaintBrush}
                   onChange={e => setInpaintBrush(Number(e.target.value))}
-                  className="w-24 accent-[color:var(--accent)]"
+                  className="w-20 accent-[color:var(--accent)]"
+                  title="브러시 크기"
                 />
+                <button
+                  onClick={undoBrushStroke}
+                  disabled={brushUndoCount === 0}
+                  className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30"
+                  title="직전 스트로크 되돌리기"
+                >
+                  <RotateCcw size={12} /> 되돌리기
+                </button>
                 <button
                   onClick={clearBrush}
                   className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                  title="칠한 영역 전체 지우기"
                 >
-                  지우기
+                  전체지우기
                 </button>
+                {/* 참조 이미지 팝오버(선택) — 선택 시 인페인트의 둘째 첨부(참조)로 전달. */}
+                <div className="relative">
+                  <button
+                    onClick={() => setRefOpen(o => !o)}
+                    className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${
+                      refId
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary"
+                        : "border-border text-text-muted hover:text-text-primary"
+                    }`}
+                    title="참조 이미지 — 프롬프트와 함께 인페인트에 사용(선택)"
+                  >
+                    <ImageIcon size={12} /> 참조{refId ? " ✓" : ""}
+                  </button>
+                  {refOpen && (
+                    <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-lg border border-border bg-bg-panel p-2 shadow-xl">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-[11px] text-text-muted">참조 이미지 (선택)</span>
+                        <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[10px]">
+                          {(["session", "gallery"] as const).map(scope => (
+                            <button
+                              key={scope}
+                              onClick={() => setRefScope(scope)}
+                              className={`rounded px-1.5 py-0.5 ${
+                                refScope === scope
+                                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                                  : "text-text-muted hover:text-text-primary"
+                              }`}
+                            >
+                              {scope === "session" ? "세션" : "갤러리"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {(() => {
+                        const list = refScope === "session" ? sessionRefs : galleryRefs;
+                        if (list === null)
+                          return <p className="py-2 text-center text-[10px] text-text-muted/60">불러오는 중…</p>;
+                        if (list.length === 0)
+                          return <p className="py-2 text-center text-[10px] text-text-muted/60">이미지 없음</p>;
+                        return (
+                          <div className="grid max-h-40 grid-cols-4 gap-1 overflow-y-auto">
+                            {list.map(g => {
+                              const sel = refId === g.id;
+                              return (
+                                <button
+                                  key={g.id}
+                                  onClick={() => setRefId(sel ? null : g.id)}
+                                  className={`relative aspect-square overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/8px_8px] ${
+                                    sel
+                                      ? "border-[color:var(--accent)] ring-1 ring-[color:var(--accent)]"
+                                      : "border-border hover:border-[color:var(--accent)]/50"
+                                  }`}
+                                  title={g.prompt ?? g.id}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={`/api/images/${g.id}`} alt="" className="h-full w-full object-contain" />
+                                  {sel && (
+                                    <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[8px] font-bold text-white">
+                                      ✓
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
                 <input
                   value={inpaintPrompt}
                   onChange={e => setInpaintPrompt(e.target.value)}
@@ -1537,6 +1729,15 @@ export function CanvasEditor({
                   ) : (
                     "채우기 ▸"
                   )}
+                </button>
+                {/* 오브젝트 지우기 — 칠한 영역을 주변 배경으로 메워 제거(프롬프트 불필요, 칠해야 활성). */}
+                <button
+                  onClick={handleObjectRemove}
+                  disabled={inpaintBusy || !brushPainted}
+                  className="flex h-7 items-center gap-1 rounded-lg border border-[color:var(--danger)]/50 px-2.5 text-xs font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger)]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="칠한 영역의 오브젝트를 지우고 주변 배경으로 채움"
+                >
+                  <Trash2 size={13} /> 오브젝트 지우기
                 </button>
               </>
             ) : tool === "extract" ? (

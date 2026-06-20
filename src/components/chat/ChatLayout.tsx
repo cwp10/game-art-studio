@@ -10,7 +10,6 @@ import { StatusButton } from "./StatusButton";
 import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
 import { CanvasEditor } from "@/components/editor/CanvasEditor";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
-import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
@@ -71,7 +70,6 @@ type EditTarget = {
   prompt?: string;
 };
 type Editing =
-  | ({ mode: "inpaint" } & EditTarget)
   | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image" } & EditTarget)
@@ -91,7 +89,8 @@ export function ChatLayout() {
   // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
   const [buttonStateOpen, setButtonStateOpen] = useState<{ generationId: string } | null>(null);
   // 통합 캔버스 에디터 — 전체전환(inset-0). seedGenerationId 로 첫 레이어. null 이면 닫힘.
-  const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string } | null>(null);
+  // initialTool 이 "inpaint" 면 진입 직후 영역 편집 도구를 자동으로 연다(결과카드 "편집" 진입).
+  const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string; initialTool?: "inpaint" } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -472,7 +471,7 @@ export function ChatLayout() {
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
   // resize / remove_bg 는 generationId 를 attach 해서 Claude 가 inputGenerationId 로
-  // 사용하도록 한다. edit (인페인트) 는 우측 패널 열어 MaskCanvas 띄움.
+  // 사용하도록 한다. edit (인페인트) 는 캔버스 에디터를 영역 편집 모드로 직진입시킨다.
   const handleAction = useCallback(
     (
       action:
@@ -522,6 +521,16 @@ export function ChatLayout() {
         } as Editing);
       };
 
+      // 전체전환 캔버스 에디터 진입 — 다른 패널을 모두 닫고 연다. initialTool 이 있으면
+      // 진입 직후 해당 도구(영역 편집)를 자동으로 띄운다.
+      const openCanvas = (genId: string, initialTool?: "inpaint") => {
+        setEditing(null);
+        setSpriteGen(null);
+        setNineSliceOpen(null);
+        setButtonStateOpen(null);
+        setCanvasOpen({ seedGenerationId: genId, initialTool });
+      };
+
       const handlers: Partial<Record<typeof action, () => void>> = {
         compare: () => {
           if (!payload.generationId) return;
@@ -556,12 +565,7 @@ export function ChatLayout() {
         make_normal_map: () => openEditPanel("normal_map"),
         canvas_edit: () => {
           if (!payload.generationId) return;
-          // 전체전환 캔버스 에디터 — 다른 패널을 모두 닫고 진입.
-          setEditing(null);
-          setSpriteGen(null);
-          setNineSliceOpen(null);
-          setButtonStateOpen(null);
-          setCanvasOpen({ seedGenerationId: payload.generationId });
+          openCanvas(payload.generationId);
         },
         open_nine_slice: () => {
           if (!payload.generationId) return;
@@ -596,7 +600,10 @@ export function ChatLayout() {
               inferSubjectModeFromPrompt(payload.prompt),
           });
         },
-        edit: () => openEditPanel("inpaint"),
+        edit: () => {
+          if (!payload.generationId) return;
+          openCanvas(payload.generationId, "inpaint");
+        },
         layer_split: () => {
           openEditPanel("layer");
           if (payload.generationId && payload.width && payload.height) setLayerResults([]);
@@ -607,77 +614,6 @@ export function ChatLayout() {
       handlers[action]?.();
     },
     [handleSend],
-  );
-
-  // 편집 패널 '실행' — 인페인트 / 리사이즈(긴 변 기준, 비율 유지) / 배경 제거를 설정된 것만
-  // 순차 적용한다. 각 단계 결과를 다음 단계 입력으로 이어받고, 최종 결과를 패널의 새 베이스로
-  // 띄워 연속 편집. 각 단계는 handleSend 를 거쳐 채팅 타임라인에 그대로 누적된다.
-  const handleInpaint = useCallback(
-    async ({
-      maskDataUrl,
-      prompt,
-      resizeTarget,
-      removeBg,
-      referenceGenerationId,
-    }: {
-      maskDataUrl: string | null;
-      prompt: string;
-      resizeTarget: number | null;
-      removeBg: boolean;
-      referenceGenerationId: string | null;
-    }) => {
-      if (!editing || editing.mode !== "inpaint") return;
-      let curId = editing.generationId;
-      let curW = editing.width;
-      let curH = editing.height;
-      try {
-        // 1. 인페인트 (마스크 + 프롬프트가 있을 때만)
-        if (maskDataUrl && prompt) {
-          const maskId = await uploadMask(curId, maskDataUrl);
-          // 참조 이미지가 있으면 첫=입력 둘째=참조 순서로 attachment 에 포함.
-          const attachments = referenceGenerationId
-            ? [curId, referenceGenerationId]
-            : [curId];
-          const r = await handleSend(prompt, {
-            attachmentGenerationIds: attachments,
-            maskGenerationId: maskId,
-          });
-          if (r) ({ generationId: curId, width: curW, height: curH } = r);
-        }
-        // 2. 리사이즈 — 긴 변(가로·세로 중 큰 쪽)을 선택 크기로, 비율 유지.
-        if (resizeTarget) {
-          const r = await handleSend(
-            `이 이미지의 긴 변(가로·세로 중 큰 쪽)을 ${resizeTarget}px 로 리사이즈해줘. 가로세로 비율은 그대로 유지.`,
-            { attachmentGenerationIds: [curId] },
-          );
-          if (r) ({ generationId: curId, width: curW, height: curH } = r);
-        }
-        // 3. 배경 제거
-        if (removeBg) {
-          const r = await handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
-            attachmentGenerationIds: [curId],
-          });
-          if (r) ({ generationId: curId, width: curW, height: curH } = r);
-        }
-        // 최종 결과를 새 베이스로 (변경이 있었을 때만)
-        if (curId !== editing.generationId) {
-          setEditing({
-            mode: "inpaint",
-            generationId: curId,
-            imageUrl: `/api/images/${curId}`,
-            width: curW,
-            height: curH,
-          });
-        }
-      } catch (e) {
-        console.error("[edit]", e);
-        dispatch({
-          type: "sse",
-          event: { type: "error", message: friendlyError((e as Error).message) },
-        });
-      }
-    },
-    [editing, handleSend],
   );
 
   // ReskinPanel 이 submit 한 payload → 모드별 자연어 메시지 + attachments 로 handleSend.
@@ -954,21 +890,6 @@ export function ChatLayout() {
     if (!editing) return null;
     const panel = (() => {
       switch (editing.mode) {
-        case "inpaint":
-          return (
-            <MaskCanvas
-              key={editing.generationId}
-              parentGenerationId={editing.generationId}
-              imageUrl={editing.imageUrl}
-              imageWidth={editing.width}
-              imageHeight={editing.height}
-              sessionId={state.activeSessionId}
-              busy={state.generating}
-              onSubmit={handleInpaint}
-              onCancel={closeEditing}
-              onCancelGeneration={handleCancel}
-            />
-          );
         case "layer":
           return (
             <LayerCanvas
@@ -1102,7 +1023,7 @@ export function ChatLayout() {
           generating={state.generating}
         />
       )}
-      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 MaskCanvas 가 flex-1 로 남은 공간 차지.
+      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 편집 패널이 flex-1 로 남은 공간 차지.
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
           중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
       <div
@@ -1261,6 +1182,7 @@ export function ChatLayout() {
         // 전체전환(full-takeover) — CanvasEditor 가 내부에서 fixed inset-0 z-40 으로 렌더.
         <CanvasEditor
           seedGenerationId={canvasOpen.seedGenerationId}
+          initialTool={canvasOpen.initialTool}
           sessionId={state.activeSessionId}
           busy={state.generating}
           onClose={closeCanvas}
@@ -1292,10 +1214,13 @@ export function ChatLayout() {
               extractObject: true,
             })
           }
-          onInpaint={async (genId, maskDataUrl, prompt) => {
+          onInpaint={async (genId, maskDataUrl, prompt, referenceGenerationId) => {
             const maskId = await uploadMask(genId, maskDataUrl);
+            // 참조 이미지가 있으면 첫=입력 둘째=참조 순서로 attachment 에 포함(MCP inpaint_image).
             return handleSend(prompt, {
-              attachmentGenerationIds: [genId],
+              attachmentGenerationIds: referenceGenerationId
+                ? [genId, referenceGenerationId]
+                : [genId],
               maskGenerationId: maskId,
             });
           }}
