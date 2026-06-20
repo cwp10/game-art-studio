@@ -19,8 +19,20 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 핵심 파일:
 - `src/lib/image-backend/index.ts` — `ImageBackend` 인터페이스, `ImageJob`/`ImageResult`/`ProgressCallback` 타입
 - `src/lib/image-backend/codex-exec.ts` — spawn 인자, `buildNaturalPrompt()`, stage 추론, output 회수, chroma-key
-- `src/lib/mcp/server.ts` — 도구 라우팅 + 공통 생성 처리
+- `src/lib/image-backend/composite-layers.ts` — `mergeImages()` / `placeWithTransform()` sharp 합성 (contain-fit, alpha, rotation, flipH, stretchW/H, filters)
+- `src/lib/image-backend/composite-runner.ts` — `runComposite()` 공통 오케스트레이터 (라우트·MCP 공유)
+- `src/lib/image-backend/sprite-effect.ts` — `applySpritesheetEffect()` 셀별 이펙트(drop_shadow/outline/glow)
+- `src/lib/image-backend/sprite-effect-runner.ts` — `runSpriteEffect()` 공통 오케스트레이터
+- `src/lib/image-backend/nine-slice.ts` — `makeNineSliceGrid()` / `scaleWithNineSlice()`
+- `src/lib/image-backend/button-states.ts` — `generateButtonState()` (normal/hover/pressed sharp 변환)
+- `src/lib/image-backend/recolor.ts` — 색상 재채색 처리
+- `src/lib/image-backend/spritesheet-postprocess.ts` — `normalizeSpritesheetCells()`, `chromaKeyFile()`, `fallbackBgRemove()`
+- `src/lib/image-backend/spritesheet-reorder.ts` — 스프라이트 프레임 재정렬
+- `src/lib/image-backend/pose-reference.ts` — 포즈 참조 이미지 처리
+- `src/lib/mcp/server.ts` — 도구 라우팅 + 공통 생성 처리 (도구: generate_image / make_spritesheet / edit_image / upscale_image / resize_image / remove_background / inpaint_image / composite_scene / apply_sprite_effect)
 - `src/lib/mcp/handlers/spritesheet-handler.ts` — `make_spritesheet` 전체 흐름 (facing 결정, 그리드 검증, 다방향 stitch)
+- `src/lib/mcp/handlers/normal-map-handler.ts` — 노멀 맵 생성 처리
+- `src/lib/mcp/handlers/reskin-handler.ts` — 리스킨 처리
 - `src/lib/mcp/spritesheet-classify.ts` — 순수 함수 모듈: `inferSubjectType`, `classifyAnchor`, `isLocomotion`, `isRunning`, `directionLabels`, `buildDirectionPrompt`
 
 ## 스프라이트 프롬프트 계층 — 깨지기 쉬운 불변식

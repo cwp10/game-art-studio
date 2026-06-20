@@ -55,6 +55,10 @@ yarn-error.log*
 # local plans
 /.local-plans/
 
+# orchestrator workspace (중간 산출물)
+/_workspace/
+/_workspace_prev/
+
 
 # typescript
 *.tsbuildinfo

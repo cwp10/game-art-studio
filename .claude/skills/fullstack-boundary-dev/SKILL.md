@@ -17,6 +17,35 @@ React(components) ⇄ lib/api/client.ts ⇄ app/api/* (Next)
 
 **Next와 MCP 서버는 별도 프로세스이며 WAL로 같은 `data/app.db`를 공유한다.** 한쪽에서 쓴 행을 다른 쪽이 읽는다.
 
+## 핵심 파일 지도
+
+### API 라우트 (`src/app/api/`)
+chat, composite, crop, describe, export, filter, generations/[id], generations, images/[id], images/[id]/opacity, layer-parts, layer-suggest, layers, logs, nine-slice, nine-slice-scale, normal-map, presets/[id], presets, prompts/[id], prompts, reskin/recolor, reskin-suggest, sessions/[id], sessions/[id]/gallery-insert, sessions/[id]/messages, sessions, sprite-effect, sprite-frame/regenerate, sprite-suggest, status, suggest, thumbnails/[id], upload, button-states, cleanup, config
+
+### React 컴포넌트 (`src/components/`)
+**chat:** ChatLayout, Composer, ImageResultCard, MessageList, SessionList, StatusButton, ToolCallBlock, chat-state.ts  
+**editor:**
+- `CanvasEditor.tsx` — 전체전환 레이어 캔버스 (~950줄). 자유변형(모서리=크기/노브=회전/변=비균일 늘이기), 레이어 레일+드래그정렬, 선택레이어 필터, undo/redo, 에셋피커, 합치기. **브라우저 전용**: 외부 변형 수학(local 좌표 투영). CSS filter로 라이브 미리보기 → composite API로 확정.
+- `SceneComposer.tsx` — 씬 합성 UI (레이어 스택, 드래그 배치, scale 슬라이더)
+- `SpriteCanvas.tsx` — 스프라이트시트 뷰어·셀 편집·어니언 스킨
+- `SpriteGenPanel.tsx` — 스프라이트 생성 패널 (`buildSpriteMessage` 포함)
+- `LayerCanvas.tsx` — 레이어 분리 캔버스 (16:10 뷰박스, 줌/팬)
+- `MaskCanvas.tsx` — 인페인트 마스크 캔버스
+- `NineSliceEditor.tsx` — 9-slice 슬라이스 라인 오버레이 UI
+- `ButtonStateEditor.tsx` — 버튼 상태 3슬롯 미리보기
+- `ReskinPanel.tsx` — 리스킨 파라미터 UI
+- `NormalMapPanel.tsx` — 노멀 맵 생성 UI
+- `AiSuggestControls.tsx`, `ImageToolsPanel.tsx`, `PanelFooter.tsx`
+
+### 클라이언트 래퍼 (`src/lib/api/client.ts`)
+`compositeScene`, `uploadImage`, `getGeneration` 등 fetch 래퍼. CanvasEditor는 직접 fetch 대신 이 래퍼를 사용.
+
+### CLI (`src/lib/cli/`)
+`claude-cli.ts` — Claude CLI spawn, `progress-tail.ts` — progress.jsonl tail
+
+### DB (`src/lib/db/`)
+`client.ts`(싱글톤 WAL), `schema.sql`(IF NOT EXISTS 멱등), `migrate.ts`(v1~v10), repo 모듈들
+
 ## 깨지기 쉬운 계약 (한쪽 바꾸면 반대쪽도)
 
 1. **MCP `structuredContent` ↔ ImageResultCard**
