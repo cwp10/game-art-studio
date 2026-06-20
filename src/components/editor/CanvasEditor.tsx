@@ -693,6 +693,8 @@ export function CanvasEditor({
     rot: number; // rad (양의 회전각)
     cx: number;
     cy: number;
+    fhw: number; // 캔버스(프레임) 반폭/반높이 (frame px) — 가장자리 스냅용
+    fhh: number;
   } | null>(null);
 
   const onHandleDown = useCallback(
@@ -702,9 +704,10 @@ export function CanvasEditor({
       const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
       if (!frame) return;
       const rect = frame.getBoundingClientRect();
-      // 캔버스 프레임 중심(client). getBoundingClientRect 는 zoom/pan 반영됨.
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
+      // ★ 레이어 중심(client) = 프레임 중심 + 레이어 오프셋(x,y)·zoom. 프레임 중심이 아니라
+      // 레이어 중심을 원점으로 써야 오프셋된 레이어에서도 반대 변이 정확히 고정된다(드리프트 수정).
+      const cx = rect.left + rect.width / 2 + layer.x * zp.zoom;
+      const cy = rect.top + rect.height / 2 + layer.y * zp.zoom;
       // 역회전 투영으로 local 좌표 산출 (client px). 그랩 변 핸들은 로컬 변 위치에 있으므로
       // |lx|≈반폭, |ly|≈반높이.
       const rot = (layer.rotation * Math.PI) / 180;
@@ -727,6 +730,8 @@ export function CanvasEditor({
         rot,
         cx,
         cy,
+        fhw: rect.width / zp.zoom / 2,
+        fhh: rect.height / zp.zoom / 2,
       };
       pushUndo();
       try {
@@ -756,7 +761,19 @@ export function CanvasEditor({
         if (d.type === "l" || d.type === "r") {
           // 좌·우 변 → 반대 변 고정, 그랩 변만 이동. sign: 오른쪽=+1, 왼쪽=-1.
           const sign = d.type === "r" ? 1 : -1;
-          const newW = Math.max(8, d.hw0 + sign * llx); // 그랩 변 위치(llx) ↔ 반대 변(-sign*hw0) 사이 폭
+          let newW = Math.max(8, d.hw0 + sign * llx); // 그랩 변 위치(llx) ↔ 반대 변(-sign*hw0) 사이 폭
+          // 캔버스 가장자리·중앙 스냅(회전 ~0 일 때만) — 그랩 변 frame x 를 목표에 맞춰 newW 재산출.
+          if (Math.abs(d.rot) < 0.035) {
+            const oppX = d.x0 - (sign * d.hw0) / d.zoom; // 고정(반대) 변 frame x
+            const draggedX = d.x0 + (sign * (newW - d.hw0)) / d.zoom; // 현재 그랩 변 frame x
+            const snapT = 7 / d.zoom;
+            for (const T of [sign * d.fhw, -sign * d.fhw, 0]) {
+              if (Math.abs(draggedX - T) < snapT) {
+                newW = Math.abs(T - oppX) * d.zoom;
+                break;
+              }
+            }
+          }
           const stretchW = Math.max(0.1, (d.sw0 * newW) / (2 * d.hw0));
           // 중심이 로컬 x 로 sign*(newW/2 - hw0) 만큼 이동(반대 변 고정). frame px 환산 후 회전.
           const shift = (sign * (newW / 2 - d.hw0)) / d.zoom;
@@ -768,7 +785,18 @@ export function CanvasEditor({
         } else {
           // 상·하 변 → 반대 변 고정, 그랩 변만 이동. sign: 아래=+1, 위=-1.
           const sign = d.type === "b" ? 1 : -1;
-          const newH = Math.max(8, d.hh0 + sign * lly);
+          let newH = Math.max(8, d.hh0 + sign * lly);
+          if (Math.abs(d.rot) < 0.035) {
+            const oppY = d.y0 - (sign * d.hh0) / d.zoom;
+            const draggedY = d.y0 + (sign * (newH - d.hh0)) / d.zoom;
+            const snapT = 7 / d.zoom;
+            for (const T of [sign * d.fhh, -sign * d.fhh, 0]) {
+              if (Math.abs(draggedY - T) < snapT) {
+                newH = Math.abs(T - oppY) * d.zoom;
+                break;
+              }
+            }
+          }
           const stretchH = Math.max(0.1, (d.sh0 * newH) / (2 * d.hh0));
           const shift = (sign * (newH / 2 - d.hh0)) / d.zoom;
           patchLayer(layer.id, {
