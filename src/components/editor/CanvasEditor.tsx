@@ -194,6 +194,8 @@ export function CanvasEditor({
   const [inpaintPrompt, setInpaintPrompt] = useState("");
   const [inpaintBrush, setInpaintBrush] = useState(40);
   const [inpaintBusy, setInpaintBusy] = useState(false);
+  // 인페인트 대상 레이어의 원본 픽셀 크기 — 마스크 캔버스 해상도(선언적으로 박아 기본 300 버그 회피).
+  const [inpaintNat, setInpaintNat] = useState<{ w: number; h: number } | null>(null);
   const brushCanvasRef = useRef<HTMLCanvasElement>(null);
   const brushDrawingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -442,6 +444,7 @@ export function CanvasEditor({
   const exitInpaint = useCallback(() => {
     setInpaintLayerId(null);
     setInpaintPrompt("");
+    setInpaintNat(null);
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   }, []);
@@ -961,19 +964,11 @@ export function CanvasEditor({
                       />
                       {/* 영역 편집 인라인 마스크 — 레이어와 같은 transform 을 CSS 가 적용(표시),
                           포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). 내부 res = 원본. */}
-                      {inpaintLayerId === layer.id && (
+                      {inpaintLayerId === layer.id && inpaintNat && (
                         <canvas
-                          ref={el => {
-                            brushCanvasRef.current = el;
-                            if (el && el.width <= 1) {
-                              const im = new window.Image();
-                              im.onload = () => {
-                                el.width = im.naturalWidth;
-                                el.height = im.naturalHeight;
-                              };
-                              im.src = `/api/images/${layer.generationId}`;
-                            }
-                          }}
+                          ref={brushCanvasRef}
+                          width={inpaintNat.w}
+                          height={inpaintNat.h}
                           className="absolute inset-0 h-full w-full cursor-crosshair opacity-50"
                           style={{ touchAction: "none" }}
                           onPointerDown={e => onBrushDown(e, layer)}
@@ -1303,8 +1298,12 @@ export function CanvasEditor({
                   </button>
                   <button
                     onClick={() => {
-                      setInpaintLayerId(selected.id);
                       setInpaintPrompt("");
+                      setInpaintNat(null);
+                      const im = new window.Image();
+                      im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
+                      im.src = `/api/images/${selected.generationId}`;
+                      setInpaintLayerId(selected.id);
                     }}
                     className="flex items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
                     title="영역 편집 — 칠한 영역을 프롬프트로 다시 그림 (generative fill)"
