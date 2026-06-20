@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-20
+마지막 업데이트: 2026-06-20 (rotation 추가)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -117,6 +117,17 @@ normal/hover/pressed 3종을 각각 별도 generation으로 생성.
 - hover: modulate(brightness: 1.25, saturation: 1.15)
 - pressed: modulate(brightness: 0.75, saturation: 0.85) + 95% 축소 중앙 composite
 
+### SceneComposer 회전 기능 — 2026-06-20
+SceneLayer에 `rotation: number` (도°, 기본 0) 추가.
+
+**수정 파일:**
+- `src/components/editor/SceneComposer.tsx` — SceneLayer 타입에 rotation 추가, setRotation 콜백, resetTransform에 rotation:0 포함, CSS transform에 rotate(), 회전 슬라이더(-180~180°) UI
+- `src/lib/image-backend/composite-runner.ts` — CompositeLayerSpec에 rotation? 추가, resolved 배열 전파
+- `src/lib/image-backend/composite-layers.ts` — placeWithTransform에 rotation 파라미터, sharp `.rotate(rotation, {background: transparent})` 적용 (resize 전), hasTransform 조건에 rotation !== 0 포함
+
+**구현 방식:**
+- CSS 프리뷰: `rotate(${rotation}deg)` — scale 뒤에 적용
+- sharp 백엔드: `.rotate()` → `.resize()` 순서. sharp rotate는 바운딩 박스 확장 + 투명 배경 처리 자동.
+
 ## 다음 단계
-- 현재 모든 계획된 3단계 완료 (MCP / 9-slice / 버튼 상태)
 - 향후 옵션: 9-slice 게임엔진 메타데이터 JSON export, 이펙트 탭 확장, 애니메이션 미리보기

@@ -31,6 +31,7 @@ type SceneLayer = {
   x: number; // 출력 캔버스 중앙 기준 오프셋 px (기본 0)
   y: number; // 출력 캔버스 중앙 기준 오프셋 px (기본 0)
   scale: number; // 1.0 = contain-fit (기본 1.0)
+  rotation: number; // 회전 각도 도(°) (기본 0)
 };
 
 type Props = {
@@ -55,6 +56,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
             x: 0,
             y: 0,
             scale: 1.0,
+            rotation: 0,
           },
         ]
       : [],
@@ -87,6 +89,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
           x: 0,
           y: 0,
           scale: 1.0,
+          rotation: 0,
         },
       ];
     });
@@ -112,9 +115,13 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
     setLayers(prev => prev.map((l, idx) => (idx === i ? { ...l, scale } : l)));
   }, []);
 
-  // x/y/scale 리셋(↺) — 한 레이어의 배치를 contain-fit 중앙으로 되돌림.
+  const setRotation = useCallback((i: number, rotation: number) => {
+    setLayers(prev => prev.map((l, idx) => (idx === i ? { ...l, rotation } : l)));
+  }, []);
+
+  // x/y/scale/rotation 리셋(↺) — 한 레이어의 배치를 contain-fit 중앙으로 되돌림.
   const resetTransform = useCallback((i: number) => {
-    setLayers(prev => prev.map((l, idx) => (idx === i ? { ...l, x: 0, y: 0, scale: 1.0 } : l)));
+    setLayers(prev => prev.map((l, idx) => (idx === i ? { ...l, x: 0, y: 0, scale: 1.0, rotation: 0 } : l)));
   }, []);
 
   const removeLayer = useCallback((i: number) => {
@@ -169,6 +176,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
           x: l.x,
           y: l.y,
           scale: l.scale,
+          rotation: l.rotation,
         })),
         sessionId: sessionId ?? undefined,
         outputWidth: preset.w || undefined,
@@ -256,7 +264,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
                     position: "absolute",
                     left: "50%",
                     top: "50%",
-                    transform: `translate(-50%, -50%) translate(${layer.x}px, ${layer.y}px) scale(${layer.scale})`,
+                    transform: `translate(-50%, -50%) translate(${layer.x}px, ${layer.y}px) scale(${layer.scale}) rotate(${layer.rotation}deg)`,
                     opacity: layer.opacity / 100,
                     maxWidth: "100%",
                     maxHeight: "100%",
@@ -372,7 +380,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
                     <X size={12} />
                   </button>
                 </div>
-                {/* scale 슬라이더 + 위치/배율 리셋(↺). 1.0× = contain-fit. */}
+                {/* scale 슬라이더 + 회전 슬라이더 + 리셋(↺). */}
                 <div className="flex items-center gap-2 pl-8">
                   <span className="w-10 shrink-0 text-[11px] text-text-muted">배율</span>
                   <input
@@ -390,10 +398,26 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
                   <button
                     onClick={() => resetTransform(i)}
                     className="rounded p-1 text-text-muted hover:text-text-primary"
-                    title="위치·배율 리셋"
+                    title="위치·배율·회전 리셋"
                   >
                     <RotateCcw size={12} />
                   </button>
+                </div>
+                <div className="flex items-center gap-2 pl-8">
+                  <span className="w-10 shrink-0 text-[11px] text-text-muted">회전</span>
+                  <input
+                    type="range"
+                    min={-180}
+                    max={180}
+                    step={1}
+                    value={layer.rotation}
+                    onChange={e => setRotation(i, Number(e.target.value))}
+                    className="flex-1 accent-[color:var(--accent)]"
+                  />
+                  <span className="w-9 text-right text-[11px] tabular-nums text-text-muted">
+                    {layer.rotation}°
+                  </span>
+                  <div className="w-[22px]" />
                 </div>
               </div>
             ))}

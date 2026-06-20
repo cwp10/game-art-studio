@@ -43,13 +43,18 @@ async function placeWithTransform(
   x: number,
   y: number,
   scale: number,
+  rotation: number,
 ): Promise<{ input: Buffer; left: number; top: number } | null> {
   // fit:'inside' 로 contain 비율을 유지하며 scale 배 캔버스에 맞춘다 → 실제 크기는 비율에 따라
   // 폭/높이 중 한쪽이 목표에 닿는다. 정확한 결과 크기는 버퍼 메타로 다시 읽는다.
   const scaledTargetW = Math.max(1, Math.round(outputWidth * scale));
   const scaledTargetH = Math.max(1, Math.round(outputHeight * scale));
-  const scaled = await sharp(imagePath)
-    .ensureAlpha()
+  const chain = sharp(imagePath).ensureAlpha();
+  // 회전이 0이 아닐 때만 적용 — sharp rotate 는 바운딩 박스를 확장해 투명 배경으로 채운다.
+  if (rotation !== 0) {
+    chain.rotate(rotation, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+  }
+  const scaled = await chain
     .resize(scaledTargetW, scaledTargetH, { fit: "inside" })
     .png()
     .toBuffer();
@@ -84,7 +89,7 @@ async function placeWithTransform(
 }
 
 export async function mergeImages(params: {
-  layers: { imagePath: string; opacity: number; x?: number; y?: number; scale?: number }[];
+  layers: { imagePath: string; opacity: number; x?: number; y?: number; scale?: number; rotation?: number }[];
   outputWidth: number;
   outputHeight: number;
   outPath: string;
@@ -93,8 +98,9 @@ export async function mergeImages(params: {
 
   const compositeInputs: { input: Buffer; blend: "over"; left?: number; top?: number }[] = [];
   for (const layer of layers) {
+    const rotation = layer.rotation ?? 0;
     const hasTransform =
-      layer.x !== undefined || layer.y !== undefined || layer.scale !== undefined;
+      layer.x !== undefined || layer.y !== undefined || layer.scale !== undefined || rotation !== 0;
     if (hasTransform) {
       const placed = await placeWithTransform(
         layer.imagePath,
@@ -103,6 +109,7 @@ export async function mergeImages(params: {
         layer.x ?? 0,
         layer.y ?? 0,
         layer.scale ?? 1,
+        rotation,
       );
       if (!placed) continue; // 완전히 캔버스 밖 — 스킵.
       const withOpacity = await applyOpacity(placed.input, layer.opacity);

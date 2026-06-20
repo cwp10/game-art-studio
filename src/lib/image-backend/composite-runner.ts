@@ -26,6 +26,7 @@ export interface CompositeLayerSpec {
   x?: number; // 중앙 기준 오프셋 px
   y?: number;
   scale?: number; // 1.0 = contain-fit
+  rotation?: number; // 회전 각도 도(°), 기본 0
 }
 
 export interface RunCompositeParams {
@@ -57,6 +58,7 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
     x?: number;
     y?: number;
     scale?: number;
+    rotation?: number;
   }[] = [];
   for (const [i, l] of layers.entries()) {
     if (!l.generationId) {
@@ -74,6 +76,7 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       x: typeof l.x === "number" ? l.x : undefined,
       y: typeof l.y === "number" ? l.y : undefined,
       scale: typeof l.scale === "number" ? l.scale : undefined,
+      rotation: typeof l.rotation === "number" ? l.rotation : undefined,
     });
   }
 
@@ -102,6 +105,7 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       x: r.x,
       y: r.y,
       scale: r.scale,
+      rotation: r.rotation,
     })),
     outputWidth,
     outputHeight,
