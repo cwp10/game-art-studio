@@ -685,8 +685,10 @@ export function CanvasEditor({
     sw0: number;
     sh0: number;
     sum0: number; // corner 비율 기준
-    hw0: number; // 그랩 시점 로컬 반폭 |llx0| (client px)
-    hh0: number; // 그랩 시점 로컬 반높이 |lly0|
+    hw0: number; // 박스 반폭 (client px) — selBox 기반 정확값
+    hh0: number; // 박스 반높이 (client px)
+    llx0: number; // 그랩 시점 포인터 로컬 좌표 — 델타 기준
+    lly0: number;
     x0: number; // 레이어 시작 x/y (frame px)
     y0: number;
     zoom: number;
@@ -722,8 +724,11 @@ export function CanvasEditor({
         sw0: layer.stretchW,
         sh0: layer.stretchH,
         sum0: Math.abs(lx) + Math.abs(ly) || 1,
-        hw0: Math.abs(lx) || 1,
-        hh0: Math.abs(ly) || 1,
+        // 박스 반치수는 그랩 위치가 아니라 selBox(실제 표시 크기)로 정확히 계산 — 스냅/늘이기 오차 제거.
+        hw0: selBox ? (selBox.w / 2) * layer.scale * layer.stretchW * zp.zoom || 1 : Math.abs(lx) || 1,
+        hh0: selBox ? (selBox.h / 2) * layer.scale * layer.stretchH * zp.zoom || 1 : Math.abs(ly) || 1,
+        llx0: lx,
+        lly0: ly,
         x0: layer.x,
         y0: layer.y,
         zoom: zp.zoom,
@@ -761,7 +766,8 @@ export function CanvasEditor({
         if (d.type === "l" || d.type === "r") {
           // 좌·우 변 → 반대 변 고정, 그랩 변만 이동. sign: 오른쪽=+1, 왼쪽=-1.
           const sign = d.type === "r" ? 1 : -1;
-          let newW = Math.max(8, d.hw0 + sign * llx); // 그랩 변 위치(llx) ↔ 반대 변(-sign*hw0) 사이 폭
+          // 그랩 후 포인터 이동량(델타)으로 폭 산출 — 박스 반폭은 정확값(hw0), 반대 변 고정.
+          let newW = Math.max(8, 2 * d.hw0 + sign * (llx - d.llx0));
           // 캔버스 가장자리·중앙 스냅(회전 ~0 일 때만) — 그랩 변 frame x 를 목표에 맞춰 newW 재산출.
           if (Math.abs(d.rot) < 0.035) {
             const oppX = d.x0 - (sign * d.hw0) / d.zoom; // 고정(반대) 변 frame x
@@ -785,7 +791,7 @@ export function CanvasEditor({
         } else {
           // 상·하 변 → 반대 변 고정, 그랩 변만 이동. sign: 아래=+1, 위=-1.
           const sign = d.type === "b" ? 1 : -1;
-          let newH = Math.max(8, d.hh0 + sign * lly);
+          let newH = Math.max(8, 2 * d.hh0 + sign * (lly - d.lly0));
           if (Math.abs(d.rot) < 0.035) {
             const oppY = d.y0 - (sign * d.hh0) / d.zoom;
             const draggedY = d.y0 + (sign * (newH - d.hh0)) / d.zoom;
@@ -817,7 +823,7 @@ export function CanvasEditor({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [pushUndo, patchLayer, zp.zoom],
+    [pushUndo, patchLayer, zp.zoom, selBox],
   );
 
   // 휠/트랙패드 줌 — 커서 위치 기준(zoomAtPoint). 네이티브 리스너 + passive:false 로 페이지 스크롤 차단.
