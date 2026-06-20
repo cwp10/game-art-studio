@@ -168,7 +168,8 @@ export function CanvasEditor({
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(() => null);
+  // 열자마자 씬(첫) 레이어를 선택해 둔다 — 도구(변형·필터·분리·영역편집 등)가 바로 보이도록.
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(() => layers[0]?.id ?? null);
   const [presetIdx, setPresetIdx] = useState(0);
   const [customSize, setCustomSize] = useState<CanvasSize>({ w: 1024, h: 1024 });
   const [assets, setAssets] = useState<Generation[]>([]);
