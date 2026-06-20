@@ -95,6 +95,11 @@ type Props = {
   onUpscale: (
     generationId: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  /** 부위 추출(오려내기) — generationId 에서 prompt 부위를 투명 PNG 로 분리. 결과를 새 레이어로. */
+  onExtract: (
+    generationId: string,
+    prompt: string,
+  ) => Promise<{ generationId: string; width: number; height: number } | null>;
 };
 
 let layerSeq = 0;
@@ -151,6 +156,7 @@ export function CanvasEditor({
   onComposited,
   onRemoveBg,
   onUpscale,
+  onExtract,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -171,6 +177,9 @@ export function CanvasEditor({
   const [composing, setComposing] = useState(false);
   // 선택 레이어 단일 작업 진행 상태 — 배경제거/업스케일(AI) · 여백제거(sharp). 동시 실행 방지.
   const [layerOp, setLayerOp] = useState<null | "bg" | "upscale" | "trim">(null);
+  // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
+  const [extractInput, setExtractInput] = useState("");
+  const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -380,6 +389,37 @@ export function CanvasEditor({
     },
     [layers, layerOp, onRemoveBg, onUpscale, pushUndo, patchLayer],
   );
+
+  // ── 분리(오려내기) — 선택 레이어에서 부위명(쉼표 구분)을 추출해 각각 새 레이어로 추가 ──────────
+  // 텍스트 기반(extractObject, 마스크 없음) — 기존 레이어 분리 경로 재사용. 원본 레이어는 유지.
+  const handleExtract = useCallback(async () => {
+    const layer = layers.find(l => l.id === selectedLayerId);
+    if (!layer || extracting) return;
+    const parts = extractInput.split(",").map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    setExtracting(true);
+    setError(null);
+    try {
+      let pushed = false;
+      for (const part of parts) {
+        const r = await onExtract(layer.generationId, part);
+        if (r) {
+          if (!pushed) {
+            pushUndo();
+            pushed = true;
+          }
+          const nl = makeLayer(r.generationId);
+          setLayers(prev => [...prev, nl]);
+          setSelectedLayerId(nl.id);
+        }
+      }
+      setExtractInput("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExtracting(false);
+    }
+  }, [layers, selectedLayerId, extracting, extractInput, onExtract, pushUndo]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -1107,6 +1147,27 @@ export function CanvasEditor({
                     title="선택 레이어의 투명 여백을 잘라냄 (sharp)"
                   >
                     <Scissors size={11} /> 여백 제거
+                  </button>
+                </div>
+                {/* 분리(오려내기) — 부위명 입력 → AI 추출 → 새 레이어. 쉼표로 여러 부위. */}
+                <div className="mb-2 flex items-center gap-1.5">
+                  <input
+                    value={extractInput}
+                    onChange={e => setExtractInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") handleExtract();
+                    }}
+                    placeholder="분리할 부위 (예: 머리, 무기)"
+                    disabled={extracting}
+                    className="h-7 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                  />
+                  <button
+                    onClick={handleExtract}
+                    disabled={extracting || !extractInput.trim()}
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10 disabled:opacity-40"
+                    title="부위를 AI로 추출해 새 레이어로 추가 (쉼표로 여러 부위)"
+                  >
+                    {extracting ? <Loader2 size={11} className="animate-spin" /> : <Scissors size={11} />} 분리
                   </button>
                 </div>
                 <div className="mb-1 flex items-center text-[11px] font-semibold">

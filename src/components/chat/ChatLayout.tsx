@@ -1445,6 +1445,12 @@ export function ChatLayout() {
               attachmentGenerationIds: [genId],
             })
           }
+          onExtract={(genId, prompt) =>
+            handleSend(`${prompt} 레이어 추출`, {
+              attachmentGenerationIds: [genId],
+              extractObject: true,
+            })
+          }
         />
       )}
       <PromptLibrarySheet
