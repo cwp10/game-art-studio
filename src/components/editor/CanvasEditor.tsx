@@ -202,8 +202,8 @@ export function CanvasEditor({
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
   const [extractInput, setExtractInput] = useState("");
   const [extracting, setExtracting] = useState(false);
-  // 영역 편집(generative fill) — 활성 레이어 id(null=꺼짐) + 프롬프트/브러시/진행. 마스크는 소스 해상도 캔버스.
-  const [inpaintLayerId, setInpaintLayerId] = useState<string | null>(null);
+  // 활성 도구 — 상단 메뉴 클릭 시 하단 바를 띄우는 단일 상태(즉시 실행하지 않음). 대상은 선택 레이어.
+  const [tool, setTool] = useState<null | "inpaint" | "extract" | "bg" | "upscale" | "trim">(null);
   const [inpaintPrompt, setInpaintPrompt] = useState("");
   const [inpaintBrush, setInpaintBrush] = useState(40);
   const [inpaintBusy, setInpaintBusy] = useState(false);
@@ -455,13 +455,29 @@ export function CanvasEditor({
 
   // ── 영역 편집(generative fill) — 선택 레이어 위에 마스크를 칠하고 프롬프트로 재생성 ──────────
   // 소스 해상도 캔버스에 #ff0000 으로 칠하고, export 시 검정 배경 + 빨강 = 인페인트 영역(MaskCanvas 포맷).
-  const exitInpaint = useCallback(() => {
-    setInpaintLayerId(null);
+  const closeTool = useCallback(() => {
+    setTool(null);
     setInpaintPrompt("");
     setInpaintNat(null);
+    setExtractInput("");
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   }, []);
+  // 상단 메뉴 클릭 → 즉시 실행하지 않고 하단 바를 띄운다. inpaint 는 마스크용 원본 크기 로드.
+  const openTool = useCallback(
+    (kind: "inpaint" | "extract" | "bg" | "upscale" | "trim", layer: Layer) => {
+      setTool(kind);
+      setInpaintPrompt("");
+      setExtractInput("");
+      setInpaintNat(null);
+      if (kind === "inpaint") {
+        const im = new window.Image();
+        im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
+        im.src = `/api/images/${layer.generationId}`;
+      }
+    },
+    [],
+  );
   const clearBrush = useCallback(() => {
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
@@ -542,7 +558,7 @@ export function CanvasEditor({
   }, []);
 
   const handleInpaintSubmit = useCallback(async () => {
-    const layer = layers.find(l => l.id === inpaintLayerId);
+    const layer = layers.find(l => l.id === selectedLayerId);
     const canvas = brushCanvasRef.current;
     if (!layer || !canvas || inpaintBusy || !inpaintPrompt.trim()) return;
     // export: 소스 해상도 검정 배경 + 빨강 칠.
@@ -562,14 +578,14 @@ export function CanvasEditor({
       if (r) {
         pushUndo();
         patchLayer(layer.id, { generationId: r.generationId });
-        exitInpaint();
+        closeTool();
       }
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setInpaintBusy(false);
     }
-  }, [layers, inpaintLayerId, inpaintBusy, inpaintPrompt, onInpaint, pushUndo, patchLayer, exitInpaint]);
+  }, [layers, selectedLayerId, inpaintBusy, inpaintPrompt, onInpaint, pushUndo, patchLayer, closeTool]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -868,9 +884,9 @@ export function CanvasEditor({
         </div>
       </header>
 
-      {/* 도구 스트립 — 출력 규격 + 레이어 추가 */}
-      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2 text-xs">
-        <span className="text-text-muted">출력</span>
+      {/* 도구 스트립(한 줄) — 출력 규격 + (레이어 선택 시) 변형·생성형 메뉴. 생성형은 클릭 시
+          즉시 실행하지 않고 하단 바를 띄운다(openTool). */}
+      <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-border px-3.5 py-2 text-xs">
         <select
           value={presetIdx}
           onChange={e => setPresetIdx(Number(e.target.value))}
@@ -901,92 +917,56 @@ export function CanvasEditor({
             />
           </span>
         )}
-        <span className="ml-2 text-text-muted/60">
+        <span className="text-text-muted/60">
           {canvasSize.w}×{canvasSize.h}
         </span>
+        {selected && (
+          <>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <button
+              onClick={() => flipSelected(selected.id)}
+              className={`rounded-md border px-2 py-1 text-[11px] ${
+                selected.flipH
+                  ? "border-[color:var(--accent)] text-text-primary"
+                  : "border-border text-text-muted hover:text-text-primary"
+              }`}
+              title="좌우반전"
+            >
+              ↔ 반전
+            </button>
+            <button
+              onClick={() => resetTransform(selected.id)}
+              className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+              title="위치·크기·회전 리셋"
+            >
+              <RotateCcw size={11} /> 리셋
+            </button>
+            <span className="mx-1 h-4 w-px bg-border" />
+            {(
+              [
+                ["bg", "배경 제거", Sparkles],
+                ["upscale", "업스케일", Sparkles],
+                ["trim", "여백 제거", Scissors],
+                ["inpaint", "영역 편집", Wand2],
+                ["extract", "레이어 분리", Scissors],
+              ] as const
+            ).map(([kind, label, Icon]) => (
+              <button
+                key={kind}
+                onClick={() => openTool(kind, selected)}
+                className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${
+                  tool === kind
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/10 text-text-primary"
+                    : "border-[color:var(--accent)]/45 text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+                }`}
+                title={`${label} — 하단 바에서 실행`}
+              >
+                <Icon size={11} /> {label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
-
-      {/* 선택 레이어 도구 (상단 툴바) — 변형 · 생성형 액션 · 분리. 레이어 선택 시에만 표시. */}
-      {selected && (
-        <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-border px-3.5 py-2 text-xs">
-          <button
-            onClick={() => flipSelected(selected.id)}
-            className={`rounded-md border px-2 py-1 text-[11px] ${
-              selected.flipH
-                ? "border-[color:var(--accent)] text-text-primary"
-                : "border-border text-text-muted hover:text-text-primary"
-            }`}
-            title="좌우반전"
-          >
-            ↔ 반전
-          </button>
-          <button
-            onClick={() => resetTransform(selected.id)}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-            title="위치·크기·회전 리셋"
-          >
-            <RotateCcw size={11} /> 리셋
-          </button>
-          <span className="mx-1 h-4 w-px bg-border" />
-          <button
-            onClick={() => runLayerOp("bg", selected.id)}
-            disabled={!!layerOp}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-            title="선택 레이어의 배경을 투명하게 (AI)"
-          >
-            <Sparkles size={11} /> 배경 제거
-          </button>
-          <button
-            onClick={() => runLayerOp("upscale", selected.id)}
-            disabled={!!layerOp}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-            title="선택 레이어를 고화질로 업스케일 (AI)"
-          >
-            <Sparkles size={11} /> 업스케일
-          </button>
-          <button
-            onClick={() => runLayerOp("trim", selected.id)}
-            disabled={!!layerOp}
-            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-            title="선택 레이어의 투명 여백을 잘라냄 (sharp)"
-          >
-            <Scissors size={11} /> 여백 제거
-          </button>
-          <button
-            onClick={() => {
-              setInpaintPrompt("");
-              setInpaintNat(null);
-              const im = new window.Image();
-              im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
-              im.src = `/api/images/${selected.generationId}`;
-              setInpaintLayerId(selected.id);
-            }}
-            className="flex items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
-            title="영역 편집 — 칠한 영역을 프롬프트로 다시 그림 (generative fill)"
-          >
-            <Wand2 size={11} /> 영역 편집
-          </button>
-          <span className="mx-1 h-4 w-px bg-border" />
-          <input
-            value={extractInput}
-            onChange={e => setExtractInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter") handleExtract();
-            }}
-            placeholder="분리할 부위 (예: 머리, 무기)"
-            disabled={extracting}
-            className="h-7 w-40 rounded-md border border-border bg-bg-panel px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-          />
-          <button
-            onClick={handleExtract}
-            disabled={extracting || !extractInput.trim()}
-            className="flex shrink-0 items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10 disabled:opacity-40"
-            title="부위를 AI로 추출해 새 레이어로 추가 (쉼표로 여러 부위)"
-          >
-            {extracting ? <Loader2 size={11} className="animate-spin" /> : <Scissors size={11} />} 분리
-          </button>
-        </div>
-      )}
 
       {/* 본문: 스테이지 + 레이어 레일 */}
       <div className="flex min-h-0 flex-1">
@@ -1062,7 +1042,7 @@ export function CanvasEditor({
                       />
                       {/* 영역 편집 인라인 마스크 — 레이어와 같은 transform 을 CSS 가 적용(표시),
                           포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). 내부 res = 원본. */}
-                      {inpaintLayerId === layer.id && inpaintNat && (
+                      {tool === "inpaint" && selectedLayerId === layer.id && inpaintNat && (
                         <canvas
                           ref={brushCanvasRef}
                           width={inpaintNat.w}
@@ -1080,7 +1060,7 @@ export function CanvasEditor({
 
                 {/* 선택 레이어 자유변형 핸들 — 클립 밖 오버레이라 캔버스 경계를 넘은 핸들도 잡힌다.
                     숨김 이미지로 레이어 박스 크기를 맞춰 핸들 위치 기준을 잡는다. */}
-                {selected && !inpaintLayerId && (
+                {selected && tool !== "inpaint" && (
                   <div className="pointer-events-none absolute inset-0">
                     <div
                       style={{
@@ -1423,50 +1403,115 @@ export function CanvasEditor({
         </button>
       </footer>
 
-      {/* 영역 편집(generative fill) — 인라인. 메인 캔버스의 선택 레이어 위에 직접 브러시질하고,
-          아래 플로팅 바에서 브러시·프롬프트·실행. (브러시 캔버스는 layers.map 안 레이어 div 에 있음) */}
-      {inpaintLayerId && (
+      {/* 도구 하단 바 — 선택한 메뉴를 여기서 실행(즉시 실행 X). tool 별로 내용 전환. */}
+      {tool && selected && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[88px] z-40 flex justify-center px-4">
-          <div className="pointer-events-auto flex max-w-[780px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
-            <Wand2 size={14} className="text-[color:var(--accent)]" />
-            <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
-            <span className="text-[11px] text-text-muted">레이어 위에 다시 그릴 영역을 칠하세요</span>
-            <span className="ml-1 text-[11px] text-text-muted">브러시</span>
-            <input
-              type="range"
-              min={5}
-              max={120}
-              value={inpaintBrush}
-              onChange={e => setInpaintBrush(Number(e.target.value))}
-              className="w-24 accent-[color:var(--accent)]"
-            />
-            <button
-              onClick={clearBrush}
-              className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-            >
-              지우기
-            </button>
-            <input
-              value={inpaintPrompt}
-              onChange={e => setInpaintPrompt(e.target.value)}
-              placeholder="무엇을 그릴까요? (예: 빛나는 룬 문양)"
-              disabled={inpaintBusy}
-              className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-            />
-            <button
-              onClick={handleInpaintSubmit}
-              disabled={inpaintBusy || !inpaintPrompt.trim()}
-              className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
-            >
-              {inpaintBusy ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> 생성 중…
-                </>
-              ) : (
-                "채우기 ▸"
-              )}
-            </button>
-            <button onClick={exitInpaint} className="rounded p-1 text-text-muted hover:text-text-primary">
+          <div className="pointer-events-auto flex max-w-[840px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
+            {tool === "inpaint" ? (
+              <>
+                <Wand2 size={14} className="text-[color:var(--accent)]" />
+                <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
+                <span className="text-[11px] text-text-muted">레이어 위에 다시 그릴 영역을 칠하세요</span>
+                <span className="ml-1 text-[11px] text-text-muted">브러시</span>
+                <input
+                  type="range"
+                  min={5}
+                  max={120}
+                  value={inpaintBrush}
+                  onChange={e => setInpaintBrush(Number(e.target.value))}
+                  className="w-24 accent-[color:var(--accent)]"
+                />
+                <button
+                  onClick={clearBrush}
+                  className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                >
+                  지우기
+                </button>
+                <input
+                  value={inpaintPrompt}
+                  onChange={e => setInpaintPrompt(e.target.value)}
+                  placeholder="무엇을 그릴까요? (예: 빛나는 룬 문양)"
+                  disabled={inpaintBusy}
+                  className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                />
+                <button
+                  onClick={handleInpaintSubmit}
+                  disabled={inpaintBusy || !inpaintPrompt.trim()}
+                  className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {inpaintBusy ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" /> 생성 중…
+                    </>
+                  ) : (
+                    "채우기 ▸"
+                  )}
+                </button>
+              </>
+            ) : tool === "extract" ? (
+              <>
+                <Scissors size={14} className="text-[color:var(--accent)]" />
+                <span className="text-[11px] font-medium text-text-primary">레이어 분리</span>
+                <span className="text-[11px] text-text-muted">분리할 부위 (쉼표로 여러 개)</span>
+                <input
+                  value={extractInput}
+                  onChange={e => setExtractInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") handleExtract();
+                  }}
+                  placeholder="예: 머리, 무기"
+                  disabled={extracting}
+                  className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                />
+                <button
+                  onClick={handleExtract}
+                  disabled={extracting || !extractInput.trim()}
+                  className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {extracting ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" /> 분리 중…
+                    </>
+                  ) : (
+                    "분리 ▸"
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                {tool === "trim" ? (
+                  <Scissors size={14} className="text-[color:var(--accent)]" />
+                ) : (
+                  <Sparkles size={14} className="text-[color:var(--accent)]" />
+                )}
+                <span className="text-[11px] font-medium text-text-primary">
+                  {tool === "bg" ? "배경 제거" : tool === "upscale" ? "업스케일" : "여백 제거"}
+                </span>
+                <span className="text-[11px] text-text-muted">
+                  {tool === "bg"
+                    ? "선택 레이어의 배경을 투명하게 (AI)"
+                    : tool === "upscale"
+                      ? "선택 레이어를 고화질로 (AI)"
+                      : "선택 레이어의 투명 여백을 잘라냄 (sharp)"}
+                </span>
+                <button
+                  onClick={() => {
+                    void runLayerOp(tool, selected.id).then(closeTool);
+                  }}
+                  disabled={!!layerOp}
+                  className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  {layerOp ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" /> 처리 중…
+                    </>
+                  ) : (
+                    "실행 ▸"
+                  )}
+                </button>
+              </>
+            )}
+            <button onClick={closeTool} className="rounded p-1 text-text-muted hover:text-text-primary">
               <X size={14} />
             </button>
           </div>
