@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Undo2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, X } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
@@ -80,6 +80,18 @@ export function SpriteCanvas({
   const [rowMode, setRowMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+
+  // 이펙트 탭 — 시트 전체에 drop_shadow/outline/glow 후처리를 서버(POST /api/sprite-effect)로 적용.
+  const [effectTabOpen, setEffectTabOpen] = useState(false);
+  const [effectType, setEffectType] = useState<"drop_shadow" | "outline" | "glow">("drop_shadow");
+  const [effectColor, setEffectColor] = useState("#000000");
+  const [effectOpacity, setEffectOpacity] = useState(70);
+  const [effectBlur, setEffectBlur] = useState(3);
+  const [effectOffsetX, setEffectOffsetX] = useState(4);
+  const [effectOffsetY, setEffectOffsetY] = useState(4);
+  const [effectThickness, setEffectThickness] = useState(2);
+  const [effectBusy, setEffectBusy] = useState(false);
+  const [effectError, setEffectError] = useState<string | null>(null);
 
   // 마운트 시 parentGenerationId 로 params fetch → 있으면 rows/cols/fps 를 그 값으로 동기화.
   // 사용자 수동 입력은 유지(이후 setRows/setCols 가능)하되 초기값만 params 우선.
@@ -933,6 +945,50 @@ export function SpriteCanvas({
     }
   }
 
+  // 이펙트 적용 — 시트 전체에 drop_shadow/outline/glow 후처리(서버 sharp). 새 generation 으로 저장.
+  // cols/rows 는 params(백엔드 영속) 우선·detectSpriteGrid 폴백(apiRows/apiCols)으로 보내 셀 경계 정합.
+  // params 가 없으면(구버전 외부 시트) 라이브 rows/cols 로 최선.
+  async function handleApplyEffect() {
+    if (effectBusy) return;
+    setEffectBusy(true);
+    setEffectError(null);
+    try {
+      const res = await fetch("/api/sprite-effect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          generationId: parentGenerationId,
+          effect: effectType,
+          params: {
+            color: effectColor,
+            opacity: effectOpacity,
+            blur: effectBlur,
+            ...(effectType === "drop_shadow" && { offsetX: effectOffsetX, offsetY: effectOffsetY }),
+            ...(effectType === "outline" && { thickness: effectThickness }),
+          },
+          sessionId: sessionId ?? undefined,
+          cols: apiCols ?? cols,
+          rows: apiRows ?? rows,
+        }),
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(error ?? `${res.status}`);
+      }
+      const data = (await res.json()) as {
+        generationId: string;
+        imagePath: string;
+        width: number;
+        height: number;
+      };
+      onSaved?.({ generationId: data.generationId, width: data.width, height: data.height });
+    } catch (e) {
+      setEffectError((e as Error).message);
+    } finally {
+      setEffectBusy(false);
+    }
+  }
+
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="mx-auto flex h-12 w-full max-w-[880px] items-center gap-2 border-b border-border px-3 text-sm">
@@ -942,9 +998,21 @@ export function SpriteCanvas({
         <span className="text-xs text-text-muted/60">
           {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
         </span>
+        {/* 이펙트 탭 토글 — 시트 전체 후처리(drop_shadow/outline/glow) 패널 노출. */}
+        <button
+          onClick={() => setEffectTabOpen(o => !o)}
+          className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+            effectTabOpen
+              ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+              : "border-border text-text-muted hover:text-text-primary"
+          }`}
+          title="이펙트: 시트 전체에 그림자/외곽선/광선 후처리"
+        >
+          <Sparkles size={12} /> 이펙트
+        </button>
         <button
           onClick={onCancel}
-          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+          className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
           title="닫기"
         >
           <X size={14} />
@@ -1398,6 +1466,83 @@ export function SpriteCanvas({
             </div>
           </div>
         </div>
+
+        {/* 이펙트 패널 — 시트 전체에 후처리(drop_shadow/outline/glow). 새 generation 으로 저장. */}
+        {effectTabOpen && (
+          <div className="shrink-0 space-y-2 rounded-lg border border-[color:var(--accent)]/40 bg-bg-card p-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-text-muted">효과 선택</span>
+              <select
+                value={effectType}
+                onChange={e => setEffectType(e.target.value as "drop_shadow" | "outline" | "glow")}
+                className="h-7 flex-1 rounded border border-border bg-bg-app px-2 text-text-primary"
+              >
+                <option value="drop_shadow">드롭섀도우</option>
+                <option value="outline">외곽선</option>
+                <option value="glow">광선(글로우)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-text-muted">색상</span>
+              <input
+                type="color"
+                value={effectColor}
+                onChange={e => setEffectColor(e.target.value)}
+                className="h-7 w-10 shrink-0 rounded border border-border bg-bg-app"
+              />
+              <span className="w-12 shrink-0 text-text-muted">불투명도</span>
+              <input
+                type="range" min={0} max={100} value={effectOpacity}
+                onChange={e => setEffectOpacity(Number(e.target.value))}
+                className="flex-1 accent-[color:var(--accent)]"
+              />
+              <span className="w-9 text-right tabular-nums text-text-muted/80">{effectOpacity}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-16 shrink-0 text-text-muted">blur</span>
+              <input
+                type="number" min={0} max={30} value={effectBlur}
+                onChange={e => setEffectBlur(clamp(Number(e.target.value), 0, 30))}
+                className="h-7 w-16 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
+              />
+              {effectType === "drop_shadow" && (
+                <>
+                  <span className="w-12 shrink-0 text-text-muted">offsetX</span>
+                  <input
+                    type="number" min={-50} max={50} value={effectOffsetX}
+                    onChange={e => setEffectOffsetX(clamp(Number(e.target.value), -50, 50))}
+                    className="h-7 w-16 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
+                  />
+                  <span className="w-12 shrink-0 text-text-muted">offsetY</span>
+                  <input
+                    type="number" min={-50} max={50} value={effectOffsetY}
+                    onChange={e => setEffectOffsetY(clamp(Number(e.target.value), -50, 50))}
+                    className="h-7 w-16 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
+                  />
+                </>
+              )}
+            </div>
+            {effectType === "outline" && (
+              <div className="flex items-center gap-2">
+                <span className="w-16 shrink-0 text-text-muted">thickness</span>
+                <input
+                  type="number" min={1} max={20} value={effectThickness}
+                  onChange={e => setEffectThickness(clamp(Number(e.target.value), 1, 20))}
+                  className="h-7 w-16 rounded border border-border bg-bg-app px-1 text-center text-text-primary"
+                />
+              </div>
+            )}
+            {effectError && <p className="text-[11px] text-[color:var(--danger)]">{effectError}</p>}
+            <button
+              onClick={handleApplyEffect}
+              disabled={effectBusy}
+              className="flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              {effectBusy ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {effectBusy ? "적용 중…" : "이펙트 적용"}
+            </button>
+          </div>
+        )}
       </div>
 
       <footer className="mx-auto flex w-full max-w-[880px] flex-col gap-2 border-t border-border p-3">

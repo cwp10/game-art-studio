@@ -82,6 +82,8 @@ export function MaskCanvas({
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const maskRef = useRef<HTMLCanvasElement>(null);
+  // 뷰박스(transform 미적용) — 커서 앵커 줌의 기준 컨테이너.
+  const viewBoxRef = useRef<HTMLDivElement>(null);
   // 캔버스 컨테이너의 사용 가능한 폭·높이를 mount 시 측정.
   // toolbar / prompt 의 실제 height 를 ref 로 직접 측정해서 캔버스 최대 height 정확히 결정.
   // strokes 좌표 정합성을 위해 1회만 측정 (사용자가 그리는 도중 창 리사이즈는 edge case).
@@ -149,19 +151,18 @@ export function MaskCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // 휠 줌: canvas 위에서 스크롤로 줌인/줌아웃. non-passive 리스너를 직접 등록.
+  // 휠 줌: 뷰박스 위에서 스크롤로 커서 위치 기준 줌인/줌아웃. non-passive 리스너를 직접 등록.
   const zp = useZoomPan();
   useEffect(() => {
-    const el = maskRef.current;
+    const el = viewBoxRef.current;
     if (!el) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      if (e.deltaY < 0) zp.zoomIn();
-      else zp.zoomOut();
+      zp.zoomAtPoint(el, e.clientX, e.clientY, e.deltaY < 0 ? 1 : -1);
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
-  }, [zp.zoomIn, zp.zoomOut]);
+  }, [zp.zoomAtPoint]);
   // fitBox 의 16:10 비율 제한 없이 직접 계산 — LayerCanvas 와 높이 일치.
   const viewW = avail?.w ?? maxDisplayPx;
   const viewH = avail?.h ?? Math.round((640 * imageHeight) / imageWidth);
@@ -331,6 +332,7 @@ export function MaskCanvas({
 
         {/* 16:10 뷰박스 — 이미지를 contain-fit + 줌/팬. overflow-hidden 으로 줌 넘침 클립. */}
         <div
+          ref={viewBoxRef}
           className="relative mx-auto shrink-0 select-none overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#3a3a3a_0%_50%)_50%/14px_14px]"
           style={{ width: viewW, height: viewH }}
         >

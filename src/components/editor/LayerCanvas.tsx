@@ -164,12 +164,11 @@ export function LayerCanvas({
     if (!el) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      if (e.deltaY < 0) zp.zoomIn();
-      else zp.zoomOut();
+      zp.zoomAtPoint(el, e.clientX, e.clientY, e.deltaY < 0 ? 1 : -1);
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
-  }, [tab, zp.zoomIn, zp.zoomOut]);
+  }, [tab, zp.zoomAtPoint]);
 
   function getPos(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = displayCanvasRef.current!.getBoundingClientRect();

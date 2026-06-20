@@ -44,7 +44,9 @@ export type GenerationKind =
   | "external"
   | "emote_sheet"
   | "tileset"
-  | "normal_map";
+  | "normal_map"
+  | "composite"
+  | "sprite_effect";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";
 

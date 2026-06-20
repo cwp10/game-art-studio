@@ -25,6 +25,7 @@ type Props = {
       | "overlay"
       | "make_sheet"
       | "make_normal_map"
+      | "add_to_scene"
       | "reference"
       | "compare",
     payload: {

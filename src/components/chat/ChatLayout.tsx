@@ -12,6 +12,7 @@ import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
+import { SceneComposer } from "@/components/editor/SceneComposer";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
 import { CompareSheet } from "@/components/library/CompareSheet";
@@ -85,6 +86,8 @@ export function ChatLayout() {
   const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget; initialSubjectMode?: "character" | "object" } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
+  // 씬 합성 오버레이 — seedGenerationId 로 첫 레이어 미리채움. null 이면 닫힘.
+  const [sceneOpen, setSceneOpen] = useState<{ seedGenerationId?: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -458,6 +461,7 @@ export function ChatLayout() {
   // 편집/스프라이트 패널 닫기 — JSX inline 화살표 대신 안정 참조로 공유(원자적 상태 정리).
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
+  const closeScene = useCallback(() => setSceneOpen(null), []);
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
@@ -479,6 +483,7 @@ export function ChatLayout() {
         | "overlay"
         | "make_sheet"
         | "make_normal_map"
+        | "add_to_scene"
         | "reference"
         | "compare",
       payload: {
@@ -542,6 +547,12 @@ export function ChatLayout() {
           });
         },
         make_normal_map: () => openEditPanel("normal_map"),
+        add_to_scene: () => {
+          if (!payload.generationId) return;
+          setEditing(null);
+          setSpriteGen(null);
+          setSceneOpen({ seedGenerationId: payload.generationId });
+        },
         overlay: () =>
           // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
           // 백엔드 동일 — 패널이 시트+이미지참조 서브일 때 "캐릭터 오버레이"로 리프레이밍.
@@ -1168,7 +1179,7 @@ export function ChatLayout() {
   const hasItems = state.items.length > 0;
   // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
   // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
-  const editorPanelOpen = editing !== null || spriteGen !== null;
+  const editorPanelOpen = editing !== null || spriteGen !== null || sceneOpen !== null;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
@@ -1276,6 +1287,27 @@ export function ChatLayout() {
             onSubmit={handleSpriteGen}
             onClose={closeSpriteGen}
             onCancel={handleCancel}
+          />
+        </div>
+      )}
+      {sceneOpen && (
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+          <SceneComposer
+            seedGenerationId={sceneOpen.seedGenerationId}
+            sessionId={state.activeSessionId}
+            onClose={closeScene}
+            onComposited={res => {
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: "🎬 씬 합성",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "composite",
+              });
+              closeScene();
+            }}
           />
         </div>
       )}

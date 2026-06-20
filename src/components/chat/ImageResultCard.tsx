@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Clapperboard,
   Columns2,
   Copy,
   Download,
@@ -33,6 +34,7 @@ type Action =
   | "overlay"
   | "make_sheet"
   | "make_normal_map"
+  | "add_to_scene"
   | "reference"
   | "compare";
 
@@ -234,6 +236,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
             >
               <Columns2 size={12} /> 비교
+            </button>
+            <button
+              onClick={() => onAction?.("add_to_scene")}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+              title="씬 합성에 추가 — 여러 이미지를 레이어로 쌓아 한 장으로 병합"
+            >
+              <Clapperboard size={12} /> 씬에 추가
             </button>
             <button
               onClick={() => onAction?.("reference")}
