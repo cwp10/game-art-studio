@@ -122,19 +122,21 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
     setSelectedIdx(sel => (sel === i ? null : sel));
   }, []);
 
-  // 프리뷰 드래그 — 선택된 레이어의 x/y 를 이동. window 이벤트로 프리뷰 밖에서도 추적
-  // (SpriteCanvas 의 셀 드래그 패턴 동일). delta 는 zoom 으로 역산해 화면 1:1 이동감 유지.
-  // useZoomPan 의 onPanPointer* 는 SceneComposer 에서 어떤 요소에도 연결돼 있지 않아(현재 inert)
-  // 패닝과 충돌하지 않는다 — 별도 stopPropagation 불필요.
+  // 프리뷰 드래그 — 선택된 레이어(없으면 최상단 레이어)의 x/y 를 이동.
+  // window 이벤트로 프리뷰 밖에서도 추적. delta 는 zoom 으로 역산해 화면 1:1 이동감 유지.
+  // img 에 pointer-events:none 을 주어 브라우저 네이티브 이미지 드래그가 mousemove 를 가로채는
+  // 문제를 차단한다.
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const onPreviewMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if (selectedIdx === null) return;
-      const layer = layers[selectedIdx];
+      // 선택된 레이어가 없으면 최상단(마지막) 레이어를 자동 선택.
+      const idx = selectedIdx ?? layers.length - 1;
+      if (idx < 0 || idx >= layers.length) return;
+      const layer = layers[idx];
       if (!layer) return;
       e.preventDefault();
+      setSelectedIdx(idx);
       dragRef.current = { sx: e.clientX, sy: e.clientY, ox: layer.x, oy: layer.y };
-      const idx = selectedIdx;
       const zoom = zp.zoom;
       const onMove = (ev: MouseEvent) => {
         const d = dragRef.current;
@@ -259,6 +261,7 @@ export function SceneComposer({ seedGenerationId, sessionId, onClose, onComposit
                     maxWidth: "100%",
                     maxHeight: "100%",
                     objectFit: "contain",
+                    pointerEvents: "none",
                   }}
                   draggable={false}
                 />

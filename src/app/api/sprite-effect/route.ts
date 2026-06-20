@@ -1,19 +1,7 @@
 import { NextRequest } from "next/server";
-import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
-import { newGenerationId } from "@/lib/util/ids";
-import {
-  IMAGES_DIR,
-  ensureDataDirs,
-  imagePath as imagePathFor,
-  toRelative,
-  resolveImagePath,
-} from "@/lib/util/paths";
-import {
-  applySpritesheetEffect,
-  type SpriteEffect,
-  type SpriteEffectParams,
-} from "@/lib/image-backend/sprite-effect";
-import fs from "node:fs/promises";
+import { getGeneration } from "@/lib/db/repo/generations";
+import { type SpriteEffect, type SpriteEffectParams } from "@/lib/image-backend/sprite-effect";
+import { runSpriteEffect } from "@/lib/image-backend/sprite-effect-runner";
 
 export const runtime = "nodejs";
 
@@ -59,6 +47,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 라우트에 입력 검증(400/404 구분)을 유지 — 관찰 가능한 HTTP 계약.
+  // 핵심 실행은 runSpriteEffect 에 위임해 MCP 도구와 동일 계약을 공유한다.
   const gen = getGeneration(body.generationId);
   if (!gen) {
     return Response.json({ error: `generation not found: ${body.generationId}` }, { status: 404 });
@@ -82,22 +72,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  ensureDataDirs();
-  await fs.mkdir(IMAGES_DIR, { recursive: true });
-
-  const newId = newGenerationId();
-  const outPath = imagePathFor(newId);
-  const effectParams = body.params ?? {};
-
-  let result: { width: number; height: number };
+  let result: { generationId: string; imagePath: string; width: number; height: number };
   try {
-    result = await applySpritesheetEffect({
-      inputPath: resolveImagePath(gen.image_path),
+    result = await runSpriteEffect({
+      generationId: body.generationId,
       effect: body.effect as SpriteEffect,
-      effectParams,
-      cols,
-      rows,
-      outPath,
+      params: body.params ?? {},
+      sessionId: body.sessionId,
+      cols: body.cols,
+      rows: body.rows,
     });
   } catch (e) {
     return Response.json(
@@ -106,24 +89,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  createGeneration({
-    id: newId,
-    session_id: body.sessionId ?? null,
-    message_id: null,
-    kind: "sprite_effect",
-    backend: "direct",
-    prompt: `스프라이트 이펙트 (${body.effect})`,
-    input_image_ids: [body.generationId],
-    params: { effect: body.effect, effectParams, cols, rows },
-    image_path: toRelative(outPath),
-    width: result.width,
-    height: result.height,
-  });
-
-  return Response.json({
-    generationId: newId,
-    imagePath: `/api/images/${newId}`,
-    width: result.width,
-    height: result.height,
-  });
+  return Response.json(result);
 }

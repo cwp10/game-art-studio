@@ -15,6 +15,7 @@ import {
   Map,
   Palette,
   RotateCw,
+  Scissors,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -35,6 +36,7 @@ type Action =
   | "make_sheet"
   | "make_normal_map"
   | "add_to_scene"
+  | "open_nine_slice"
   | "reference"
   | "compare";
 
@@ -244,6 +246,16 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Clapperboard size={12} /> 씬에 추가
             </button>
+            {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
+            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (
+              <button
+                onClick={() => onAction?.("open_nine_slice")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
+              >
+                <Scissors size={12} /> 9-slice
+              </button>
+            )}
             <button
               onClick={() => onAction?.("reference")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"

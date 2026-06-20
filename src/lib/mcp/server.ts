@@ -61,6 +61,9 @@ import type { GenerationKind } from "../../types/db.js";
 import { handleMakeSpritesheet } from "./handlers/spritesheet-handler.js";
 import { handleReskinImage } from "./handlers/reskin-handler.js";
 import { handleGenerateNormalMap } from "./handlers/normal-map-handler.js";
+import { runComposite } from "../image-backend/composite-runner.js";
+import { runSpriteEffect } from "../image-backend/sprite-effect-runner.js";
+import type { SpriteEffect } from "../image-backend/sprite-effect.js";
 
 const RESIZE_TARGET_SIZES = [64, 128, 256, 512, 1024, 2048, 4096, 8192] as const;
 
@@ -294,6 +297,52 @@ const SCHEMAS = {
     },
     required: ["inputGenerationId"],
   },
+  composite_scene: {
+    type: "object" as const,
+    properties: {
+      layers: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "합성할 이미지의 generation id" },
+            opacity: { type: "number", description: "불투명도 0-100 (기본 100)" },
+          },
+          required: ["id"],
+        },
+        description: "합성할 레이어 목록. 배열[0]이 최하단. 최소 2개.",
+      },
+      outputWidth: {
+        type: "integer",
+        description: "(선택) 출력 캔버스 너비 px. 미지정 시 첫 레이어 크기.",
+      },
+      outputHeight: { type: "integer", description: "(선택) 출력 캔버스 높이 px." },
+      ...SESSION_PROP,
+    },
+    required: ["layers"],
+  },
+  apply_sprite_effect: {
+    type: "object" as const,
+    properties: {
+      inputGenerationId: {
+        type: "string",
+        description: "이펙트를 적용할 spritesheet generation id",
+      },
+      effect: {
+        type: "string",
+        enum: ["drop_shadow", "outline", "glow"],
+        description: "drop_shadow: 셀별 그림자. outline: 캐릭터 외곽선. glow: 외곽 발광.",
+      },
+      color: { type: "string", description: "이펙트 색상 hex (기본 '#000000')" },
+      opacity: { type: "number", description: "이펙트 불투명도 0-100 (기본 70)" },
+      blur: { type: "number", description: "블러 sigma (기본 3)" },
+      offsetX: { type: "number", description: "그림자 X 오프셋 px (drop_shadow만, 기본 4)" },
+      offsetY: { type: "number", description: "그림자 Y 오프셋 px (drop_shadow만, 기본 4)" },
+      thickness: { type: "number", description: "아웃라인 두께 px (outline만, 기본 2)" },
+      ...SESSION_PROP,
+    },
+    required: ["inputGenerationId", "effect"],
+  },
 } as const;
 
 const TOOLS = [
@@ -381,6 +430,22 @@ const TOOLS = [
       "대상이 스프라이트시트면 셀 정렬·투명화 후처리가 자동 적용된다(단일 이미지는 후처리 없음).",
     inputSchema: SCHEMAS.reskin_image,
   },
+  {
+    name: "composite_scene",
+    description:
+      "여러 이미지를 레이어로 쌓아 한 장의 씬 PNG로 합성. " +
+      "배경 + 캐릭터, 여러 에셋 조합 등에 사용. codex 호출 없음, 1~5초. " +
+      "layers[0]이 최하단(배경), 마지막이 최상단(전경).",
+    inputSchema: SCHEMAS.composite_scene,
+  },
+  {
+    name: "apply_sprite_effect",
+    description:
+      "스프라이트시트 각 프레임에 알파 기반 이펙트 적용. " +
+      "drop_shadow(그림자)/outline(외곽선)/glow(발광) 지원. " +
+      "투명 배경 시트 전용. codex 없음, 수초 이내.",
+    inputSchema: SCHEMAS.apply_sprite_effect,
+  },
 ];
 
 // ─── server bootstrap ────────────────────────────────────────────────────────
@@ -414,6 +479,18 @@ type CallArgs = {
   directions?: Directions;
   viewpoint?: string;
   sessionId?: string;
+  // composite_scene
+  layers?: Array<{ id: string; opacity?: number }>;
+  outputWidth?: number;
+  outputHeight?: number;
+  // apply_sprite_effect
+  effect?: string;
+  color?: string;
+  opacity?: number;
+  blur?: number;
+  offsetX?: number;
+  offsetY?: number;
+  thickness?: number;
 };
 
 server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
@@ -650,6 +727,53 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
 
       case "generate_normal_map":
         return await handleGenerateNormalMap(args as Record<string, unknown>, { signal: extra.signal }, { sessionId, log });
+
+      case "composite_scene": {
+        const layers = requireArray(args.layers, "layers") as Array<{ id: string; opacity?: number }>;
+        if (layers.length < 1) throw new Error("layers must have at least 1 item");
+        const result = await runComposite({
+          layers: layers.map((l) => ({ generationId: l.id, opacity: l.opacity })),
+          sessionId,
+          outputWidth: args.outputWidth as number | undefined,
+          outputHeight: args.outputHeight as number | undefined,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Generated composite ${result.generationId} (${result.width}×${result.height}). Show it with image ref id "${result.generationId}".`,
+            },
+          ],
+          structuredContent: result,
+        };
+      }
+
+      case "apply_sprite_effect": {
+        const inputGenerationId = requireString(args.inputGenerationId, "inputGenerationId");
+        const effect = requireString(args.effect, "effect") as SpriteEffect;
+        const result = await runSpriteEffect({
+          generationId: inputGenerationId,
+          effect,
+          params: {
+            color: args.color as string | undefined,
+            opacity: args.opacity as number | undefined,
+            blur: args.blur as number | undefined,
+            offsetX: args.offsetX as number | undefined,
+            offsetY: args.offsetY as number | undefined,
+            thickness: args.thickness as number | undefined,
+          },
+          sessionId,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Applied ${effect} effect. generationId: ${result.generationId} (${result.width}×${result.height}). Show it with image ref id "${result.generationId}".`,
+            },
+          ],
+          structuredContent: result,
+        };
+      }
 
       default:
         throw new Error(`unknown tool: ${name}`);
@@ -1048,6 +1172,10 @@ function requireString(v: unknown, name: string): string {
 }
 function requireInt(v: unknown, name: string): number {
   if (typeof v !== "number" || !Number.isInteger(v)) throw new Error(`${name} must be an integer`);
+  return v;
+}
+function requireArray(v: unknown, name: string): unknown[] {
+  if (!Array.isArray(v)) throw new Error(`${name} must be an array`);
   return v;
 }
 

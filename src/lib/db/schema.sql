@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS generations (
   session_id        TEXT REFERENCES sessions(id) ON DELETE SET NULL,
   message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
   kind              TEXT NOT NULL
-                    CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','external','reskin','resize','emote_sheet','tileset','normal_map','layer_extract','composite','sprite_effect')),
+                    CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','external','reskin','resize','emote_sheet','tileset','normal_map','layer_extract','composite','sprite_effect','nine_slice','nine_slice_scaled')),
   prompt            TEXT,
   negative_prompt   TEXT,
   preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,

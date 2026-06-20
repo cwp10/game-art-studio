@@ -10,6 +10,7 @@ import { StatusButton } from "./StatusButton";
 import { ImageToolsPanel, POST_FILTER_DEFS, type FilterArg } from "@/components/editor/ImageToolsPanel";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
+import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SceneComposer } from "@/components/editor/SceneComposer";
@@ -88,6 +89,8 @@ export function ChatLayout() {
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
   // 씬 합성 오버레이 — seedGenerationId 로 첫 레이어 미리채움. null 이면 닫힘.
   const [sceneOpen, setSceneOpen] = useState<{ seedGenerationId?: string } | null>(null);
+  // 9-slice 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
+  const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -462,6 +465,7 @@ export function ChatLayout() {
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
   const closeScene = useCallback(() => setSceneOpen(null), []);
+  const closeNineSlice = useCallback(() => setNineSliceOpen(null), []);
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
@@ -484,6 +488,7 @@ export function ChatLayout() {
         | "make_sheet"
         | "make_normal_map"
         | "add_to_scene"
+        | "open_nine_slice"
         | "reference"
         | "compare",
       payload: {
@@ -552,6 +557,12 @@ export function ChatLayout() {
           setEditing(null);
           setSpriteGen(null);
           setSceneOpen({ seedGenerationId: payload.generationId });
+        },
+        open_nine_slice: () => {
+          if (!payload.generationId) return;
+          setEditing(null);
+          setSpriteGen(null);
+          setNineSliceOpen({ generationId: payload.generationId });
         },
         overlay: () =>
           // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
@@ -1179,7 +1190,8 @@ export function ChatLayout() {
   const hasItems = state.items.length > 0;
   // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
   // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
-  const editorPanelOpen = editing !== null || spriteGen !== null || sceneOpen !== null;
+  const editorPanelOpen =
+    editing !== null || spriteGen !== null || sceneOpen !== null || nineSliceOpen !== null;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
@@ -1307,6 +1319,27 @@ export function ChatLayout() {
                 kind: "composite",
               });
               closeScene();
+            }}
+          />
+        </div>
+      )}
+      {nineSliceOpen && (
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+          <NineSliceEditor
+            generationId={nineSliceOpen.generationId}
+            sessionId={state.activeSessionId}
+            onClose={closeNineSlice}
+            onResult={res => {
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: res.kind === "nine_slice_scaled" ? "✂️ 9-slice 리사이즈" : "✂️ 9-slice 그리드",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: res.kind,
+              });
+              closeNineSlice();
             }}
           />
         </div>

@@ -1,16 +1,6 @@
 import { NextRequest } from "next/server";
-import sharp from "sharp";
-import { createGeneration, getGeneration } from "@/lib/db/repo/generations";
-import { newGenerationId } from "@/lib/util/ids";
-import {
-  IMAGES_DIR,
-  ensureDataDirs,
-  imagePath as imagePathFor,
-  toRelative,
-  resolveImagePath,
-} from "@/lib/util/paths";
-import { mergeImages } from "@/lib/image-backend/composite-layers";
-import fs from "node:fs/promises";
+import { getGeneration } from "@/lib/db/repo/generations";
+import { runComposite } from "@/lib/image-backend/composite-runner";
 
 export const runtime = "nodejs";
 
@@ -52,80 +42,29 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "layers must be a non-empty array" }, { status: 400 });
   }
 
-  const resolved: {
-    imagePath: string;
-    opacity: number;
-    generationId: string;
-    x?: number;
-    y?: number;
-    scale?: number;
-  }[] = [];
+  // 라우트에 입력 검증(400/404 구분)을 유지 — 관찰 가능한 HTTP 계약.
+  // 핵심 실행은 runComposite 에 위임해 MCP 도구와 동일 계약을 공유한다.
   for (const [i, l] of body.layers.entries()) {
     if (!l.generationId) {
       return Response.json({ error: `layers[${i}].generationId required` }, { status: 400 });
     }
-    const gen = getGeneration(l.generationId);
-    if (!gen) {
+    if (!getGeneration(l.generationId)) {
       return Response.json({ error: `generation not found: ${l.generationId}` }, { status: 404 });
     }
-    const opacity = typeof l.opacity === "number" ? l.opacity : 100;
-    resolved.push({
-      imagePath: resolveImagePath(gen.image_path),
-      opacity,
-      generationId: l.generationId,
-      x: typeof l.x === "number" ? l.x : undefined,
-      y: typeof l.y === "number" ? l.y : undefined,
-      scale: typeof l.scale === "number" ? l.scale : undefined,
-    });
   }
 
-  let outputWidth = body.outputWidth;
-  let outputHeight = body.outputHeight;
-  if (!outputWidth || !outputHeight) {
-    const meta = await sharp(resolved[0].imagePath).metadata();
-    outputWidth = meta.width ?? 0;
-    outputHeight = meta.height ?? 0;
-  }
-  if (!outputWidth || !outputHeight) {
-    return Response.json({ error: "could not determine output dimensions" }, { status: 400 });
-  }
-
-  ensureDataDirs();
-  await fs.mkdir(IMAGES_DIR, { recursive: true });
-
-  const newId = newGenerationId();
-  const outPath = imagePathFor(newId);
-  const { width, height } = await mergeImages({
-    layers: resolved.map((r) => ({
-      imagePath: r.imagePath,
-      opacity: r.opacity,
-      x: r.x,
-      y: r.y,
-      scale: r.scale,
+  const result = await runComposite({
+    layers: body.layers.map((l) => ({
+      generationId: l.generationId as string,
+      opacity: l.opacity,
+      x: l.x,
+      y: l.y,
+      scale: l.scale,
     })),
-    outputWidth,
-    outputHeight,
-    outPath,
+    sessionId: body.sessionId,
+    outputWidth: body.outputWidth,
+    outputHeight: body.outputHeight,
   });
 
-  createGeneration({
-    id: newId,
-    session_id: body.sessionId ?? null,
-    message_id: null,
-    kind: "composite",
-    backend: "direct",
-    prompt: `씬 합성 (${body.layers.length}개 레이어)`,
-    input_image_ids: resolved.map((r) => r.generationId),
-    params: { layers: body.layers, outputWidth, outputHeight },
-    image_path: toRelative(outPath),
-    width,
-    height,
-  });
-
-  return Response.json({
-    generationId: newId,
-    imagePath: `/api/images/${newId}`,
-    width,
-    height,
-  });
+  return Response.json(result);
 }

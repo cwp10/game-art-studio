@@ -26,6 +26,7 @@ type Props = {
       | "make_sheet"
       | "make_normal_map"
       | "add_to_scene"
+      | "open_nine_slice"
       | "reference"
       | "compare",
     payload: {

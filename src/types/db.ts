@@ -46,7 +46,9 @@ export type GenerationKind =
   | "tileset"
   | "normal_map"
   | "composite"
-  | "sprite_effect";
+  | "sprite_effect"
+  | "nine_slice"
+  | "nine_slice_scaled";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";
 
