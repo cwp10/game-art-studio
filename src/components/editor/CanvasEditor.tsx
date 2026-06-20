@@ -14,6 +14,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  Wand2,
   X,
   ZoomIn,
   ZoomOut,
@@ -21,7 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
-import { useZoomPan } from "./useZoomPan";
+import { rectRatioPoint, useZoomPan } from "./useZoomPan";
 
 /**
  * CanvasEditor — 전체전환(full-takeover) 통합 캔버스 에디터 (1단계).
@@ -100,6 +101,12 @@ type Props = {
     generationId: string,
     prompt: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  /** 영역 편집(generative fill) — generationId + 마스크(dataUrl) + prompt 로 칠한 영역 재생성. */
+  onInpaint: (
+    generationId: string,
+    maskDataUrl: string,
+    prompt: string,
+  ) => Promise<{ generationId: string; width: number; height: number } | null>;
 };
 
 let layerSeq = 0;
@@ -157,6 +164,7 @@ export function CanvasEditor({
   onRemoveBg,
   onUpscale,
   onExtract,
+  onInpaint,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -180,6 +188,13 @@ export function CanvasEditor({
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
   const [extractInput, setExtractInput] = useState("");
   const [extracting, setExtracting] = useState(false);
+  // 영역 편집(generative fill) — 활성 레이어 id(null=꺼짐) + 프롬프트/브러시/진행. 마스크는 소스 해상도 캔버스.
+  const [inpaintLayerId, setInpaintLayerId] = useState<string | null>(null);
+  const [inpaintPrompt, setInpaintPrompt] = useState("");
+  const [inpaintBrush, setInpaintBrush] = useState(40);
+  const [inpaintBusy, setInpaintBusy] = useState(false);
+  const brushCanvasRef = useRef<HTMLCanvasElement>(null);
+  const brushDrawingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -420,6 +435,92 @@ export function CanvasEditor({
       setExtracting(false);
     }
   }, [layers, selectedLayerId, extracting, extractInput, onExtract, pushUndo]);
+
+  // ── 영역 편집(generative fill) — 선택 레이어 위에 마스크를 칠하고 프롬프트로 재생성 ──────────
+  // 소스 해상도 캔버스에 #ff0000 으로 칠하고, export 시 검정 배경 + 빨강 = 인페인트 영역(MaskCanvas 포맷).
+  const exitInpaint = useCallback(() => {
+    setInpaintLayerId(null);
+    setInpaintPrompt("");
+    const c = brushCanvasRef.current;
+    c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  }, []);
+  const clearBrush = useCallback(() => {
+    const c = brushCanvasRef.current;
+    c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  }, []);
+  const onBrushDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const canvas = brushCanvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      if (!canvas || !ctx) return;
+      e.preventDefault();
+      brushDrawingRef.current = true;
+      const rect = canvas.getBoundingClientRect();
+      const srcPerDisplay = canvas.width / rect.width;
+      const p = rectRatioPoint(e);
+      ctx.fillStyle = "#ff0000";
+      ctx.strokeStyle = "#ff0000";
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = inpaintBrush * srcPerDisplay;
+      // 클릭만 해도 한 점 칠해지게 dot.
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, (inpaintBrush * srcPerDisplay) / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {}
+    },
+    [inpaintBrush],
+  );
+  const onBrushMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!brushDrawingRef.current) return;
+    const ctx = brushCanvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    const p = rectRatioPoint(e);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+  }, []);
+  const onBrushUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    brushDrawingRef.current = false;
+    try {
+      brushCanvasRef.current?.releasePointerCapture(e.pointerId);
+    } catch {}
+  }, []);
+
+  const handleInpaintSubmit = useCallback(async () => {
+    const layer = layers.find(l => l.id === inpaintLayerId);
+    const canvas = brushCanvasRef.current;
+    if (!layer || !canvas || inpaintBusy || !inpaintPrompt.trim()) return;
+    // export: 소스 해상도 검정 배경 + 빨강 칠.
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const octx = out.getContext("2d");
+    if (!octx) return;
+    octx.fillStyle = "#000000";
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(canvas, 0, 0);
+    const maskDataUrl = out.toDataURL("image/png");
+    setInpaintBusy(true);
+    setError(null);
+    try {
+      const r = await onInpaint(layer.generationId, maskDataUrl, inpaintPrompt.trim());
+      if (r) {
+        pushUndo();
+        patchLayer(layer.id, { generationId: r.generationId });
+        exitInpaint();
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setInpaintBusy(false);
+    }
+  }, [layers, inpaintLayerId, inpaintBusy, inpaintPrompt, onInpaint, pushUndo, patchLayer, exitInpaint]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -1148,6 +1249,16 @@ export function CanvasEditor({
                   >
                     <Scissors size={11} /> 여백 제거
                   </button>
+                  <button
+                    onClick={() => {
+                      setInpaintLayerId(selected.id);
+                      setInpaintPrompt("");
+                    }}
+                    className="flex items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+                    title="영역 편집 — 칠한 영역을 프롬프트로 다시 그림 (generative fill)"
+                  >
+                    <Wand2 size={11} /> 영역 편집
+                  </button>
                 </div>
                 {/* 분리(오려내기) — 부위명 입력 → AI 추출 → 새 레이어. 쉼표로 여러 부위. */}
                 <div className="mb-2 flex items-center gap-1.5">
@@ -1241,6 +1352,92 @@ export function CanvasEditor({
           )}
         </button>
       </footer>
+
+      {/* 영역 편집(generative fill) 오버레이 — 선택 레이어를 평면으로 띄우고 마스크를 칠한 뒤 프롬프트로 재생성. */}
+      {inpaintLayerId &&
+        (() => {
+          const layer = layers.find(l => l.id === inpaintLayerId);
+          if (!layer) return null;
+          return (
+            <div className="absolute inset-0 z-50 flex flex-col bg-bg-app">
+              <header className="flex h-12 flex-none items-center gap-2 border-b border-border px-4 text-sm">
+                <Wand2 size={15} className="text-[color:var(--accent)]" />
+                <span className="font-medium">영역 편집</span>
+                <span className="text-text-muted">— 다시 그릴 영역을 칠하고 프롬프트를 입력</span>
+                <button
+                  onClick={exitInpaint}
+                  className="ml-auto rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                >
+                  <X size={16} />
+                </button>
+              </header>
+              <div className="flex flex-1 items-center justify-center overflow-hidden p-4">
+                <div className="relative max-h-full max-w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/images/${layer.generationId}`}
+                    alt=""
+                    className="checkerboard block max-h-[calc(100vh-190px)] max-w-full select-none"
+                    draggable={false}
+                    onLoad={e => {
+                      const img = e.currentTarget;
+                      const c = brushCanvasRef.current;
+                      if (c) {
+                        c.width = img.naturalWidth;
+                        c.height = img.naturalHeight;
+                      }
+                    }}
+                  />
+                  <canvas
+                    ref={brushCanvasRef}
+                    className="absolute inset-0 h-full w-full cursor-crosshair opacity-50"
+                    onPointerDown={onBrushDown}
+                    onPointerMove={onBrushMove}
+                    onPointerUp={onBrushUp}
+                  />
+                </div>
+              </div>
+              <footer className="flex flex-none flex-wrap items-center gap-2 border-t border-border px-4 py-3">
+                <span className="text-[11px] text-text-muted">브러시</span>
+                <input
+                  type="range"
+                  min={5}
+                  max={120}
+                  value={inpaintBrush}
+                  onChange={e => setInpaintBrush(Number(e.target.value))}
+                  className="w-28 accent-[color:var(--accent)]"
+                />
+                <span className="w-9 text-right text-[11px] tabular-nums text-text-muted">{inpaintBrush}px</span>
+                <button
+                  onClick={clearBrush}
+                  className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                >
+                  지우기
+                </button>
+                <input
+                  value={inpaintPrompt}
+                  onChange={e => setInpaintPrompt(e.target.value)}
+                  placeholder="칠한 영역에 무엇을 그릴까요? (예: 빛나는 룬 문양)"
+                  disabled={inpaintBusy}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                />
+                <button
+                  onClick={handleInpaintSubmit}
+                  disabled={inpaintBusy || !inpaintPrompt.trim()}
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-4 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  {inpaintBusy ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> 생성 중…
+                    </>
+                  ) : (
+                    "채우기 ▸"
+                  )}
+                </button>
+              </footer>
+            </div>
+          );
+        })()}
     </div>
   );
 }

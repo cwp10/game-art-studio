@@ -1451,6 +1451,13 @@ export function ChatLayout() {
               extractObject: true,
             })
           }
+          onInpaint={async (genId, maskDataUrl, prompt) => {
+            const maskId = await uploadMask(genId, maskDataUrl);
+            return handleSend(prompt, {
+              attachmentGenerationIds: [genId],
+              maskGenerationId: maskId,
+            });
+          }}
         />
       )}
       <PromptLibrarySheet
