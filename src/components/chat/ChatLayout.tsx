@@ -1057,7 +1057,7 @@ export function ChatLayout() {
   );
 
   // 우측 편집 패널 — mode 별로 props 가 전부 달라 config 맵은 불가하지만, 공통 래퍼
-  // (fixed inset-y-0 right-0 z-40 w-1/2)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
+  // (fixed inset-y-0 right-0 z-40 w-2/3)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
   // (spriteGen 상태)은 EditTarget 기반이 아니라 별도라 이 함수 밖에 유지.
   function renderEditPanel() {
     if (!editing) return null;
@@ -1195,7 +1195,7 @@ export function ChatLayout() {
       }
     })();
     if (!panel) return null;
-    return <div className="fixed inset-y-0 right-0 z-40 w-1/2">{panel}</div>;
+    return <div className="fixed inset-y-0 right-0 z-40 w-2/3">{panel}</div>;
   }
 
   const hasItems = state.items.length > 0;
@@ -1228,7 +1228,7 @@ export function ChatLayout() {
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
           중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
       <div
-        className={`relative flex flex-col ${editorPanelOpen ? "w-1/2" : "flex-1"}`}
+        className={`relative flex flex-col ${editorPanelOpen ? "w-1/3" : "flex-1"}`}
         onDragEnter={e => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
@@ -1304,7 +1304,7 @@ export function ChatLayout() {
       </div>
       {renderEditPanel()}
       {spriteGen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
           <SpriteGenPanel
             referenceId={spriteGen.reference?.generationId}
             referenceImageUrl={spriteGen.reference?.imageUrl}
@@ -1318,7 +1318,7 @@ export function ChatLayout() {
         </div>
       )}
       {sceneOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
           <SceneComposer
             seedGenerationId={sceneOpen.seedGenerationId}
             sessionId={state.activeSessionId}
@@ -1339,7 +1339,7 @@ export function ChatLayout() {
         </div>
       )}
       {nineSliceOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
           <NineSliceEditor
             generationId={nineSliceOpen.generationId}
             sessionId={state.activeSessionId}
@@ -1360,7 +1360,7 @@ export function ChatLayout() {
         </div>
       )}
       {buttonStateOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
           <ButtonStateEditor
             generationId={buttonStateOpen.generationId}
             sessionId={state.activeSessionId}

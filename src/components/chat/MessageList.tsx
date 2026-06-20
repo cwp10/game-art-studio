@@ -75,7 +75,7 @@ export function MessageList({ items, generating, onAction, onPickSuggestion, onR
   }, [items]);
 
   return (
-    <div className="mx-auto w-full max-w-[880px] space-y-4 px-4 py-6">
+    <div className="mx-auto w-full max-w-full space-y-4 px-4 py-6">
       {items.map((it, i) => {
         if (it.kind === "user") {
           return (
