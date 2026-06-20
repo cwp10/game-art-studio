@@ -109,98 +109,92 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
         </span>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1 gap-4 overflow-y-auto p-4">
-        {/* 좌: 원본 미리보기 + 슬라이스 라인 오버레이 */}
-        <div className="flex flex-1 flex-col gap-2">
-          <p className="text-xs font-medium text-text-muted">원본 미리보기</p>
-          <div className="relative inline-flex max-h-[60vh] items-center justify-center self-start checkerboard overflow-hidden rounded-lg border border-border">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={imageUrl}
-              alt="9-slice 원본"
-              className="block max-h-[60vh] max-w-full object-contain"
-              onLoad={e => {
-                const img = e.currentTarget;
-                setNatural({ w: img.naturalWidth, h: img.naturalHeight });
-              }}
-            />
-            {/* 슬라이스 라인 — 1px dashed accent. 자연 크기 기준 %. */}
-            {linePct && (
-              <>
-                <div
-                  className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[color:var(--accent)]"
-                  style={{ top: linePct.top }}
-                />
-                <div
-                  className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[color:var(--accent)]"
-                  style={{ bottom: linePct.bottom }}
-                />
-                <div
-                  className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[color:var(--accent)]"
-                  style={{ left: linePct.left }}
-                />
-                <div
-                  className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[color:var(--accent)]"
-                  style={{ right: linePct.right }}
-                />
-              </>
-            )}
+      {/* 도구 스트립 — 출력 규격(리사이즈). 캔버스 에디터 상단 스트립과 동일 위치. */}
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2 text-xs">
+        <span className="text-text-muted">리사이즈 출력</span>
+        <input
+          type="number"
+          min={1}
+          value={outWidth}
+          onChange={e => setOutWidth(e.target.value)}
+          placeholder="너비"
+          className="h-7 w-20 rounded-md border border-border bg-bg-panel px-2 tabular-nums text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
+        />
+        <span className="text-text-muted/50">×</span>
+        <input
+          type="number"
+          min={1}
+          value={outHeight}
+          onChange={e => setOutHeight(e.target.value)}
+          placeholder="높이"
+          className="h-7 w-20 rounded-md border border-border bg-bg-panel px-2 tabular-nums text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
+        />
+        <span className="text-text-muted/50">입력 시 모서리를 유지한 채 늘립니다(미입력 시 그리드 미리보기만)</span>
+        {natural && (
+          <span className="ml-auto tabular-nums text-text-muted/60">원본 {natural.w}×{natural.h}px</span>
+        )}
+      </div>
+
+      {/* 본문 — 중앙 스테이지(미리보기) + 우측 레일(옵션·액션). 캔버스 에디터와 동일 골격. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]">
+            <div className="relative inline-flex max-h-full items-center justify-center checkerboard overflow-hidden rounded-lg border border-border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imageUrl}
+                alt="9-slice 원본"
+                className="block max-h-[78vh] max-w-full object-contain"
+                onLoad={e => {
+                  const img = e.currentTarget;
+                  setNatural({ w: img.naturalWidth, h: img.naturalHeight });
+                }}
+              />
+              {/* 슬라이스 라인 — 1px dashed accent. 자연 크기 기준 %. */}
+              {linePct && (
+                <>
+                  <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[color:var(--accent)]" style={{ top: linePct.top }} />
+                  <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-[color:var(--accent)]" style={{ bottom: linePct.bottom }} />
+                  <div className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[color:var(--accent)]" style={{ left: linePct.left }} />
+                  <div className="pointer-events-none absolute inset-y-0 border-l border-dashed border-[color:var(--accent)]" style={{ right: linePct.right }} />
+                </>
+              )}
+            </div>
           </div>
-          {natural && (
-            <p className="text-[11px] text-text-muted/60">
-              원본 {natural.w}×{natural.h}px
-            </p>
-          )}
         </div>
 
-        {/* 우: inset 설정 + 리사이즈 출력 */}
-        <div className="flex w-48 shrink-0 flex-col gap-4">
-          <div className="flex flex-col gap-2">
+        {/* 우측 레일 — inset 옵션(레이어 레일 자리) + 하단 액션(합치기 자리). */}
+        <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
+          <div className="flex-1 space-y-2 overflow-y-auto p-3">
             <p className="text-xs font-medium text-text-muted">Inset 설정 (px)</p>
             <InsetInput label="좌" value={insetLeft} onChange={setInsetLeft} />
             <InsetInput label="우" value={insetRight} onChange={setInsetRight} />
             <InsetInput label="상" value={insetTop} onChange={setInsetTop} />
             <InsetInput label="하" value={insetBottom} onChange={setInsetBottom} />
             {insetInvalid && (
-              <p className="text-[11px] text-[color:var(--danger)]">
-                inset 합이 원본 크기를 넘습니다 — 중앙 영역이 없습니다.
-              </p>
+              <p className="text-[11px] text-[color:var(--danger)]">inset 합이 원본 크기를 넘습니다 — 중앙 영역이 없습니다.</p>
             )}
+            {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
           </div>
-
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-text-muted">리사이즈 출력 (선택)</p>
-            <SizeInput label="너비" value={outWidth} onChange={setOutWidth} />
-            <SizeInput label="높이" value={outHeight} onChange={setOutHeight} />
-            <p className="text-[11px] text-text-muted/50">
-              너비·높이를 입력하면 모서리를 유지한 채 늘립니다.
-            </p>
+          <div className="flex flex-none flex-col gap-2 border-t border-border p-3">
+            <button
+              onClick={() => run("/api/nine-slice", "nine_slice")}
+              disabled={busy || insetInvalid}
+              className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />} 그리드 미리보기
+            </button>
+            <button
+              onClick={() => run("/api/nine-slice-scale", "nine_slice_scaled")}
+              disabled={busy || insetInvalid || !resizeReady}
+              className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+              title={!resizeReady ? "리사이즈 출력 크기를 입력하세요" : ""}
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : null} 리사이즈 출력 ▸
+            </button>
           </div>
         </div>
       </div>
-
-      {error && (
-        <p className="mx-auto w-full max-w-[1200px] px-4 pb-2 text-[11px] text-[color:var(--danger)]">
-          {error}
-        </p>
-      )}
-
-      <footer className="mx-auto flex w-full max-w-[1200px] gap-2 border-t border-border p-3">
-        <button
-          onClick={() => run("/api/nine-slice", "nine_slice")}
-          disabled={busy || insetInvalid}
-          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
-        >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : <Scissors size={14} />} 그리드 미리보기
-        </button>
-        <button
-          onClick={() => run("/api/nine-slice-scale", "nine_slice_scaled")}
-          disabled={busy || insetInvalid || !resizeReady}
-          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-        >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : null} 리사이즈 출력
-        </button>
-      </footer>
     </aside>
   );
 }
@@ -223,32 +217,6 @@ function InsetInput({
         min={0}
         value={value}
         onChange={e => onChange(Math.max(0, Number(e.target.value) || 0))}
-        className="h-7 w-full rounded-lg border border-border bg-bg-card px-2 text-xs tabular-nums text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
-      />
-      <span className="text-text-muted/50">px</span>
-    </label>
-  );
-}
-
-/** 출력 크기 입력 — 빈 문자열 허용(미설정). */
-function SizeInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <label className="flex items-center gap-2 text-xs text-text-muted">
-      <span className="w-6 shrink-0">{label}</span>
-      <input
-        type="number"
-        min={1}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder="px"
         className="h-7 w-full rounded-lg border border-border bg-bg-card px-2 text-xs tabular-nums text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
       />
       <span className="text-text-muted/50">px</span>

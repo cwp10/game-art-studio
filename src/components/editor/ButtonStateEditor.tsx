@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowLeft, Gamepad2, Plus } from "lucide-react";
+import { ArrowLeft, Gamepad2, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
-import { PanelFooter } from "./PanelFooter";
 
 /**
  * ButtonStateEditor — 단일 이미지를 UI 버튼의 3가지 상태(normal/hover/pressed)로 변환하는 편집기.
@@ -105,73 +104,75 @@ export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, 
         </span>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-4 overflow-y-auto p-4">
-        {/* 미리보기 — 3개 슬롯 (생성 전: 원본 × 3, 생성 후: 각 상태 결과) */}
-        <div className="grid grid-cols-3 gap-3">
-          {(["normal", "hover", "pressed"] as StateKey[]).map(state => (
-            <div key={state} className="flex flex-col gap-1.5">
-              <div className="flex aspect-square items-center justify-center checkerboard overflow-hidden rounded-lg border border-border">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={slotUrl(state)}
-                  alt={LABELS[state]}
-                  className="block max-h-full max-w-full object-contain"
-                />
-              </div>
-              <p className="text-center text-[11px] font-medium text-text-muted">{LABELS[state]}</p>
-              {results && onAddOne && (
-                <button
-                  onClick={() =>
-                    onAddOne({
-                      generationId: results[state].generationId,
-                      width: results[state].width,
-                      height: results[state].height,
-                      state,
-                    })
-                  }
-                  className="flex h-6 items-center justify-center gap-1 rounded border border-border text-[11px] text-text-muted hover:bg-bg-card hover:text-text-primary"
-                  title={`${LABELS[state]} 상태를 채팅에 카드로 추가`}
-                >
-                  <Plus size={11} /> 채팅에 추가
-                </button>
-              )}
+      {/* 본문 — 중앙 스테이지(3 상태 슬롯) + 우측 레일(파라미터·생성). 캔버스 에디터와 동일 골격. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d] p-4">
+            <div className="grid w-full max-w-[960px] grid-cols-3 gap-4">
+              {(["normal", "hover", "pressed"] as StateKey[]).map(state => (
+                <div key={state} className="flex flex-col gap-1.5">
+                  <div className="flex aspect-square items-center justify-center checkerboard overflow-hidden rounded-lg border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={slotUrl(state)}
+                      alt={LABELS[state]}
+                      className="block max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <p className="text-center text-[11px] font-medium text-text-muted">{LABELS[state]}</p>
+                  {results && onAddOne && (
+                    <button
+                      onClick={() =>
+                        onAddOne({
+                          generationId: results[state].generationId,
+                          width: results[state].width,
+                          height: results[state].height,
+                          state,
+                        })
+                      }
+                      className="flex h-6 items-center justify-center gap-1 rounded border border-border text-[11px] text-text-muted hover:bg-bg-card hover:text-text-primary"
+                      title={`${LABELS[state]} 상태를 채팅에 카드로 추가`}
+                    >
+                      <Plus size={11} /> 채팅에 추가
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
         </div>
 
-        {/* 파라미터 슬라이더 */}
-        <div className="flex flex-col gap-4 border-t border-border pt-4">
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-text-muted">Hover</p>
-            <Slider label="밝기" min={0.5} max={2.0} value={hoverBrightness} onChange={setHoverBrightness} />
-            <Slider label="채도" min={0.5} max={2.0} value={hoverSaturation} onChange={setHoverSaturation} />
+        {/* 우측 레일 — 파라미터(옵션) + 하단 생성(합치기 자리). */}
+        <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
+          <div className="flex-1 space-y-4 overflow-y-auto p-3">
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-medium text-text-muted">Hover</p>
+              <Slider label="밝기" min={0.5} max={2.0} value={hoverBrightness} onChange={setHoverBrightness} />
+              <Slider label="채도" min={0.5} max={2.0} value={hoverSaturation} onChange={setHoverSaturation} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-medium text-text-muted">Pressed</p>
+              <Slider label="밝기" min={0.5} max={2.0} value={pressedBrightness} onChange={setPressedBrightness} />
+              <Slider label="채도" min={0.5} max={2.0} value={pressedSaturation} onChange={setPressedSaturation} />
+              <Slider label="축소" min={0.8} max={1.0} value={pressedScale} onChange={setPressedScale} suffix="×" />
+            </div>
+            {error && <p className="text-[11px] text-[color:var(--danger)]">{error}</p>}
           </div>
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-text-muted">Pressed</p>
-            <Slider label="밝기" min={0.5} max={2.0} value={pressedBrightness} onChange={setPressedBrightness} />
-            <Slider label="채도" min={0.5} max={2.0} value={pressedSaturation} onChange={setPressedSaturation} />
-            <Slider label="축소" min={0.8} max={1.0} value={pressedScale} onChange={setPressedScale} suffix="×" />
+          <div className="flex-none border-t border-border p-3">
+            <button
+              onClick={run}
+              disabled={busy}
+              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              {busy ? (
+                <><Loader2 size={14} className="animate-spin" /> 생성 중…</>
+              ) : (
+                <><Gamepad2 size={14} /> {results ? "다시 생성" : "3종 생성 →"}</>
+              )}
+            </button>
           </div>
         </div>
       </div>
-
-      {error && (
-        <p className="mx-auto w-full max-w-[1200px] px-4 pb-2 text-[11px] text-[color:var(--danger)]">
-          {error}
-        </p>
-      )}
-
-      <PanelFooter
-        busy={busy}
-        canSubmit
-        onSubmit={run}
-        busyLabel="생성 중…"
-        submitLabel={
-          <>
-            <Gamepad2 size={14} /> {results ? "다시 생성" : "3종 생성 →"}
-          </>
-        }
-      />
     </aside>
   );
 }
