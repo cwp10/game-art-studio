@@ -130,6 +130,19 @@ function makeLayer(generationId: string): Layer {
 }
 
 /** 레이어 CSS transform — 백엔드 sharp 순서(stretch/scale → rotate → flip)와 동일 배치로 WYSIWYG 근사. */
+/** 원본 공간에 타원(rx,ry) 스탬프 — 화면에선 정원(비균일 늘이기 보정). */
+function stampEllipse(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rx: number,
+  ry: number,
+) {
+  ctx.beginPath();
+  ctx.ellipse(x, y, Math.max(0.5, rx), Math.max(0.5, ry), 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /** File → "data:image/...;base64,..." dataUrl. */
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -198,6 +211,7 @@ export function CanvasEditor({
   const [inpaintNat, setInpaintNat] = useState<{ w: number; h: number } | null>(null);
   const brushCanvasRef = useRef<HTMLCanvasElement>(null);
   const brushDrawingRef = useRef(false);
+  const brushLastRef = useRef<{ x: number; y: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -470,11 +484,12 @@ export function CanvasEditor({
       const f = canvas.offsetWidth / (canvas.width || 1); // 표시(레이아웃)폭 / 원본폭
       const sxScreen = f * layer.scale * layer.stretchW * zp.zoom || 1;
       const syScreen = f * layer.scale * layer.stretchH * zp.zoom || 1;
-      const rScale = f * layer.scale * ((layer.stretchW + layer.stretchH) / 2) * zp.zoom || 1;
+      // 화면 브러시 반경(원) → 원본 공간 축별 반경(타원). 비균일 늘이기여도 화면에선 정원으로 보인다.
       return {
         x: ux / sxScreen + canvas.width / 2,
         y: uy / syScreen + canvas.height / 2,
-        rSrc: inpaintBrush / rScale, // 화면 브러시 반경 → 원본 반경
+        rx: inpaintBrush / sxScreen,
+        ry: inpaintBrush / syScreen,
       };
     },
     [zp.zoom, inpaintBrush],
@@ -488,17 +503,10 @@ export function CanvasEditor({
       e.preventDefault();
       e.stopPropagation();
       brushDrawingRef.current = true;
-      const p = screenToSource(canvas, e.clientX, e.clientY, layer);
       ctx.fillStyle = "#ff0000";
-      ctx.strokeStyle = "#ff0000";
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = Math.max(1, p.rSrc * 2);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(0.5, p.rSrc), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
+      const p = screenToSource(canvas, e.clientX, e.clientY, layer);
+      stampEllipse(ctx, p.x, p.y, p.rx, p.ry);
+      brushLastRef.current = { x: p.x, y: p.y };
       try {
         canvas.setPointerCapture(e.pointerId);
       } catch {}
@@ -511,15 +519,23 @@ export function CanvasEditor({
       const ctx = e.currentTarget.getContext("2d");
       if (!ctx) return;
       const p = screenToSource(e.currentTarget, e.clientX, e.clientY, layer);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
+      const last = brushLastRef.current ?? { x: p.x, y: p.y };
+      // last → 현재 점 사이를 타원으로 보간 스탬프(끊김 없이 균일 굵기).
+      const dx = p.x - last.x;
+      const dy = p.y - last.y;
+      const dist = Math.hypot(dx, dy);
+      const step = Math.max(1, Math.min(p.rx, p.ry) / 2);
+      const n = Math.ceil(dist / step);
+      for (let i = 1; i <= n; i++) {
+        stampEllipse(ctx, last.x + (dx * i) / n, last.y + (dy * i) / n, p.rx, p.ry);
+      }
+      brushLastRef.current = { x: p.x, y: p.y };
     },
     [screenToSource],
   );
   const onBrushUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     brushDrawingRef.current = false;
+    brushLastRef.current = null;
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
