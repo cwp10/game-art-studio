@@ -14,11 +14,13 @@ import {
   Undo2,
   Upload,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compositeScene, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
-import { ZoomPanControls, useZoomPan } from "./useZoomPan";
+import { useZoomPan } from "./useZoomPan";
 
 /**
  * CanvasEditor — 전체전환(full-takeover) 통합 캔버스 에디터 (1단계).
@@ -709,10 +711,6 @@ export function CanvasEditor({
           <div
             ref={stageRef}
             className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]"
-            style={{ cursor: zp.panMode ? "grab" : "default" }}
-            onPointerDown={zp.onPanPointerDown}
-            onPointerMove={zp.onPanPointerMove}
-            onPointerUp={zp.onPanPointerUp}
             onDragOver={e => {
               if (!e.dataTransfer.types.includes("Files")) return;
               e.preventDefault();
@@ -745,8 +743,6 @@ export function CanvasEditor({
               style={{
                 transform: `translate(${zp.pan.x}px, ${zp.pan.y}px) scale(${zp.zoom})`,
                 transformOrigin: "center",
-                // 이동 모드: 캔버스 내용 클릭통과 → 스테이지가 팬. 편집 모드: 레이어가 이벤트 수신.
-                pointerEvents: zp.panMode ? "none" : "auto",
               }}
             >
               {/* 출력 캔버스 — 설정 사이즈를 종횡비로 표시. wrap 은 핸들 오버레이의 좌표 기준. */}
@@ -857,7 +853,30 @@ export function CanvasEditor({
                 <Loader2 size={18} className="mr-2 animate-spin" /> 배경 제거 중…
               </div>
             )}
-            <ZoomPanControls zp={zp} />
+            {/* 줌 컨트롤(휠 줌과 동일 상태) — 모드 토글 없음. 편집은 항상 활성. */}
+            <div className="absolute bottom-2 right-2 z-30 flex items-center gap-1 rounded-lg border border-border bg-bg-panel/90 p-1 text-xs shadow-lg backdrop-blur">
+              <button
+                onClick={zp.zoomOut}
+                className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+                title="줌 아웃"
+              >
+                <ZoomOut size={14} />
+              </button>
+              <button
+                onClick={zp.resetView}
+                className="w-11 tabular-nums text-text-muted hover:text-text-primary"
+                title="100% 로 리셋"
+              >
+                {Math.round(zp.zoom * 100)}%
+              </button>
+              <button
+                onClick={zp.zoomIn}
+                className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
+                title="줌 인"
+              >
+                <ZoomIn size={14} />
+              </button>
+            </div>
           </div>
         </div>
 
