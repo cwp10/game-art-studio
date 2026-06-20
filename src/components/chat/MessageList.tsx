@@ -27,6 +27,7 @@ type Props = {
       | "make_normal_map"
       | "add_to_scene"
       | "open_nine_slice"
+      | "open_button_states"
       | "reference"
       | "compare",
     payload: {

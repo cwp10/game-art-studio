@@ -7,6 +7,7 @@ import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
+import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
 import { ImageToolsPanel, POST_FILTER_DEFS, type FilterArg } from "@/components/editor/ImageToolsPanel";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
@@ -91,6 +92,8 @@ export function ChatLayout() {
   const [sceneOpen, setSceneOpen] = useState<{ seedGenerationId?: string } | null>(null);
   // 9-slice 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
   const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
+  // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
+  const [buttonStateOpen, setButtonStateOpen] = useState<{ generationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -466,6 +469,7 @@ export function ChatLayout() {
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
   const closeScene = useCallback(() => setSceneOpen(null), []);
   const closeNineSlice = useCallback(() => setNineSliceOpen(null), []);
+  const closeButtonState = useCallback(() => setButtonStateOpen(null), []);
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
@@ -489,6 +493,7 @@ export function ChatLayout() {
         | "make_normal_map"
         | "add_to_scene"
         | "open_nine_slice"
+        | "open_button_states"
         | "reference"
         | "compare",
       payload: {
@@ -563,6 +568,12 @@ export function ChatLayout() {
           setEditing(null);
           setSpriteGen(null);
           setNineSliceOpen({ generationId: payload.generationId });
+        },
+        open_button_states: () => {
+          if (!payload.generationId) return;
+          setEditing(null);
+          setSpriteGen(null);
+          setButtonStateOpen({ generationId: payload.generationId });
         },
         overlay: () =>
           // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
@@ -1191,7 +1202,11 @@ export function ChatLayout() {
   // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
   // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
   const editorPanelOpen =
-    editing !== null || spriteGen !== null || sceneOpen !== null || nineSliceOpen !== null;
+    editing !== null ||
+    spriteGen !== null ||
+    sceneOpen !== null ||
+    nineSliceOpen !== null ||
+    buttonStateOpen !== null;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
@@ -1340,6 +1355,47 @@ export function ChatLayout() {
                 kind: res.kind,
               });
               closeNineSlice();
+            }}
+          />
+        </div>
+      )}
+      {buttonStateOpen && (
+        <div className="fixed inset-y-0 right-0 z-40 w-1/2">
+          <ButtonStateEditor
+            generationId={buttonStateOpen.generationId}
+            sessionId={state.activeSessionId}
+            onClose={closeButtonState}
+            onResult={res => {
+              // 3종(normal/hover/pressed)을 각각 별도 카드로 일괄 삽입 — tempId 는 슬롯마다 새로.
+              const labels: Array<["normal" | "hover" | "pressed", string]> = [
+                ["normal", "🎮 버튼 Normal"],
+                ["hover", "🎮 버튼 Hover"],
+                ["pressed", "🎮 버튼 Pressed"],
+              ];
+              for (const [k, userText] of labels) {
+                dispatch({
+                  type: "add_result_card",
+                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                  userText,
+                  generationId: res[k].generationId,
+                  width: res[k].width,
+                  height: res[k].height,
+                  kind: "button_state",
+                });
+              }
+              // 패널은 닫지 않는다 — 슬롯에서 파라미터 재조정·개별 추가를 이어갈 수 있게.
+            }}
+            onAddOne={res => {
+              const labels = { normal: "🎮 버튼 Normal", hover: "🎮 버튼 Hover", pressed: "🎮 버튼 Pressed" };
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: labels[res.state],
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "button_state",
+              });
             }}
           />
         </div>

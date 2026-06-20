@@ -7,6 +7,7 @@ import {
   Download,
   Edit3,
   Film,
+  Gamepad2,
   Grid3x3,
   Image,
   Layers,
@@ -37,6 +38,7 @@ type Action =
   | "make_normal_map"
   | "add_to_scene"
   | "open_nine_slice"
+  | "open_button_states"
   | "reference"
   | "compare";
 
@@ -254,6 +256,16 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
               >
                 <Scissors size={12} /> 9-slice
+              </button>
+            )}
+            {/* 버튼 상태 — 단일 일반 이미지(버튼/아이콘)에만. 시트/합성/9-slice/이미 버튼상태 결과는 제외. */}
+            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "button_state"].includes(kind ?? "") && (
+              <button
+                onClick={() => onAction?.("open_button_states")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="버튼 상태 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
+              >
+                <Gamepad2 size={12} /> 버튼 상태
               </button>
             )}
             <button
