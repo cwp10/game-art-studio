@@ -1373,6 +1373,22 @@ export function CanvasEditor({
               <p className="text-[11px] text-text-muted/60">레이어를 선택하면 필터가 표시됩니다.</p>
             )}
           </div>
+          {/* 합치기(flatten) — 모든 레이어를 1장으로. 필터 아래 상시 노출(닫기는 상단 "대화로 돌아가기"). */}
+          <div className="flex-none border-t border-border p-3">
+            <button
+              onClick={handleComposite}
+              disabled={layers.length === 0 || composing || busy}
+              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              {composing ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> 합치는 중…
+                </>
+              ) : (
+                `합치기 ▸ (${layers.length}개 → 1장)`
+              )}
+            </button>
+          </div>
         </aside>
       </div>
 
@@ -1380,32 +1396,9 @@ export function CanvasEditor({
         <p className="flex-none px-4 pb-1 text-[11px] text-[color:var(--danger)]">{error}</p>
       )}
 
-      {/* 푸터: 취소 / 합치기 */}
-      <footer className="flex flex-none gap-2 border-t border-border px-4 py-3">
-        <button
-          onClick={onClose}
-          className="h-10 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
-        >
-          ✕ 취소
-        </button>
-        <button
-          onClick={handleComposite}
-          disabled={layers.length === 0 || composing || busy}
-          className="flex h-10 flex-[2] items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-        >
-          {composing ? (
-            <>
-              <Loader2 size={14} className="animate-spin" /> 합치는 중…
-            </>
-          ) : (
-            `합치기 ▸ (${layers.length}개 레이어 → 1장)`
-          )}
-        </button>
-      </footer>
-
       {/* 도구 하단 바 — 선택한 메뉴를 여기서 실행(즉시 실행 X). tool 별로 내용 전환. */}
       {tool && selected && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[88px] z-40 flex justify-center px-4">
+        <div className="pointer-events-none absolute bottom-4 left-0 right-[256px] z-40 flex justify-center px-4">
           <div className="pointer-events-auto flex max-w-[840px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
             {tool === "inpaint" ? (
               <>
