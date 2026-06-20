@@ -1,7 +1,7 @@
 "use client";
 
 import { Hand, Pencil, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /**
  * useZoomPan — MaskCanvas/LayerCanvas 공유 줌·팬 훅.
@@ -37,46 +37,46 @@ export type ZoomPan = {
 };
 
 export function useZoomPan(): ZoomPan {
-  const [zoom, setZoomState] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  // zoom·pan 을 한 상태로 묶는다. zoomAtPoint 는 둘을 함께 읽고 써야 하므로 단일 함수형
+  // 업데이터로 원자적으로 갱신한다 — 빠른 스크롤에서 매 틱 누적(functional updater 는 직전
+  // pending 값을 본다)되고, StrictMode 이중 호출에도 멱등하다.
+  const [view, setView] = useState<{ zoom: number; pan: { x: number; y: number } }>({
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+  });
   const [panMode, setPanMode] = useState(false);
   // 드래그 시작 시점의 clientXY + pan 기준점. 팬 중에만 유효.
   const dragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
-  // zoomAtPoint 는 zoom·pan 을 함께 읽고 쓴다. setState 업데이터 중첩(StrictMode 이중 호출
-  // 시 pan 이중 적용)을 피하려 ref 로 미러링하고 구체값으로 두 setter 를 호출한다.
-  // 미러링은 effect 에서 — render 중 ref 변경 금지(react-hooks/refs).
-  const zoomRef = useRef(zoom);
-  const panRef = useRef(pan);
-  useEffect(() => {
-    zoomRef.current = zoom;
-    panRef.current = pan;
-  }, [zoom, pan]);
 
-  const setZoom = useCallback((z: number) => setZoomState(clampZoom(z)), []);
-  const zoomIn = useCallback(() => setZoomState(z => clampZoom(z + ZOOM_STEP)), []);
-  const zoomOut = useCallback(() => setZoomState(z => clampZoom(z - ZOOM_STEP)), []);
-  const resetView = useCallback(() => {
-    setZoomState(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+  const setZoom = useCallback(
+    (z: number) => setView(v => ({ ...v, zoom: clampZoom(z) })),
+    [],
+  );
+  const zoomIn = useCallback(
+    () => setView(v => ({ ...v, zoom: clampZoom(v.zoom + ZOOM_STEP) })),
+    [],
+  );
+  const zoomOut = useCallback(
+    () => setView(v => ({ ...v, zoom: clampZoom(v.zoom - ZOOM_STEP) })),
+    [],
+  );
+  const resetView = useCallback(() => setView({ zoom: 1, pan: { x: 0, y: 0 } }), []);
   const togglePanMode = useCallback(() => setPanMode(v => !v), []);
 
   const zoomAtPoint = useCallback(
     (containerEl: HTMLElement, clientX: number, clientY: number, direction: 1 | -1) => {
-      const oldZoom = zoomRef.current;
-      const newZoom = clampZoom(oldZoom + direction * ZOOM_STEP);
-      const ratio = newZoom / oldZoom; // clamp 후 비율 — 경계에서 1 → pan 고정.
       const rect = containerEl.getBoundingClientRect();
       // transform-origin:center + 중앙 배치라 앵커는 "뷰박스 중심 기준 커서 오프셋"이다.
       const cx = clientX - rect.left - rect.width / 2;
       const cy = clientY - rect.top - rect.height / 2;
-      const oldPan = panRef.current;
-      const newPan = {
-        x: cx - (cx - oldPan.x) * ratio,
-        y: cy - (cy - oldPan.y) * ratio,
-      };
-      setZoomState(newZoom);
-      setPan(newPan);
+      setView(({ zoom: oldZoom, pan: oldPan }) => {
+        const newZoom = clampZoom(oldZoom + direction * ZOOM_STEP);
+        const ratio = newZoom / oldZoom; // clamp 후 비율 — 경계에서 1 → pan 고정.
+        return {
+          zoom: newZoom,
+          pan: { x: cx - (cx - oldPan.x) * ratio, y: cy - (cy - oldPan.y) * ratio },
+        };
+      });
     },
     [],
   );
@@ -87,15 +87,15 @@ export function useZoomPan(): ZoomPan {
       try {
         (e.currentTarget as Element).setPointerCapture(e.pointerId);
       } catch {}
-      dragRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+      dragRef.current = { sx: e.clientX, sy: e.clientY, px: view.pan.x, py: view.pan.y };
     },
-    [panMode, pan.x, pan.y],
+    [panMode, view.pan.x, view.pan.y],
   );
 
   const onPanPointerMove = useCallback((e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
-    setPan({ x: d.px + (e.clientX - d.sx), y: d.py + (e.clientY - d.sy) });
+    setView(v => ({ ...v, pan: { x: d.px + (e.clientX - d.sx), y: d.py + (e.clientY - d.sy) } }));
   }, []);
 
   const onPanPointerUp = useCallback((e: React.PointerEvent) => {
@@ -106,8 +106,8 @@ export function useZoomPan(): ZoomPan {
   }, []);
 
   return {
-    zoom,
-    pan,
+    zoom: view.zoom,
+    pan: view.pan,
     panMode,
     zoomIn,
     zoomOut,
