@@ -58,13 +58,7 @@ type Props = {
   onCancel?: () => void;
 };
 
-const UI_MODE_LABELS: Record<UIMode, string> = {
-  skin: "외형 교체",
-  color: "색만 변경",
-  style: "화풍",
-};
-
-// 진입 화면(1단계) 큰 버튼 — 순서: 색 변경 / 외형 교체 / 화풍 변환.
+// 상단 모드 탭 — 순서: 색 변경 / 외형 교체 / 화풍 변환.
 const ENTRY_CARDS: { mode: UIMode; label: string; desc: string; icon: typeof Brush }[] = [
   { mode: "color", label: "색 변경", desc: "형태는 그대로, 색 팔레트만", icon: Palette },
   { mode: "skin", label: "외형 교체", desc: "텍스트·이미지로 외형 재구성", icon: Brush },
@@ -104,9 +98,7 @@ export function ReskinPanel({
   onClose,
   onCancel,
 }: Props) {
-  // 2단계 진입: 진입 화면(3개 큰 버튼) → 모드별 상세. 오버레이 단축어처럼 initial*이
-  // 주어지면 상세로 바로 진입(진입 화면 건너뜀) — ChatLayout 단축어 계약 보존.
-  const [entered, setEntered] = useState(initialMode != null || initialSkinInput != null);
+  // 모드(외형/색/화풍)는 상단 탭으로 항상 선택. initialMode/initialSkinInput 으로 초기 모드 지정(ChatLayout 단축어 계약).
   const [uiMode, setUiMode] = useState<UIMode>(initialMode ?? "skin");
   const [skinInput, setSkinInput] = useState<SkinInput>(initialSkinInput ?? "text");
   // 색 변경 상세의 "고급 설정"(정밀 픽셀 색교체) 접힘 토글. 기본 닫힘.
@@ -308,16 +300,26 @@ export function ReskinPanel({
         </span>
       </header>
 
+      {/* 상단 모드 탭 — 색/외형/화풍. 캔버스 도구 스트립 자리(2단계 진입을 펼침). */}
+      <div className="flex flex-none items-center gap-2 border-b border-border px-3.5 py-2 text-xs">
+        <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5">
+          {ENTRY_CARDS.map(({ mode, label, icon: Icon }) => (
+            <button
+              key={mode}
+              onClick={() => setUiMode(mode)}
+              className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+                uiMode === mode
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {/* 2단계 진입: 모드 선택 후 뒤로가기 바, 그 전엔 진입 화면 큰 버튼. */}
-        {entered ? (
-          <button
-            onClick={() => setEntered(false)}
-            className="flex shrink-0 items-center gap-1 self-start rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs text-text-muted hover:text-text-primary"
-          >
-            ← {UI_MODE_LABELS[uiMode]}
-          </button>
-        ) : null}
 
         {/* 원본 미리보기 + kind 배지 — 크게 표시. */}
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2">
@@ -336,31 +338,8 @@ export function ReskinPanel({
           </div>
         </div>
 
-        {/* 진입 화면(1단계) — 무엇을 할지 큰 버튼으로 먼저 고른다. */}
-        {!entered && (
-          <div className="shrink-0 space-y-2">
-            <p className="text-xs text-text-muted">무엇을 바꿀까요?</p>
-            <div className="grid grid-cols-3 gap-2">
-              {ENTRY_CARDS.map(({ mode, label, desc, icon: Icon }) => (
-                <button
-                  key={mode}
-                  onClick={() => {
-                    setUiMode(mode);
-                    setEntered(true);
-                  }}
-                  className="flex flex-col items-center gap-1.5 rounded-lg border border-border bg-bg-card px-3 py-4 text-center transition-colors hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/10"
-                >
-                  <Icon size={22} className="text-[color:var(--accent)]" />
-                  <span className="text-sm font-medium text-text-primary">{label}</span>
-                  <span className="text-[10px] leading-tight text-text-muted/70">{desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* "외형 교체" 탭 내부 서브 토글 (텍스트 / 이미지 참조) */}
-        {entered && uiMode === "skin" && (
+        {uiMode === "skin" && (
           <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
             {(["text", "image"] as const).map(s => (
               <button
@@ -379,7 +358,7 @@ export function ReskinPanel({
         )}
 
         {/* 모드별 입력 */}
-        {entered && uiMode === "skin" && skinInput === "text" && (
+        {uiMode === "skin" && skinInput === "text" && (
           <div className="shrink-0 space-y-1">
             <label className="text-xs text-text-muted">새 스킨 설명</label>
             <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
@@ -418,7 +397,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {entered && uiMode === "color" && (
+        {uiMode === "color" && (
           <div className="shrink-0 space-y-2">
             {/* 기본 = AI 팔레트(mode b). 정밀 픽셀 색교체(b-precise)는 고급 설정으로 접어둠. */}
             {!advancedOpen && (
@@ -541,7 +520,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {entered && uiMode === "style" && (
+        {uiMode === "style" && (
           <div className="shrink-0 space-y-3">
             {/* 프리셋 그리드 */}
             <div className="space-y-1">
@@ -604,7 +583,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {entered && uiMode === "skin" && skinInput === "image" && (
+        {uiMode === "skin" && skinInput === "image" && (
           <div className="shrink-0 space-y-2">
             {overlay && (
               <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
@@ -800,35 +779,31 @@ export function ReskinPanel({
           </div>
         )}
 
-        {/* 시트 후처리 안내 — 시트면서 상세 진입 후에만 */}
-        {entered && isSheet && (
+        {/* 시트 후처리 안내 — 시트일 때만 */}
+        {isSheet && (
           <div className="shrink-0 rounded-lg border border-border bg-bg-card p-2 text-[11px] text-text-muted/70">
             ⓘ 스프라이트시트는 셀 정렬·투명 후처리가 자동 적용됩니다.
           </div>
         )}
       </div>
 
-      {/* 진입 화면(1단계)에는 실행 footer 없음 — 모드 선택 후에만 노출. */}
-      {entered && (
-        <PanelFooter
-          busy={busy}
-          canSubmit={canSubmit}
-          onSubmit={submit}
-          onCancel={onCancel}
-          busyLabel="생성 중…"
-          submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
-          submitTitle={
-            canSubmit || busy
-              ? ""
-              : uiMode === "skin" && skinInput === "image"
-              ? "참조 이미지 선택 필요"
-              : uiMode === "style"
-              ? "스타일 선택 또는 입력 필요"
-              : "설명 입력 필요"
-          }
-        />
-      )}
-
+      <PanelFooter
+        busy={busy}
+        canSubmit={canSubmit}
+        onSubmit={submit}
+        onCancel={onCancel}
+        busyLabel="생성 중…"
+        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
+        submitTitle={
+          canSubmit || busy
+            ? ""
+            : uiMode === "skin" && skinInput === "image"
+            ? "참조 이미지 선택 필요"
+            : uiMode === "style"
+            ? "스타일 선택 또는 입력 필요"
+            : "설명 입력 필요"
+        }
+      />
     </aside>
   );
 }
