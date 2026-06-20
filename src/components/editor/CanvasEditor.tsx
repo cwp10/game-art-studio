@@ -19,7 +19,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 import { useZoomPan } from "./useZoomPan";
@@ -212,6 +212,10 @@ export function CanvasEditor({
   const brushCanvasRef = useRef<HTMLCanvasElement>(null);
   const brushDrawingRef = useRef(false);
   const brushLastRef = useRef<{ x: number; y: number } | null>(null);
+  // 선택 레이어 이미지의 변형 전 표시 크기(px) — 핸들 박스를 scale 밖에서 일정 크기로 그리기 위해.
+  const [selBox, setSelBox] = useState<{ w: number; h: number } | null>(null);
+  // 드래그 중 센터 스냅 가이드(세로/가로 선) 표시.
+  const [snapGuides, setSnapGuides] = useState<{ v: boolean; h: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -589,6 +593,31 @@ export function CanvasEditor({
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
+  // FLIP — 재정렬로 행 위치가 바뀌면 옛 위치에서 새 위치로 부드럽게 슬라이드(자연스러운 인지).
+  const railRef = useRef<HTMLDivElement>(null);
+  const rowTopsRef = useRef<Map<string, number>>(new Map());
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const rows = rail.querySelectorAll<HTMLElement>("[data-lrow]");
+    const prev = rowTopsRef.current;
+    const next = new Map<string, number>();
+    rows.forEach(row => {
+      const lid = row.dataset.lid ?? "";
+      const top = row.offsetTop;
+      next.set(lid, top);
+      const old = prev.get(lid);
+      if (old != null && old !== top) {
+        row.style.transition = "none";
+        row.style.transform = `translateY(${old - top}px)`;
+        requestAnimationFrame(() => {
+          row.style.transition = "transform 180ms ease";
+          row.style.transform = "";
+        });
+      }
+    });
+    rowTopsRef.current = next;
+  }, [layers]);
   const onRailGripDown = useCallback(
     (e: React.PointerEvent, id: string) => {
       e.preventDefault();
@@ -789,13 +818,31 @@ export function CanvasEditor({
       const onMove = (ev: PointerEvent) => {
         const d = moveDragRef.current;
         if (!d) return;
-        patchLayer(layer.id, {
-          x: d.ox + (ev.clientX - d.sx) / zoom,
-          y: d.oy + (ev.clientY - d.sy) / zoom,
-        });
+        let nx = d.ox + (ev.clientX - d.sx) / zoom;
+        let ny = d.oy + (ev.clientY - d.sy) / zoom;
+        // Shift = 직선 이동(이동량 큰 축만 살리고 다른 축은 시작값 고정).
+        if (ev.shiftKey) {
+          if (Math.abs(ev.clientX - d.sx) >= Math.abs(ev.clientY - d.sy)) ny = d.oy;
+          else nx = d.ox;
+        }
+        // 센터 스냅 — 레이어 중심이 캔버스 중앙(0)에 가까우면 달라붙고 가이드선 표시. 임계값은 화면상 8px.
+        const snap = 8 / zoom;
+        let gv = false;
+        let gh = false;
+        if (Math.abs(nx) < snap) {
+          nx = 0;
+          gv = true;
+        }
+        if (Math.abs(ny) < snap) {
+          ny = 0;
+          gh = true;
+        }
+        setSnapGuides(gv || gh ? { v: gv, h: gh } : null);
+        patchLayer(layer.id, { x: nx, y: ny });
       };
       const onUp = () => {
         moveDragRef.current = null;
+        setSnapGuides(null);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
       };
@@ -1060,63 +1107,81 @@ export function CanvasEditor({
 
                 {/* 선택 레이어 자유변형 핸들 — 클립 밖 오버레이라 캔버스 경계를 넘은 핸들도 잡힌다.
                     숨김 이미지로 레이어 박스 크기를 맞춰 핸들 위치 기준을 잡는다. */}
-                {selected && tool !== "inpaint" && (
-                  <div className="pointer-events-none absolute inset-0">
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        top: "50%",
-                        transform: layerTransform(selected),
-                      }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={`/api/images/${selected.generationId}`}
-                        alt=""
-                        aria-hidden
-                        className="block max-w-[min(56vw,640px)]"
-                        style={{ visibility: "hidden", pointerEvents: "none" }}
-                        draggable={false}
-                      />
-                      <div className="pointer-events-none absolute inset-0 outline outline-[1.5px] [outline-style:dashed] outline-[color:var(--accent)]" />
-                      {(["tl", "tr", "bl", "br"] as const).map(c => (
-                        <div
-                          key={c}
-                          onPointerDown={e => onHandleDown(e, "corner", selected)}
-                          className="pointer-events-auto absolute h-3 w-3 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                          style={{
-                            left: c.includes("l") ? -6 : undefined,
-                            right: c.includes("r") ? -6 : undefined,
-                            top: c.includes("t") ? -6 : undefined,
-                            bottom: c.includes("b") ? -6 : undefined,
-                            cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
-                          }}
+                {selected &&
+                  tool !== "inpaint" &&
+                  (
+                    <div className="pointer-events-none absolute inset-0">
+                        {/* 측정용(숨김·변형 없음) — 레이어 표시 크기(displayW/H) 확보. genId 바뀌면 remount. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          key={selected.generationId}
+                          src={`/api/images/${selected.generationId}`}
+                          alt=""
+                          aria-hidden
+                          className="block max-w-[min(56vw,640px)]"
+                          style={{ position: "absolute", left: 0, top: 0, visibility: "hidden", pointerEvents: "none" }}
+                          draggable={false}
+                          onLoad={e =>
+                            setSelBox({ w: e.currentTarget.offsetWidth, h: e.currentTarget.offsetHeight })
+                          }
                         />
-                      ))}
-                      {(["t", "b"] as const).map(v => (
-                        <div
-                          key={v}
-                          onPointerDown={e => onHandleDown(e, v, selected)}
-                          className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                          style={{ left: "50%", top: v === "t" ? -6 : undefined, bottom: v === "b" ? -6 : undefined, cursor: "ns-resize" }}
-                        />
-                      ))}
-                      {(["l", "r"] as const).map(h => (
-                        <div
-                          key={h}
-                          onPointerDown={e => onHandleDown(e, h, selected)}
-                          className="pointer-events-auto absolute h-3 w-3 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                          style={{ top: "50%", left: h === "l" ? -6 : undefined, right: h === "r" ? -6 : undefined, cursor: "ew-resize" }}
-                        />
-                      ))}
-                      <div
-                        onPointerDown={e => onHandleDown(e, "rot", selected)}
-                        className="pointer-events-auto absolute left-1/2 h-[13px] w-[13px] -translate-x-1/2 cursor-grab rounded-full border-[1.5px] border-[color:var(--accent)] bg-white"
-                        style={{ top: -30 }}
-                      />
-                    </div>
-                  </div>
+                        {selBox && (
+                          // 핸들 박스 — scale 없이 회전·위치만. 크기는 selBox×scale 로 맞춰, 핸들/외곽선은
+                          // 변형에 안 딸려가 항상 일정(포토샵식). 드래그 계산(onHandleDown)은 핸들 위치와 무관.
+                          <div
+                            style={{
+                              position: "absolute",
+                              left: "50%",
+                              top: "50%",
+                              width: Math.max(1, selBox.w * selected.scale * selected.stretchW),
+                              height: Math.max(1, selBox.h * selected.scale * selected.stretchH),
+                              transform: `translate(-50%, -50%) translate(${selected.x}px, ${selected.y}px) rotate(${selected.rotation}deg)`,
+                            }}
+                          >
+                            <div className="pointer-events-none absolute inset-0 outline outline-[1.5px] [outline-style:dashed] outline-[color:var(--accent)]" />
+                            {(["tl", "tr", "bl", "br"] as const).map(c => (
+                              <div
+                                key={c}
+                                onPointerDown={e => onHandleDown(e, "corner", selected)}
+                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                                style={{
+                                  left: c.includes("l") ? 0 : "100%",
+                                  top: c.includes("t") ? 0 : "100%",
+                                  cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
+                                }}
+                              />
+                            ))}
+                            {(["t", "b"] as const).map(v => (
+                              <div
+                                key={v}
+                                onPointerDown={e => onHandleDown(e, v, selected)}
+                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                                style={{ left: "50%", top: v === "t" ? 0 : "100%", cursor: "ns-resize" }}
+                              />
+                            ))}
+                            {(["l", "r"] as const).map(h => (
+                              <div
+                                key={h}
+                                onPointerDown={e => onHandleDown(e, h, selected)}
+                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
+                                style={{ left: h === "l" ? 0 : "100%", top: "50%", cursor: "ew-resize" }}
+                              />
+                            ))}
+                            <div
+                              onPointerDown={e => onHandleDown(e, "rot", selected)}
+                              className="pointer-events-auto absolute h-[13px] w-[13px] -translate-x-1/2 cursor-grab rounded-full border-[1.5px] border-[color:var(--accent)] bg-white"
+                              style={{ left: "50%", top: -30 }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                  )}
+                {/* 센터 스냅 가이드선 — 캔버스 중앙. */}
+                {snapGuides?.v && (
+                  <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px bg-[color:var(--accent)]" />
+                )}
+                {snapGuides?.h && (
+                  <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px bg-[color:var(--accent)]" />
                 )}
               </div>
             </div>
@@ -1255,7 +1320,7 @@ export function CanvasEditor({
           )}
 
           {/* 레이어 목록 (z-역순: 맨 위 = 최상단) */}
-          <div data-rail className="flex-1 overflow-auto p-2">
+          <div ref={railRef} data-rail className="flex-1 overflow-auto p-2">
             {railLayers.map(layer => {
               const isSel = layer.id === selectedLayerId;
               return (
@@ -1266,7 +1331,7 @@ export function CanvasEditor({
                   onClick={() => setSelectedLayerId(layer.id)}
                   className={`mb-1.5 flex cursor-pointer flex-col gap-1.5 rounded-lg border bg-bg-card p-2 ${
                     isSel ? "border-[color:var(--accent)]" : "border-border"
-                  } ${draggingRowId === layer.id ? "opacity-50" : ""}`}
+                  } ${draggingRowId === layer.id ? "opacity-60 shadow-lg" : ""}`}
                 >
                   <div className="flex items-center gap-1.5">
                     <span
@@ -1307,21 +1372,6 @@ export function CanvasEditor({
                       <Trash2 size={12} />
                     </button>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-text-muted">불투명</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={layer.opacity}
-                      onPointerDown={e => e.stopPropagation()}
-                      onChange={e => setOpacity(layer.id, Number(e.target.value))}
-                      className="flex-1 accent-[color:var(--accent)]"
-                    />
-                    <span className="w-8 text-right text-[10px] tabular-nums text-text-muted">
-                      {layer.opacity}%
-                    </span>
-                  </div>
                 </div>
               );
             })}
@@ -1331,6 +1381,20 @@ export function CanvasEditor({
           <div className="flex-none border-t border-border bg-bg-card p-3">
             {selected ? (
               <>
+                <div className="mb-2 flex items-center gap-2">
+                  <label className="w-8 text-[11px] text-text-muted">불투명</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={selected.opacity}
+                    onChange={e => setOpacity(selected.id, Number(e.target.value))}
+                    className="flex-1 accent-[color:var(--accent)]"
+                  />
+                  <b className="w-11 text-right font-mono text-[10px] font-medium text-text-muted">
+                    {selected.opacity}%
+                  </b>
+                </div>
                 <div className="mb-1 flex items-center text-[11px] font-semibold">
                   필터
                   <button
