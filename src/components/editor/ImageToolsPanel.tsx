@@ -5,31 +5,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type FilterArg = { id: string; prompt: string; param?: number };
 
-// 순서: 서버 적용 순서와 동일
+// 순서: 서버 적용 순서와 동일 (geometric → trim → AI)
 export const POST_FILTER_DEFS = [
-  { id: "median",    label: "노이즈제거", prompt: "", sharp: true  }, // 토글 (맨앞)
-  { id: "invert",    label: "반전",      prompt: "", sharp: true  }, // 토글
-  { id: "flop",      label: "좌우반전",  prompt: "", sharp: true  }, // 토글
-  { id: "flip",      label: "상하반전",  prompt: "", sharp: true  }, // 토글
-  { id: "rotate",    label: "회전",      prompt: "", sharp: true  }, // 슬라이더
-  { id: "pixelate",  label: "픽셀화",    prompt: "", sharp: true  }, // 슬라이더
-  { id: "sharpen",   label: "샤프닝",    prompt: "", sharp: true  }, // 슬라이더
-  { id: "blur",      label: "블러",      prompt: "", sharp: true  }, // 슬라이더
-  { id: "gamma",     label: "감마",      prompt: "", sharp: true  }, // 슬라이더
-  { id: "grayscale", label: "흑백",      prompt: "", sharp: true  }, // 슬라이더 (맨뒤)
-  { id: "trim",      label: "여백제거",  prompt: "", sharp: true  }, // 푸터
-  { id: "removeBg",  label: "배경제거",  prompt: "이 이미지의 배경을 투명하게 제거해줘.", sharp: false }, // 푸터
+  { id: "flop",     label: "좌우반전", prompt: "", sharp: true  }, // 토글
+  { id: "rotate",   label: "회전",     prompt: "", sharp: true  }, // 90/180/270 버튼
+  { id: "trim",     label: "여백제거", prompt: "", sharp: true  }, // 푸터
+  { id: "removeBg", label: "배경제거", prompt: "이 이미지의 배경을 투명하게 제거해줘.", sharp: false }, // 푸터 (AI)
 ] as const;
 
-// 슬라이더 필터: neutral 값이면 적용 안 함
-const PARAM_SLIDERS: Record<string, { min: number; max: number; step: number; unit: string; neutral: number; defaultVal: number }> = {
-  rotate:   { min: 0,   max: 360, step: 1,   unit: "°",  neutral: 0,   defaultVal: 0   },
-  pixelate: { min: 1,   max: 32,  step: 1,   unit: "px", neutral: 1,   defaultVal: 1   },
-  sharpen:  { min: 0,   max: 5,   step: 0.5, unit: "",   neutral: 0,   defaultVal: 0   },
-  blur:     { min: 0,   max: 20,  step: 0.5, unit: "px", neutral: 0,   defaultVal: 0   },
-  gamma:    { min: 0.5, max: 3,   step: 0.1, unit: "",   neutral: 1.0, defaultVal: 1.0 },
-  grayscale:{ min: 0,   max: 100, step: 5,   unit: "%",  neutral: 0,   defaultVal: 0   },
-};
+const ROTATE_ANGLES = [90, 180, 270] as const;
 
 type Props = {
   generationId: string;
@@ -96,6 +80,7 @@ export function ImageToolsPanel({
       });
   }, [generationId]);
   const [selectedFilters, setSelectedFilters] = useState<Set<string>>(new Set());
+  const [rotateAngle, setRotateAngle] = useState(0);
   const [aiScale, setAiScale] = useState(false);
   const [isCropping, setIsCropping] = useState(false);
 
@@ -108,12 +93,7 @@ export function ImageToolsPanel({
   }, []);
 
   const selectedFiltersRef = useRef(selectedFilters);
-
-  const [filterParams, setFilterParams] = useState<Record<string, number>>(() =>
-    Object.fromEntries(Object.entries(PARAM_SLIDERS).map(([id, c]) => [id, c.neutral]))
-  );
-  const filterParamsRef = useRef(filterParams);
-  const pixelCanvasRef = useRef<{ canvas: HTMLCanvasElement; pw: number; ph: number; img: HTMLImageElement } | null>(null);
+  const rotateAngleRef = useRef(rotateAngle);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -165,58 +145,24 @@ export function ImageToolsPanel({
       ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
     }
 
-    // Image — CSS 필터 + transform + 투명도 실시간 미리보기
+    // Image — transform + 투명도 실시간 미리보기
     if (img) {
       ctx.save();
       const sel = selectedFiltersRef.current;
-      const p = filterParamsRef.current;
       const dw = imageWidth * s;
       const dh = imageHeight * s;
 
-      // CSS 필터 조합 (슬라이더는 neutral 이 아닐 때만)
-      const cssF: string[] = [];
-      if (sel.has("invert")) cssF.push("invert(1)");
-      if (sel.has("median")) cssF.push("blur(0.5px)"); // Canvas API에 median 없음 — 근사 미리보기
-      if ((p.grayscale ?? 0) > 0)             cssF.push(`grayscale(${p.grayscale}%)`);
-      if ((p.blur ?? 0) > 0)                  cssF.push(`blur(${p.blur}px)`);
-      if ((p.sharpen ?? 0) > 0)               cssF.push(`contrast(${1 + (p.sharpen ?? 0) * 0.2}) saturate(1.1)`);
-      if (Math.abs((p.gamma ?? 1) - 1) > 0.05) cssF.push(`brightness(${p.gamma})`);
-      if (cssF.length) ctx.filter = cssF.join(" ");
       ctx.globalAlpha = opacityRef.current / 100;
-
-      // 픽셀화 소스 생성 (neutral=1 이면 skip) — 오프스크린 캔버스 재사용
-      let src: HTMLCanvasElement | HTMLImageElement = img;
-      const pixelBlock = Math.round(p.pixelate ?? 1);
-      if (pixelBlock > 1) {
-        const pw = Math.max(1, Math.round(dw / pixelBlock));
-        const ph = Math.max(1, Math.round(dh / pixelBlock));
-        const cached = pixelCanvasRef.current;
-        if (!cached || cached.pw !== pw || cached.ph !== ph || cached.img !== img) {
-          const pc = document.createElement("canvas");
-          pc.width = pw; pc.height = ph;
-          pc.getContext("2d")!.drawImage(img, 0, 0, pw, ph);
-          pixelCanvasRef.current = { canvas: pc, pw, ph, img };
-        }
-        src = pixelCanvasRef.current!.canvas;
-      }
 
       // 중심 기준 transform
       ctx.translate(ox + dw / 2, oy + dh / 2);
       if (sel.has("flop")) ctx.scale(-1, 1);
-      if (sel.has("flip")) ctx.scale(1, -1);
-      const angle = p.rotate ?? 0;
+      const angle = rotateAngleRef.current;
       if (angle !== 0) ctx.rotate((angle * Math.PI) / 180);
 
-      if (sel.has("pixelate")) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
-        ctx.imageSmoothingEnabled = true;
-      } else {
-        ctx.drawImage(src, -dw / 2, -dh / 2, dw, dh);
-      }
+      ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
 
       ctx.globalAlpha = 1;
-      ctx.filter = "none";
       ctx.restore();
     }
 
@@ -269,7 +215,7 @@ export function ImageToolsPanel({
   const initTransform = useCallback(() => {
     setOpacity(initialOpacityRef.current);
     setSelectedFilters(new Set());
-    setFilterParams(Object.fromEntries(Object.entries(PARAM_SLIDERS).map(([id, c]) => [id, c.neutral])));
+    setRotateAngle(0);
     frameRef.current = frame;
     const s = Math.min(frame.w / imageWidth, frame.h / imageHeight);
     scaleRef.current = s;
@@ -288,7 +234,7 @@ export function ImageToolsPanel({
   // opacity / selectedFilters 변경 시 ref 업데이트 + 즉시 재렌더
   useEffect(() => { opacityRef.current = opacity; draw(); }, [opacity, draw]);
   useEffect(() => { selectedFiltersRef.current = selectedFilters; draw(); }, [selectedFilters, draw]);
-  useEffect(() => { filterParamsRef.current = filterParams; draw(); }, [filterParams, draw]);
+  useEffect(() => { rotateAngleRef.current = rotateAngle; draw(); }, [rotateAngle, draw]);
 
   // Load image once
   useEffect(() => {
@@ -375,19 +321,15 @@ export function ImageToolsPanel({
     try {
       const filters: FilterArg[] = POST_FILTER_DEFS
         .filter(f => {
-          if (selectedFilters.has(f.id)) return true;
-          if (f.id in PARAM_SLIDERS) {
-            const cfg = PARAM_SLIDERS[f.id];
-            return Math.abs((filterParams[f.id] ?? cfg.neutral) - cfg.neutral) > 0.01;
-          }
-          return false;
+          if (f.id === "rotate") return rotateAngle !== 0;
+          return selectedFilters.has(f.id);
         })
-        .map(f => ({ id: f.id, prompt: f.prompt, param: filterParams[f.id] }));
+        .map(f => ({ id: f.id, prompt: f.prompt, param: f.id === "rotate" ? rotateAngle : undefined }));
       await onCrop({ srcX, srcY, srcW, srcH, targetW, targetH, opacity, filters, aiScale });
     } finally {
       setIsCropping(false);
     }
-  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, filterParams, aiScale, onCrop]);
+  }, [isCropping, busy, targetW, targetH, opacity, selectedFilters, rotateAngle, aiScale, onCrop]);
 
   const disabled = isCropping || !!busy;
 
@@ -459,48 +401,33 @@ export function ImageToolsPanel({
         {/* 드래그·휠 힌트 */}
         <p className="text-center text-xs text-text-muted/60">드래그로 이동 · 휠로 확대/축소</p>
 
-        {/* 토글 버튼 (슬라이더 없는 필터) */}
+        {/* 좌우반전 토글 */}
         <div className="flex flex-wrap gap-1.5">
-          {POST_FILTER_DEFS
-            .filter(f => !(f.id in PARAM_SLIDERS) && f.id !== "trim" && f.id !== "removeBg")
-            .map(f => (
-              <button
-                key={f.id}
-                onClick={() => toggleFilter(f.id)}
-                className={`rounded border px-2 py-1 text-xs transition-colors ${selectedFilters.has(f.id) ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
-              >
-                {f.label}
-              </button>
-            ))}
+          <button
+            onClick={() => toggleFilter("flop")}
+            className={`rounded border px-2 py-1 text-xs transition-colors ${selectedFilters.has("flop") ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+          >
+            좌우반전
+          </button>
         </div>
 
-        {/* 슬라이더 필터 (항상 표시) */}
-        {POST_FILTER_DEFS
-          .filter(f => f.id in PARAM_SLIDERS)
-          .map(f => {
-            const cfg = PARAM_SLIDERS[f.id];
-            const val = filterParams[f.id] ?? cfg.neutral;
-            const active = Math.abs(val - cfg.neutral) > 0.01;
-            return (
-              <div key={f.id} className="flex items-center gap-2">
-                <span className={`w-14 shrink-0 text-xs ${active ? "text-accent font-medium" : "text-text-muted"}`}>
-                  {f.label}
-                </span>
-                <input
-                  type="range"
-                  min={cfg.min}
-                  max={cfg.max}
-                  step={cfg.step}
-                  value={val}
-                  onChange={e => setFilterParams(prev => ({ ...prev, [f.id]: Number(e.target.value) }))}
-                  className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-border accent-accent"
-                />
-                <span className={`w-12 text-right text-xs tabular-nums ${active ? "text-accent" : "text-text-muted"}`}>
-                  {val}{cfg.unit}
-                </span>
-              </div>
-            );
-          })}
+        {/* 회전 버튼 (재클릭 시 해제) */}
+        <div className="flex items-center gap-2">
+          <span className={`w-14 shrink-0 text-xs ${rotateAngle !== 0 ? "text-accent font-medium" : "text-text-muted"}`}>
+            회전
+          </span>
+          <div className="flex gap-1.5">
+            {ROTATE_ANGLES.map(a => (
+              <button
+                key={a}
+                onClick={() => setRotateAngle(prev => (prev === a ? 0 : a))}
+                className={`rounded border px-2 py-1 text-xs transition-colors ${rotateAngle === a ? "border-accent bg-accent text-white" : "border-border text-text-muted hover:bg-bg-panel hover:text-text-primary"}`}
+              >
+                {a}°
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* 투명도 슬라이더 */}
         <div className="flex items-center gap-3">
