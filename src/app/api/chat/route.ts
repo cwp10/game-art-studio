@@ -167,6 +167,8 @@ async function runChat(
   // extractObject — Claude 가 inpaint_image 의 extractObject=true 로 사용.
   // 마스크가 있으면 마스크 영역 오브젝트를, 없으면 prompt 의 부위 이름을 투명 배경으로 추출.
   if (body.extractObject === true) markers.push(`[extract]`);
+  // autoRestore=false → [no-restore] 마커 주입 → Claude/codex 가 복원 없이 추출.
+  if (body.extractObject === true && body.autoRestore === false) markers.push(`[no-restore]`);
   const messageText = markers.length ? markers.join(" ") + "\n" + body.message : body.message;
   const userMsg = createMessage({
     session_id: sessionId,
@@ -667,6 +669,9 @@ async function runDirectBackendJob(opts: {
   }
   if (intent.tool === "reskin_image") {
     params.mode = styleRefPath ? "style_ref" : intent.args.paletteOnly ? "palette" : "appearance";
+  }
+  if (intent.tool === "inpaint_image" && intent.args.extractObject && intent.args.autoRestore === false) {
+    params.autoRestore = false;
   }
 
   const prompt = intent.args.prompt ?? "";

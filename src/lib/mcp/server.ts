@@ -258,6 +258,11 @@ const SCHEMAS = {
         description:
           "true면 마스크 영역 오브젝트를 투명 배경으로 추출 (layer_extract). false(기본)면 오브젝트를 제거하고 배경 채우기 (inpaint).",
       },
+      autoRestore: {
+        type: "boolean",
+        description:
+          "extractObject=true 일 때 가려진 부분을 AI 가 자동 복원할지 여부 (기본 true). false 면 가려진 부분을 복원하지 않고 보이는 영역만 추출.",
+      },
       ...SESSION_PROP,
     },
     required: ["prompt", "inputGenerationId"],
@@ -394,6 +399,7 @@ type CallArgs = {
   inputGenerationId?: string;
   maskGenerationId?: string;
   extractObject?: boolean;
+  autoRestore?: boolean;
   styleReferenceId?: string;
   paletteOnly?: boolean;
   rows?: number;
@@ -527,14 +533,16 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         const inputId = requireString(args.inputGenerationId, "inputGenerationId");
         const prompt = requireString(args.prompt, "prompt");
         const ids = args.maskGenerationId ? [inputId, args.maskGenerationId] : [inputId];
+        const isExtract = args.extractObject === true;
         // extractObject=true → 마스크 영역 오브젝트를 투명 배경으로 추출(layer_extract).
         // 기본(false/undefined) → 오브젝트 제거 + 배경 채우기(inpaint).
-        // 두 경로 모두 입력 순서 [원본, 마스크] 동일 — codex-exec 가 kind 로 프롬프트 분기.
+        // autoRestore=false → 가려진 부분 복원 안 함(텍스트 기반 추출에서만 유효).
         return await runImageTool({
           name,
-          kind: args.extractObject === true ? "layer_extract" : "inpaint",
+          kind: isExtract ? "layer_extract" : "inpaint",
           prompt,
           inputGenerationIds: ids,
+          params: isExtract && args.autoRestore === false ? { autoRestore: false } : undefined,
           sessionId,
           signal: extra.signal,
         });

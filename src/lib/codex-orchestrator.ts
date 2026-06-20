@@ -35,6 +35,7 @@ export type CodexIntent = {
     inputGenerationId?: string;
     maskGenerationId?: string;
     extractObject?: boolean;
+    autoRestore?: boolean;
     styleReferenceId?: string;
     paletteOnly?: boolean;
     rows?: number;
@@ -149,6 +150,7 @@ export function parseIntent(message: string): CodexIntent {
   const hasMask = /\[mask:\s*([^\]]+)\]/i.test(message);
   const maskId = message.match(/\[mask:\s*([^\]]+)\]/i)?.[1]?.trim();
   const hasExtract = /\[extract\]/i.test(message);
+  const hasNoRestore = /\[no-restore\]/i.test(message);
   const naturalText = stripMarkers(message);
   const lower = naturalText.toLowerCase();
   const seamlessLoop = detectSeamlessLoop(message);
@@ -194,6 +196,7 @@ export function parseIntent(message: string): CodexIntent {
         prompt: naturalText,
         inputGenerationId: refIds[0],
         extractObject: true,
+        autoRestore: hasNoRestore ? false : undefined,
       },
     };
   }

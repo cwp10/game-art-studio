@@ -311,6 +311,7 @@ export function ChatLayout() {
         attachmentGenerationIds?: string[];
         maskGenerationId?: string;
         extractObject?: boolean;
+        autoRestore?: boolean;
         presetId?: string;
         count?: number;
       },
@@ -361,6 +362,7 @@ export function ChatLayout() {
             attachmentGenerationIds: opts?.attachmentGenerationIds,
             maskGenerationId: opts?.maskGenerationId,
             extractObject: opts?.extractObject,
+            autoRestore: opts?.autoRestore,
           },
           event => {
             // 세션이 전환됐거나 새 전송이 시작됐으면 이 스트림은 더 이상 화면 주인이 아님 — 무시.
@@ -724,7 +726,7 @@ export function ChatLayout() {
   // Claude 가 inpaint_image(extractObject=true, prompt=부위명) 호출 → 투명 배경 PNG 추출.
   // 처리 중 LayerCanvas 는 busy 상태로 유지. 완료 후 사용자가 직접 닫는다.
   const handleLayerSplit = useCallback(
-    async ({ parts }: { parts: string[] }) => {
+    async ({ parts, autoRestore }: { parts: string[]; autoRestore: boolean }) => {
       if (!editing || editing.mode !== "layer") return;
       const parentId = editing.generationId;
       for (const part of parts) {
@@ -734,6 +736,7 @@ export function ChatLayout() {
             {
               attachmentGenerationIds: [parentId],
               extractObject: true,
+              autoRestore,
               // maskGenerationId 없음 — 텍스트 기반 추출
             },
           );

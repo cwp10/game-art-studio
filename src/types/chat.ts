@@ -29,6 +29,9 @@ export type ChatRequest = {
   /** true 면 라우트가 본문에 [extract] marker 를 prefix → Claude orchestrator 가
    *  inpaint_image 의 extractObject=true 로 사용(마스크 영역 오브젝트를 투명 배경으로 추출). */
   extractObject?: boolean;
+  /** false 면 [no-restore] marker 를 prefix → inpaint_image 의 autoRestore=false 로 전달.
+   *  가려진 부분을 AI 가 복원하지 않고 보이는 영역만 추출. 기본(true)은 복원 켜짐. */
+  autoRestore?: boolean;
   /** ×N 배치 생성의 멤버 식별자. 같은 id 의 N 개 요청이 한 그리드로 묶인다.
    *  Claude 메시지 본문은 오염시키지 않고 user 메시지의 meta 로만 저장 → 재로드 시 그룹 복원. */
   batch?: { id: string; index: number; total: number };

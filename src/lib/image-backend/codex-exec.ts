@@ -100,11 +100,16 @@ function buildLayerExtractPrompt(job: ImageJob): string {
   // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
   const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
   if (hasMask) {
+    // job.prompt 에서 " 레이어 추출" 접미사·adjustPrompt 부가어를 제거하고 부위명만 추출.
+    const partName = job.prompt.replace(/\s*레이어 추출.*/i, "").replace(/,\s*transparent background.*/i, "").trim();
+    const partHint = partName && partName !== "선택 영역"
+      ? ` The red-marked region represents "${partName}" — use this as additional context to identify the correct boundaries.`
+      : "";
     return (
       PROMPT_HEADER +
       `OBJECT EXTRACTION. I am attaching TWO images: ` +
       `(1) the original image, and (2) a mask where the RED region marks the object to extract.\n\n` +
-      `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background. ` +
+      `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background.${partHint} ` +
       `Show ONLY the extracted object — infer its complete and accurate boundary ` +
       `(the brush stroke is approximate; use visual context to find the true edges). ` +
       `Preserve the object's original colors, shading, and art style exactly. ` +
@@ -113,13 +118,16 @@ function buildLayerExtractPrompt(job: ImageJob): string {
     );
   }
   // 마스크 없음: job.prompt 가 부위명 (예: "머리띠", "눈", "몸통")
+  const restoreSentence = job.params?.autoRestore !== false
+    ? ` If any part of "${job.prompt}" is hidden or occluded by other elements,` +
+      ` naturally recreate those hidden parts so the extracted result looks complete.`
+    : "";
   return (
     PROMPT_HEADER +
     `OBJECT EXTRACTION. From the attached image, extract "${job.prompt}"` +
     ` and place it on a flat solid #00ff00 chroma-key background.\n\n` +
     `Find and extract ONLY the "${job.prompt}" — identify its exact location and boundaries in the image.` +
-    ` If any part of "${job.prompt}" is hidden or occluded by other elements,` +
-    ` naturally recreate those hidden parts so the extracted result looks complete.` +
+    restoreSentence +
     ` Preserve the original art style, colors, shading, and details exactly.` +
     ` Everything outside the extracted "${job.prompt}" must be solid #00ff00 green with no gradients or shadows.` +
     ` After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`

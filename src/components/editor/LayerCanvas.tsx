@@ -1,6 +1,6 @@
 "use client";
 
-import { Layers, Loader2, Paintbrush, Sparkles, Tags, X } from "lucide-react";
+import { Eraser, Layers, Loader2, Paintbrush, Sparkles, Tags, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AiSuggestButton, AiSuggestDropdown } from "@/components/editor/AiSuggestControls";
 import { ZoomPanControls, useZoomPan } from "./useZoomPan";
@@ -28,7 +28,7 @@ type Props = {
   imageHeight: number;
   busy?: boolean;
   results?: ResultItem[];
-  onSubmit: (args: { parts: string[] }) => void;
+  onSubmit: (args: { parts: string[]; autoRestore: boolean }) => void;
   onBrushSubmit: (args: { maskDataUrl: string; prompt: string }) => void;
   onCancel: () => void;
 };
@@ -49,6 +49,7 @@ export function LayerCanvas({
   // ── ① "입력으로 분리" 상태 ──────────────────────────────────────────────────
   const [parts, setParts] = useState<string[]>([]);
   const [input, setInput] = useState("");
+  const [autoRestore, setAutoRestore] = useState(true);
 
   // AI 제안
   const [aiLoading, setAiLoading] = useState(false);
@@ -111,6 +112,8 @@ export function LayerCanvas({
   }
 
   // ── ② "브러쉬로 분리" 상태 ──────────────────────────────────────────────────
+  const [brushName, setBrushName] = useState("");
+  const [eraseMode, setEraseMode] = useState(false);
   // 캔버스 내부 해상도: 긴 변을 640px 로, 비율 유지.
   const [canvasW, canvasH] = useMemo<[number, number]>(() => {
     if (imageWidth >= imageHeight) return [640, Math.round((640 * imageHeight) / imageWidth)];
@@ -181,14 +184,20 @@ export function LayerCanvas({
       const mask = maskCanvasRef.current;
       const img = imgLoadedRef.current;
       if (!display || !mask) return;
-      // 1. maskCanvas 에 불투명 빨간 스트로크 누적.
+      // 1. maskCanvas: 페인트 → 빨간 원 누적 / 지우개 → destination-out 으로 제거.
       const mCtx = mask.getContext("2d");
       if (mCtx) {
-        mCtx.globalCompositeOperation = "source-over";
-        mCtx.fillStyle = "red";
+        if (eraseMode) {
+          mCtx.globalCompositeOperation = "destination-out";
+          mCtx.fillStyle = "rgba(0,0,0,1)";
+        } else {
+          mCtx.globalCompositeOperation = "source-over";
+          mCtx.fillStyle = "red";
+        }
         mCtx.beginPath();
         mCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
         mCtx.fill();
+        mCtx.globalCompositeOperation = "source-over";
       }
       // 2. displayCanvas = 원본 이미지 + maskCanvas 50% 오버레이 — 매번 재합성해
       //    알파 누적 없이 일정한 반투명도를 유지한다.
@@ -201,7 +210,7 @@ export function LayerCanvas({
         dCtx.globalAlpha = 1;
       }
     },
-    [brushSize],
+    [brushSize, eraseMode],
   );
 
   function clearBrush() {
@@ -224,7 +233,7 @@ export function LayerCanvas({
   function handleBrushSubmit() {
     if (busy) return;
     const maskDataUrl = maskCanvasRef.current!.toDataURL("image/png");
-    onBrushSubmit({ maskDataUrl, prompt: "선택 영역" });
+    onBrushSubmit({ maskDataUrl, prompt: brushName.trim() || "선택 영역" });
   }
 
   return (
@@ -283,9 +292,16 @@ export function LayerCanvas({
               <p className="mt-1 text-xs leading-relaxed text-text-muted">
                 분리할 부위 이름을 입력하세요. AI 가 각 부위를 투명 배경 PNG 로 추출합니다.
               </p>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-text-muted/70">
-                ✨ 뒤에 가려진 부분은 AI 가 자동 복원합니다 | 권장: 3~5개 부위
-              </p>
+              <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11px] text-text-muted/70 select-none">
+                <input
+                  type="checkbox"
+                  checked={autoRestore}
+                  onChange={e => setAutoRestore(e.target.checked)}
+                  className="accent-[color:var(--accent)]"
+                />
+                가려진 부분 AI 자동 복원
+              </label>
+              <p className="text-[10px] text-text-muted/50">권장: 3~5개 부위</p>
             </div>
 
             {/* ③ 부위 입력 영역 */}
@@ -386,7 +402,7 @@ export function LayerCanvas({
                   }}
                   onMouseUp={() => { isDrawingRef.current = false; }}
                   onMouseLeave={() => { isDrawingRef.current = false; }}
-                  style={{ width: canvasW, height: canvasH, display: "block", cursor: zp.panMode ? "grab" : "crosshair" }}
+                  style={{ width: canvasW, height: canvasH, display: "block", cursor: zp.panMode ? "grab" : eraseMode ? "cell" : "crosshair" }}
                 />
               </div>
               <ZoomPanControls zp={zp} />
@@ -421,11 +437,36 @@ export function LayerCanvas({
               />
               <span className="w-10 text-right tabular-nums text-text-muted/80">{brushSize}px</span>
               <button
+                onClick={() => setEraseMode(v => !v)}
+                title={eraseMode ? "페인트 모드로 전환" : "지우개 모드로 전환"}
+                className={`shrink-0 rounded-lg border px-2 py-1 ${
+                  eraseMode
+                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                    : "border-border text-text-muted hover:text-text-primary"
+                }`}
+              >
+                <Eraser size={13} />
+              </button>
+              <button
                 onClick={clearBrush}
                 className="shrink-0 rounded-lg border border-border px-3 py-1 text-text-muted hover:text-text-primary"
               >
-                지우기
+                전체 지우기
               </button>
+            </div>
+
+            {/* 부위 이름 입력 */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-text-muted">부위 이름 (선택)</label>
+              <input
+                type="text"
+                value={brushName}
+                onChange={e => setBrushName(e.target.value)}
+                placeholder="예: 머리, 검, 망토…"
+                disabled={busy}
+                className="h-8 rounded-lg border border-border bg-bg-card px-2 text-[12px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none disabled:cursor-not-allowed"
+              />
+              <p className="text-[10px] text-text-muted/50">결과 레이블과 AI 추출 힌트로 사용됩니다</p>
             </div>
           </>
         )}
@@ -461,7 +502,7 @@ export function LayerCanvas({
         </button>
         {tab === "input" ? (
           <button
-            onClick={() => onSubmit({ parts })}
+            onClick={() => onSubmit({ parts, autoRestore })}
             disabled={parts.length === 0 || busy}
             className="flex h-9 flex-[2] items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
           >
