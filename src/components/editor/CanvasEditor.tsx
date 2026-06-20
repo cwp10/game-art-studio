@@ -22,7 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
-import { rectRatioPoint, useZoomPan } from "./useZoomPan";
+import { useZoomPan } from "./useZoomPan";
 
 /**
  * CanvasEditor — 전체전환(full-takeover) 통합 캔버스 에디터 (1단계).
@@ -449,24 +449,50 @@ export function CanvasEditor({
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   }, []);
-  const onBrushDown = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      const canvas = brushCanvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (!canvas || !ctx) return;
-      e.preventDefault();
-      brushDrawingRef.current = true;
+  // 화면 포인터 → 레이어 원본 픽셀 좌표(점 단위 역변환 — 비트맵 회전 없이 정밀).
+  // 레이어 중심은 회전과 무관하게 캔버스 bbox 중심과 일치 → 거기서 un-flip → un-rotate → un-scale.
+  const screenToSource = useCallback(
+    (canvas: HTMLCanvasElement, clientX: number, clientY: number, layer: Layer) => {
       const rect = canvas.getBoundingClientRect();
-      const srcPerDisplay = canvas.width / rect.width;
-      const p = rectRatioPoint(e);
+      const cx = (rect.left + rect.right) / 2;
+      const cy = (rect.top + rect.bottom) / 2;
+      let dx = clientX - cx;
+      const dy = clientY - cy;
+      if (layer.flipH) dx = -dx; // un-flip (flip 은 최외곽 → 화면 x 부호 반전)
+      const t = (layer.rotation * Math.PI) / 180;
+      const cos = Math.cos(t);
+      const sin = Math.sin(t);
+      const ux = dx * cos + dy * sin; // rotate by -t
+      const uy = -dx * sin + dy * cos;
+      const f = canvas.offsetWidth / (canvas.width || 1); // 표시(레이아웃)폭 / 원본폭
+      const sxScreen = f * layer.scale * layer.stretchW * zp.zoom || 1;
+      const syScreen = f * layer.scale * layer.stretchH * zp.zoom || 1;
+      const rScale = f * layer.scale * ((layer.stretchW + layer.stretchH) / 2) * zp.zoom || 1;
+      return {
+        x: ux / sxScreen + canvas.width / 2,
+        y: uy / syScreen + canvas.height / 2,
+        rSrc: inpaintBrush / rScale, // 화면 브러시 반경 → 원본 반경
+      };
+    },
+    [zp.zoom, inpaintBrush],
+  );
+
+  const onBrushDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>, layer: Layer) => {
+      const canvas = e.currentTarget;
+      const ctx = canvas.getContext("2d");
+      if (!ctx || !canvas.width) return;
+      e.preventDefault();
+      e.stopPropagation();
+      brushDrawingRef.current = true;
+      const p = screenToSource(canvas, e.clientX, e.clientY, layer);
       ctx.fillStyle = "#ff0000";
       ctx.strokeStyle = "#ff0000";
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.lineWidth = inpaintBrush * srcPerDisplay;
-      // 클릭만 해도 한 점 칠해지게 dot.
+      ctx.lineWidth = Math.max(1, p.rSrc * 2);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, (inpaintBrush * srcPerDisplay) / 2, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, Math.max(0.5, p.rSrc), 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
@@ -474,22 +500,25 @@ export function CanvasEditor({
         canvas.setPointerCapture(e.pointerId);
       } catch {}
     },
-    [inpaintBrush],
+    [screenToSource],
   );
-  const onBrushMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!brushDrawingRef.current) return;
-    const ctx = brushCanvasRef.current?.getContext("2d");
-    if (!ctx) return;
-    const p = rectRatioPoint(e);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-  }, []);
+  const onBrushMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>, layer: Layer) => {
+      if (!brushDrawingRef.current) return;
+      const ctx = e.currentTarget.getContext("2d");
+      if (!ctx) return;
+      const p = screenToSource(e.currentTarget, e.clientX, e.clientY, layer);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+    },
+    [screenToSource],
+  );
   const onBrushUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     brushDrawingRef.current = false;
     try {
-      brushCanvasRef.current?.releasePointerCapture(e.pointerId);
+      e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
   }, []);
 
@@ -930,13 +959,35 @@ export function CanvasEditor({
                         style={{ filter: cssFilter(layer.filters), pointerEvents: "none" }}
                         draggable={false}
                       />
+                      {/* 영역 편집 인라인 마스크 — 레이어와 같은 transform 을 CSS 가 적용(표시),
+                          포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). 내부 res = 원본. */}
+                      {inpaintLayerId === layer.id && (
+                        <canvas
+                          ref={el => {
+                            brushCanvasRef.current = el;
+                            if (el && el.width <= 1) {
+                              const im = new window.Image();
+                              im.onload = () => {
+                                el.width = im.naturalWidth;
+                                el.height = im.naturalHeight;
+                              };
+                              im.src = `/api/images/${layer.generationId}`;
+                            }
+                          }}
+                          className="absolute inset-0 h-full w-full cursor-crosshair opacity-50"
+                          style={{ touchAction: "none" }}
+                          onPointerDown={e => onBrushDown(e, layer)}
+                          onPointerMove={e => onBrushMove(e, layer)}
+                          onPointerUp={onBrushUp}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
 
                 {/* 선택 레이어 자유변형 핸들 — 클립 밖 오버레이라 캔버스 경계를 넘은 핸들도 잡힌다.
                     숨김 이미지로 레이어 박스 크기를 맞춰 핸들 위치 기준을 잡는다. */}
-                {selected && (
+                {selected && !inpaintLayerId && (
                   <div className="pointer-events-none absolute inset-0">
                     <div
                       style={{
@@ -1354,91 +1405,55 @@ export function CanvasEditor({
         </button>
       </footer>
 
-      {/* 영역 편집(generative fill) 오버레이 — 선택 레이어를 평면으로 띄우고 마스크를 칠한 뒤 프롬프트로 재생성. */}
-      {inpaintLayerId &&
-        (() => {
-          const layer = layers.find(l => l.id === inpaintLayerId);
-          if (!layer) return null;
-          return (
-            <div className="absolute inset-0 z-50 flex flex-col bg-bg-app">
-              <header className="flex h-12 flex-none items-center gap-2 border-b border-border px-4 text-sm">
-                <Wand2 size={15} className="text-[color:var(--accent)]" />
-                <span className="font-medium">영역 편집</span>
-                <span className="text-text-muted">— 다시 그릴 영역을 칠하고 프롬프트를 입력</span>
-                <button
-                  onClick={exitInpaint}
-                  className="ml-auto rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                >
-                  <X size={16} />
-                </button>
-              </header>
-              <div className="flex flex-1 items-center justify-center overflow-hidden p-4">
-                <div className="relative max-h-full max-w-full">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={`/api/images/${layer.generationId}`}
-                    alt=""
-                    className="checkerboard block max-h-[calc(100vh-190px)] max-w-full select-none"
-                    draggable={false}
-                    onLoad={e => {
-                      const img = e.currentTarget;
-                      const c = brushCanvasRef.current;
-                      if (c) {
-                        c.width = img.naturalWidth;
-                        c.height = img.naturalHeight;
-                      }
-                    }}
-                  />
-                  <canvas
-                    ref={brushCanvasRef}
-                    className="absolute inset-0 h-full w-full cursor-crosshair opacity-50"
-                    onPointerDown={onBrushDown}
-                    onPointerMove={onBrushMove}
-                    onPointerUp={onBrushUp}
-                  />
-                </div>
-              </div>
-              <footer className="flex flex-none flex-wrap items-center gap-2 border-t border-border px-4 py-3">
-                <span className="text-[11px] text-text-muted">브러시</span>
-                <input
-                  type="range"
-                  min={5}
-                  max={120}
-                  value={inpaintBrush}
-                  onChange={e => setInpaintBrush(Number(e.target.value))}
-                  className="w-28 accent-[color:var(--accent)]"
-                />
-                <span className="w-9 text-right text-[11px] tabular-nums text-text-muted">{inpaintBrush}px</span>
-                <button
-                  onClick={clearBrush}
-                  className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-                >
-                  지우기
-                </button>
-                <input
-                  value={inpaintPrompt}
-                  onChange={e => setInpaintPrompt(e.target.value)}
-                  placeholder="칠한 영역에 무엇을 그릴까요? (예: 빛나는 룬 문양)"
-                  disabled={inpaintBusy}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-                />
-                <button
-                  onClick={handleInpaintSubmit}
-                  disabled={inpaintBusy || !inpaintPrompt.trim()}
-                  className="flex h-8 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-4 text-sm font-medium text-white disabled:opacity-40"
-                >
-                  {inpaintBusy ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" /> 생성 중…
-                    </>
-                  ) : (
-                    "채우기 ▸"
-                  )}
-                </button>
-              </footer>
-            </div>
-          );
-        })()}
+      {/* 영역 편집(generative fill) — 인라인. 메인 캔버스의 선택 레이어 위에 직접 브러시질하고,
+          아래 플로팅 바에서 브러시·프롬프트·실행. (브러시 캔버스는 layers.map 안 레이어 div 에 있음) */}
+      {inpaintLayerId && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[88px] z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-[780px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
+            <Wand2 size={14} className="text-[color:var(--accent)]" />
+            <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
+            <span className="text-[11px] text-text-muted">레이어 위에 다시 그릴 영역을 칠하세요</span>
+            <span className="ml-1 text-[11px] text-text-muted">브러시</span>
+            <input
+              type="range"
+              min={5}
+              max={120}
+              value={inpaintBrush}
+              onChange={e => setInpaintBrush(Number(e.target.value))}
+              className="w-24 accent-[color:var(--accent)]"
+            />
+            <button
+              onClick={clearBrush}
+              className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+            >
+              지우기
+            </button>
+            <input
+              value={inpaintPrompt}
+              onChange={e => setInpaintPrompt(e.target.value)}
+              placeholder="무엇을 그릴까요? (예: 빛나는 룬 문양)"
+              disabled={inpaintBusy}
+              className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+            />
+            <button
+              onClick={handleInpaintSubmit}
+              disabled={inpaintBusy || !inpaintPrompt.trim()}
+              className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
+            >
+              {inpaintBusy ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" /> 생성 중…
+                </>
+              ) : (
+                "채우기 ▸"
+              )}
+            </button>
+            <button onClick={exitInpaint} className="rounded p-1 text-text-muted hover:text-text-primary">
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
