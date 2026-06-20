@@ -49,6 +49,16 @@ CREATE TABLE IF NOT EXISTS generations (
 CREATE INDEX IF NOT EXISTS idx_generations_session ON generations(session_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_generations_kind ON generations(kind, created_at DESC);
 
+-- ─── canvas_edits ─────────────────────────────────────────────────────────
+-- 캔버스 에디터 편집 상태 영속화 — 시드 이미지(seed_generation_id) 1장당 1행.
+-- state_json: { layers:[...], canvasSize:{w,h}, selectedLayerId }. 자동 저장 / 수동 복원(칩).
+-- 시드 이미지 삭제 시 CASCADE 로 함께 정리.
+CREATE TABLE IF NOT EXISTS canvas_edits (
+  seed_generation_id  TEXT PRIMARY KEY REFERENCES generations(id) ON DELETE CASCADE,
+  state_json          TEXT NOT NULL,
+  updated_at          INTEGER NOT NULL
+);
+
 -- ─── style_presets ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS style_presets (
   id                TEXT PRIMARY KEY,

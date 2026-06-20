@@ -337,6 +337,31 @@ export async function listGenerations(opts?: { sessionId?: string; kind?: string
   return generations;
 }
 
+/** 캔버스 에디터 편집 상태 — CanvasEditor 의 Snapshot 과 동형(layers 는 불투명). */
+export type PersistedCanvasState = {
+  layers: unknown[];
+  canvasSize: { w: number; h: number };
+  selectedLayerId: string | null;
+};
+
+/** 시드별 저장된 캔버스 편집 상태(없거나 모든 레이어 stale 면 null). */
+export async function getCanvasEdit(seedId: string): Promise<PersistedCanvasState | null> {
+  const r = await fetch(`/api/canvas-edit/${seedId}`);
+  if (!r.ok) return null;
+  const { state } = (await r.json()) as { state: PersistedCanvasState | null };
+  return state;
+}
+
+/** 자동 저장 — fire-and-forget(실패해도 편집 흐름 막지 않음). */
+export async function saveCanvasEdit(seedId: string, state: PersistedCanvasState): Promise<void> {
+  await jsonFetch(`/api/canvas-edit/${seedId}`, "POST", { state });
+}
+
+/** "처음부터" — 저장본 제거. */
+export async function clearCanvasEdit(seedId: string): Promise<void> {
+  await jsonFetch(`/api/canvas-edit/${seedId}`, "DELETE");
+}
+
 /**
  * /api/chat 의 SSE 를 fetch 의 ReadableStream 으로 받아 한 줄씩 ChatEvent 로 디스패치.
  *

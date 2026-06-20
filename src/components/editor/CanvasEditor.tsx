@@ -25,7 +25,15 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
-import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
+import {
+  clearCanvasEdit,
+  compositeScene,
+  filterImage,
+  getCanvasEdit,
+  listGenerations,
+  saveCanvasEdit,
+  uploadImage,
+} from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 import { useZoomPan } from "./useZoomPan";
 
@@ -142,6 +150,22 @@ function makeLayer(generationId: string): Layer {
   };
 }
 
+/**
+ * "건드리지 않은 시드 단일 레이어"인지 — 자동 저장 게이트.
+ * 진입 직후(시드 1장, 변형·필터 무, generationId=시드) 상태는 저장하지 않아, 편집하지 않은 이미지에
+ * 저장본/복원 칩이 생기는 것을 막는다. 출력 규격(canvasSize)은 자동으로 원본에 맞춰지므로 판단에서 제외.
+ */
+function isPristineSeedLayer(l: Layer, seedId: string): boolean {
+  return (
+    l.generationId === seedId &&
+    l.x === 0 && l.y === 0 &&
+    l.scale === 1 && l.stretchW === 1 && l.stretchH === 1 &&
+    l.rotation === 0 && !l.flipH && l.opacity === 100 && l.visible &&
+    l.filters.brightness === 100 && l.filters.contrast === 100 &&
+    l.filters.saturation === 100 && l.filters.hue === 0 && l.filters.blur === 0
+  );
+}
+
 /** 레이어 CSS transform — 백엔드 sharp 순서(stretch/scale → rotate → flip)와 동일 배치로 WYSIWYG 근사. */
 /** 원본 공간에 타원(rx,ry) 스탬프 — 화면에선 정원(비균일 늘이기 보정). */
 function stampEllipse(
@@ -203,6 +227,9 @@ export function CanvasEditor({
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(() => layers[0]?.id ?? null);
   const [presetIdx, setPresetIdx] = useState(0);
   const [customSize, setCustomSize] = useState<CanvasSize>({ w: 1024, h: 1024 });
+  // 영속화 — 진입 시 저장본을 불러와 "이전 편집 이어서" 칩으로 제시(자동 적용 X). dismiss 시 칩 숨김.
+  const [restorable, setRestorable] = useState<Snapshot | null>(null);
+  const [restoreDismissed, setRestoreDismissed] = useState(false);
   const [assets, setAssets] = useState<Generation[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   // 에셋 피커 소스 탭 — 이 세션 / 갤러리(전체 세션). 갤러리는 lazy 로드.
@@ -575,6 +602,58 @@ export function CanvasEditor({
     im.onload = () => setCustomSize({ w: im.naturalWidth, h: im.naturalHeight });
     im.src = `/api/images/${seedGenerationId}`;
   }, [seedGenerationId]);
+
+  // ── 편집 상태 영속화 (자동 저장 / 수동 복원) ──────────────────────────────────
+  // 진입 시 시드별 저장본을 불러와 "이전 편집 이어서" 칩으로 제시(자동 적용 X). async setState 라 무관.
+  useEffect(() => {
+    let alive = true;
+    getCanvasEdit(seedGenerationId)
+      .then(s => {
+        if (alive && s) setRestorable(s as unknown as Snapshot);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [seedGenerationId]);
+
+  // "이전 편집 이어서" — 저장본을 현재 캔버스에 적용(applySnap + 프리셋 자유로 출력 규격 복원).
+  const applyRestore = useCallback(() => {
+    if (!restorable) return;
+    applySnap(restorable);
+    setPresetIdx(0);
+    setRestoreDismissed(true);
+  }, [restorable, applySnap]);
+
+  // "처음부터" — 저장본 폐기(진입 상태=깨끗한 시드 그대로 유지). 칩도 닫는다.
+  const discardRestore = useCallback(() => {
+    setRestoreDismissed(true);
+    void clearCanvasEdit(seedGenerationId);
+  }, [seedGenerationId]);
+
+  // 자동 저장(디바운스) — 건드리지 않은 시드 단일 기본 상태는 저장 안 함(편집한 경우에만 저장본 생성).
+  const isDefaultCanvas = layers.length === 1 && isPristineSeedLayer(layers[0], seedGenerationId);
+  const pendingSaveRef = useRef<Snapshot | null>(null);
+  useEffect(() => {
+    if (isDefaultCanvas) {
+      pendingSaveRef.current = null;
+      return;
+    }
+    const state: Snapshot = { layers, canvasSize, selectedLayerId };
+    pendingSaveRef.current = state;
+    const t = setTimeout(() => {
+      pendingSaveRef.current = null;
+      void saveCanvasEdit(seedGenerationId, state);
+    }, 800);
+    return () => clearTimeout(t);
+  }, [layers, canvasSize, selectedLayerId, isDefaultCanvas, seedGenerationId]);
+  // 닫기(언마운트) 시 디바운스 대기 중인 저장을 즉시 flush — 마지막 편집 손실 방지.
+  useEffect(() => {
+    return () => {
+      if (pendingSaveRef.current) void saveCanvasEdit(seedGenerationId, pendingSaveRef.current);
+    };
+  }, [seedGenerationId]);
+
   const clearBrush = useCallback(() => {
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
@@ -1266,6 +1345,35 @@ export function CanvasEditor({
       <div className="flex min-h-0 flex-1">
         {/* 스테이지 */}
         <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* 이전 편집 복원 칩 — 저장본이 있을 때만(자동 적용 X, 사용자가 이어서/처음부터 선택). */}
+          {restorable && !restoreDismissed && (
+            <div className="pointer-events-none absolute left-1/2 top-3 z-30 flex -translate-x-1/2 justify-center px-4">
+              <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[color:var(--accent)]/50 bg-bg-card/95 py-1.5 pl-3 pr-1.5 text-xs shadow-2xl backdrop-blur">
+                <RotateCcw size={13} className="text-[color:var(--accent)]" />
+                <span className="text-text-primary">이 이미지의 이전 편집이 있어요</span>
+                <button
+                  onClick={applyRestore}
+                  className="rounded-full bg-[color:var(--accent)] px-2.5 py-1 text-[11px] font-medium text-white"
+                >
+                  이어서
+                </button>
+                <button
+                  onClick={discardRestore}
+                  className="rounded-full px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                  title="저장된 이전 편집을 폐기하고 새로 시작"
+                >
+                  처음부터
+                </button>
+                <button
+                  onClick={() => setRestoreDismissed(true)}
+                  className="rounded-full p-1 text-text-muted hover:text-text-primary"
+                  title="닫기 (저장본은 유지)"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
+          )}
           <div
             ref={stageRef}
             className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]"
