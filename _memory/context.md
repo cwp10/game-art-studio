@@ -27,7 +27,7 @@ SceneComposer 드래그 배치 + SpriteCanvas 알파 이펙트 탭 추가.
 - `SceneLayer` 타입에 `x, y, scale` 추가 (기본: 0, 0, 1.0)
 - 레이어 선택 후 프리뷰 캔버스 드래그로 위치 이동
 - scale 슬라이더 + 위치·배율 리셋 버튼
-- POST /api/composite request에 x,y,scale 포함
+- POST /api/composite 요청에 x,y,scale 포함
 
 **B. SpriteCanvas 알파 이펙트 탭:**
 - 헤더에 "이펙트" 탭 버튼 추가
@@ -39,29 +39,63 @@ SceneComposer 드래그 배치 + SpriteCanvas 알파 이펙트 탭 추가.
 - `src/app/api/sprite-effect/route.ts` — POST /api/sprite-effect
 
 **수정 파일:**
-- `src/lib/image-backend/composite-layers.ts` — x,y,scale + placeWithTransform() (crop-to-visible-window)
+- `src/lib/image-backend/composite-layers.ts` — x,y,scale + placeWithTransform()
 - `src/app/api/composite/route.ts` — CompositeLayerInput에 x?,y?,scale? 추가
 - `src/lib/db/migrate.ts` — migrateV8: 'sprite_effect' kind 추가
 - `src/lib/db/schema.sql` — kind CHECK 17개
 - `src/types/db.ts` — GenerationKind에 'sprite_effect' 추가
 - `src/components/editor/SceneComposer.tsx` — 드래그 배치 + scale 슬라이더
-- `src/components/editor/SpriteCanvas.tsx` — 이펙트 탭 추가
+
+### SceneComposer 드래그 버그 수정 — 2026-06-20
+- img에 `pointerEvents: "none"` 추가 → 브라우저 네이티브 이미지 드래그가 window.mousemove를 가로채는 문제 차단
+- `onPreviewMouseDown`에서 레이어 미선택 시 최상단 레이어 자동 선택 후 드래그 시작 (UX 개선)
+
+### MCP 자연어 연동 — 2026-06-20
+Claude CLI에서 자연어로 씬 합성·이펙트 적용 명령 가능.
+
+**신규 파일:**
+- `src/lib/image-backend/composite-runner.ts` — runComposite() 공통 오케스트레이터 (라우트·MCP 공유)
+- `src/lib/image-backend/sprite-effect-runner.ts` — runSpriteEffect() 공통 오케스트레이터
+
+**수정 파일:**
+- `src/lib/mcp/server.ts` — composite_scene / apply_sprite_effect 도구 추가 (SCHEMAS + TOOLS + dispatch)
+- `src/app/api/composite/route.ts` — runComposite() 위임으로 리팩터
+- `src/app/api/sprite-effect/route.ts` — runSpriteEffect() 위임으로 리팩터
+
+### 9-slice 패널 생성기 — 2026-06-20
+UI 패널 이미지를 9조각으로 슬라이싱하거나 타겟 크기로 리사이즈.
+
+**A. 슬라이서 (그리드 미리보기):** 원본 이미지에 슬라이스 경계선 오버레이한 PNG 출력
+**B. 리사이저:** 코너 고정 + 엣지/중앙 스트레치로 임의 크기 패널 생성
+
+**신규 파일:**
+- `src/lib/image-backend/nine-slice.ts` — makeNineSliceGrid() + scaleWithNineSlice()
+- `src/app/api/nine-slice/route.ts` — POST /api/nine-slice (kind='nine_slice')
+- `src/app/api/nine-slice-scale/route.ts` — POST /api/nine-slice-scale (kind='nine_slice_scaled')
+- `src/components/editor/NineSliceEditor.tsx` — 슬라이스 라인 오버레이 UI + 실시간 미리보기
+
+**수정 파일:**
+- `src/lib/db/migrate.ts` — migrateV9: nine_slice / nine_slice_scaled kind 추가
+- `src/lib/db/schema.sql` — kind CHECK 19개
+- `src/types/db.ts` — GenerationKind 확장
+- `src/components/chat/ChatLayout.tsx` — nineSliceOpen 상태 + NineSliceEditor 패널
+- `src/components/chat/ImageResultCard.tsx` — "9-slice" 버튼
+- `src/components/chat/MessageList.tsx` — open_nine_slice 액션 타입
+- `tsconfig.json` — _workspace / _workspace_prev exclude 추가
 
 ## 기술 스택
 - Next.js (App Router), TypeScript, React
 - sharp 0.33 (이미지 합성), better-sqlite3 (WAL), MCP stdio
-- DB: generations 테이블 (kind enum v8: text2img/img2img/.../composite/sprite_effect)
+- DB: generations 테이블 (kind enum v9: 19종 — text2img/img2img/.../composite/sprite_effect/nine_slice/nine_slice_scaled)
 
 ## 주요 설계 포인트
-- **sharp out-of-bounds**: overlay > base 크기면 throw. `scale>1` 시 crop-to-visible-window 방식 채택 (배치 사각형 ∩ 캔버스 → extract → 교집합 좌상단 합성).
-- **opacity**: sharp composite에 opacity 옵션 없음 → raw RGBA alpha 채널 multiply.
-- **contain-fit**: fit:'contain'으로 정확한 캔버스 크기 맞춤 (투명 패딩).
+- **sharp out-of-bounds**: overlay > base 크기면 throw. scale>1 시 crop-to-visible-window 방식.
 - **이펙트 셀 처리**: 각 셀 독립 투명 캔버스에서 effect(아래)+sprite(위) 합성 → 셀 경계 블리딩 방지.
-- **outline 채널 버그**: sharp `.threshold()`가 3채널 sRGB로 승격 → `.toColourspace("b-w")`로 단일채널 복원 필요.
-- **SceneComposer 드래그**: useZoomPan의 drag-pan이 실제로 배선 안 돼 있어 충돌 없음; selectedIdx 있을 때 window-level mousemove 추적.
-- **이펙트 적용 범위**: 전체 시트 오버레이(위치 어긋남 문제) 대신 알파 마스크 기반으로 캐릭터 위치 자동 추적.
+- **MCP 공통 오케스트레이터**: composite-runner / sprite-effect-runner가 라우트·MCP 양쪽에서 동일 계약 공유. HTTP 우회 없이 in-process 호출.
+- **Next.js import 패턴**: .js 확장자 금지 (MCP 서버는 ESM node 패턴 유지, Next.js 소스는 확장자 없음).
+- **9-slice 리사이즈**: 코너 크기 고정, 엣지 단축 방향 고정, 중앙 양방향 stretch (fit:'fill'). 유효성: left+right < W, top+bottom < H.
+- **SceneComposer 드래그**: img에 pointer-events:none → 브라우저 네이티브 이미지 드래그 간섭 차단. 레이어 미선택 시 최상단 자동 선택.
 
 ## 다음 단계
-- Phase 3 (필요 시): 9-slice 패널 생성기, 버튼 상태 스프라이트
-- 이펙트 탭 확장: 프레임별 이펙트 (Phase 3 별도 빌드)
-- MCP 자연어 연동 (씬 합성 명령어)
+- 버튼 상태 스프라이트 (normal/hover/pressed 3종 스트립)
+- 9-slice 게임엔진 메타데이터 JSON export (Unity .meta / Godot .import 형식)
