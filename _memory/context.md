@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-20 (통합 캔버스 에디터 1단계)
+마지막 업데이트: 2026-06-21 (통합 캔버스 에디터 — Step 2 + UI 다듬기)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -42,9 +42,16 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 - **2b 영역 편집(generative fill):** "영역 편집" → 평면 오버레이에서 브러시로 마스크 칠 + 프롬프트 → 그 영역만 재생성, 레이어 교체. 소스해상도 캔버스 #ff0000 → export 검정+빨강(MaskCanvas 포맷), rectRatioPoint 소스픽셀 매핑. onInpaint prop(uploadMask+handleSend).
 - ⚠️ 브러시 정밀도/느낌은 헤드리스 검증 불가 — 사용자 인터랙션 테스트 필요(변형 핸들처럼 반복 가능).
 
+**UI 다듬기(2026-06-21, 사용자 피드백 반영, CanvasEditor만):**
+- 열 때 첫 레이어 자동 선택(도구 바로 노출). 이동/편집 모드 토글 제거(편집 상시, 줌만).
+- 영역 편집을 평면 오버레이 → **메인 캔버스 인라인 브러시**(점-좌표 역변환, 비트맵 회전 없이 정밀). 마스크 캔버스를 레이어 div 안에 두고 CSS가 표시, 포인터만 bbox중심 기준 un-flip→un-rotate→un-scale. 비균일 늘이기 보정으로 **브러시는 화면상 정원**(원본엔 타원 스탬프). 마스크 캔버스 크기는 `inpaintNat`로 선언적 지정(HTML 기본 300 버그 회피).
+- 상단 툴바 한 줄: 출력규격 + 변형(반전/리셋) + 생성형 메뉴(배경제거/업스케일/여백제거/영역편집/레이어분리). **메뉴 클릭=즉시 실행 X → 하단 바에서 결정/실행**(단일 `tool` 상태, openTool/closeTool). 우측 레일=레이어+필터.
+- 푸터 제거(취소=상단 "대화로 돌아가기"와 중복). **합치기 버튼을 우측 레일 필터 아래 상시 노출**.
+
 **다음 단계:**
 - **Step 3:** 편집 상태 영속화(DB) → 프로젝트처럼 재오픈.
 - **정리:** 도달 불가 ImageToolsPanel/SceneComposer 데드코드 제거(ChatLayout 배선 포함). 단 영역편집/분리가 인페인트(MaskCanvas)·레이어분리(LayerCanvas) 결과 카드 경로를 handleSend로 공유하므로, 구 패널 제거 시 그 경로 영향 없는지 확인.
+- **버그 정합:** composite route rotation drop 수정은 됐으나, SceneComposer 은퇴 전 회귀 없는지(현재 도달 불가).
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.
