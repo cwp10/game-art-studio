@@ -66,7 +66,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
         <div className={`grid gap-3 ${result ? "grid-cols-2" : "grid-cols-1"}`}>
           <div className="space-y-1">
             <p className="text-[11px] text-text-muted">원본</p>
-            <div className="overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+            <div className="checkerboard overflow-hidden rounded-lg border border-border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageUrl} alt="원본" className="block w-full object-contain" style={{ maxHeight: 320 }} />
             </div>
@@ -75,7 +75,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
           {result && (
             <div className="space-y-1">
               <p className="text-[11px] text-text-muted">노멀맵</p>
-              <div className="overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+              <div className="checkerboard overflow-hidden rounded-lg border border-border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={result.imageUrl} alt="노멀맵" className="block w-full object-contain" style={{ maxHeight: 320 }} />
               </div>

@@ -109,7 +109,7 @@ export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, 
         <div className="grid grid-cols-3 gap-3">
           {(["normal", "hover", "pressed"] as StateKey[]).map(state => (
             <div key={state} className="flex flex-col gap-1.5">
-              <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#3a3a3a_0%_50%)_50%/14px_14px]">
+              <div className="flex aspect-square items-center justify-center checkerboard overflow-hidden rounded-lg border border-border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={slotUrl(state)}
@@ -165,7 +165,7 @@ export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, 
           onClick={onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
         >
-          {results ? "닫기" : "취소"}
+          {results ? "✕ 닫기" : "✕ 취소"}
         </button>
         <button
           onClick={run}

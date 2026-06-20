@@ -113,7 +113,7 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
         {/* 좌: 원본 미리보기 + 슬라이스 라인 오버레이 */}
         <div className="flex flex-1 flex-col gap-2">
           <p className="text-xs font-medium text-text-muted">원본 미리보기</p>
-          <div className="relative inline-flex max-h-[60vh] items-center justify-center self-start overflow-hidden rounded-lg border border-border bg-[repeating-conic-gradient(#1a1a1a_0%_25%,#3a3a3a_0%_50%)_50%/14px_14px]">
+          <div className="relative inline-flex max-h-[60vh] items-center justify-center self-start checkerboard overflow-hidden rounded-lg border border-border">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl}
@@ -190,7 +190,7 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
           onClick={onClose}
           className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
         >
-          취소
+          ✕ 취소
         </button>
         <button
           onClick={() => run("/api/nine-slice", "nine_slice")}

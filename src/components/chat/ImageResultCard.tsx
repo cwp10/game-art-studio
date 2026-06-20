@@ -8,9 +8,9 @@ import {
   Film,
   Gamepad2,
   Grid3x3,
+  Layers,
   Link2,
   Loader2,
-  Map,
   MoreHorizontal,
   Palette,
   RotateCw,
@@ -206,7 +206,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                 title="스프라이트 시트 분할 + GIF 미리보기 + 프레임 zip / GIF 다운로드"
               >
-                <Film size={12} /> 스프라이트
+                <Film size={12} /> 시트 분할
               </button>
             )}
             <button
@@ -246,7 +246,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                       title="노멀맵 — 이 이미지의 라이팅용 노멀맵을 생성"
                     >
-                      <Map size={12} /> 노멀맵
+                      <Layers size={12} /> 노멀맵
                     </button>
                   )}
                   <button

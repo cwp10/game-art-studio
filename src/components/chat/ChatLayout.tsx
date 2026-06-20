@@ -804,8 +804,8 @@ export function ChatLayout() {
     [state.activeSessionId],
   );
 
-  // 우측 편집 패널 — mode 별로 props 가 전부 달라 config 맵은 불가하지만, 공통 래퍼
-  // (fixed inset-y-0 right-0 z-40 w-2/3)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
+  // 전체화면 편집 패널 — mode 별로 props 가 전부 달라 config 맵은 불가하지만, 공통 래퍼
+  // (fixed inset-0 z-40)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
   // (spriteGen 상태)은 EditTarget 기반이 아니라 별도라 이 함수 밖에 유지.
   function renderEditPanel() {
     if (!editing) return null;
@@ -901,12 +901,12 @@ export function ChatLayout() {
       }
     })();
     if (!panel) return null;
-    return <div className="fixed inset-y-0 right-0 z-40 w-2/3">{panel}</div>;
+    return <div className="fixed inset-0 z-40">{panel}</div>;
   }
 
   const hasItems = state.items.length > 0;
-  // 편집/레이어/스프라이트/리스킨/시트 패널이 열리면 세션 리스트를 숨기고
-  // 대화창을 좁혀(1/3) 우측 2/3 패널과 화면을 분할한다.
+  // 편집/스프라이트/리스킨/노멀맵/9-slice/버튼상태/캔버스 패널이 열리면 세션 리스트를 숨긴다.
+  // (패널은 모두 전체화면 fixed inset-0 라 대화창을 덮는다.)
   const editorPanelOpen =
     editing !== null ||
     spriteGen !== null ||
@@ -930,11 +930,11 @@ export function ChatLayout() {
           generating={state.generating}
         />
       )}
-      {/* 편집 패널 열림 시 가운데 메인을 좁게 고정 → 우측 편집 패널이 flex-1 로 남은 공간 차지.
+      {/* 편집 패널은 전체화면(fixed inset-0)으로 이 대화 column 을 완전히 덮으므로 폭은 항상 flex-1.
           drag-drop: 가운데 column 어디에 떨어뜨려도 업로드. dragCounter 로 child traversal
           중 enter/leave 깜빡임 방지. dataTransfer.types 에 'Files' 있는 경우만 활성. */}
       <div
-        className={`relative flex flex-col ${editorPanelOpen ? "w-1/3" : "flex-1"}`}
+        className="relative flex flex-1 flex-col"
         onDragEnter={e => {
           if (!e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
@@ -1010,7 +1010,7 @@ export function ChatLayout() {
       </div>
       {renderEditPanel()}
       {spriteGen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
+        <div className="fixed inset-0 z-40">
           <SpriteGenPanel
             referenceId={spriteGen.reference?.generationId}
             referenceImageUrl={spriteGen.reference?.imageUrl}
@@ -1024,7 +1024,7 @@ export function ChatLayout() {
         </div>
       )}
       {nineSliceOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
+        <div className="fixed inset-0 z-40">
           <NineSliceEditor
             generationId={nineSliceOpen.generationId}
             sessionId={state.activeSessionId}
@@ -1045,7 +1045,7 @@ export function ChatLayout() {
         </div>
       )}
       {buttonStateOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 w-2/3">
+        <div className="fixed inset-0 z-40">
           <ButtonStateEditor
             generationId={buttonStateOpen.generationId}
             sessionId={state.activeSessionId}

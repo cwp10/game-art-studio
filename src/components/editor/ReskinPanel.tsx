@@ -331,7 +331,7 @@ export function ReskinPanel({
               </span>
             )}
           </div>
-          <div className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/16px_16px]">
+          <div className="overflow-hidden rounded border border-border checkerboard">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl} alt="원본" className="mx-auto block max-h-[44vh] w-auto object-contain" />
           </div>
@@ -701,7 +701,7 @@ export function ReskinPanel({
                     <div key={g.id} className="group relative aspect-square">
                       <button
                         onClick={() => setStyleRefId(sel ? null : g.id)}
-                        className={`h-full w-full overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px] ${
+                        className={`h-full w-full overflow-hidden rounded border checkerboard ${
                           sel
                             ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
                             : "border-border hover:border-[color:var(--accent)]/50"
@@ -744,12 +744,12 @@ export function ReskinPanel({
             {/* 선택 시 원본 + 참조 나란히 미리보기 */}
             {styleRefUrl && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-card p-2">
-                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px]">
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border checkerboard">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={imageUrl} alt="원본" className="h-full w-full object-contain" />
                 </div>
                 <span className="text-text-muted">→</span>
-                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/10px_10px]">
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border checkerboard">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={styleRefUrl} alt="참조" className="h-full w-full object-contain" />
                 </div>
@@ -817,6 +817,7 @@ export function ReskinPanel({
           onSubmit={submit}
           onClose={onClose}
           onCancel={onCancel}
+          busyLabel="생성 중…"
           submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
           submitTitle={
             canSubmit || busy

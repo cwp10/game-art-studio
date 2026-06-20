@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, X } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
@@ -1247,7 +1247,7 @@ export function SpriteCanvas({
                     setSelectedIdx(origIdx);
                     setDragging({ idx: origIdx, startX: e.clientX, startY: e.clientY, origX: off.x, origY: off.y });
                   }}
-                  className={`group relative rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px] select-none ${
+                  className={`checkerboard group relative rounded border select-none ${
                     isDragOver
                       ? "ring-2 ring-[color:var(--accent)] border-[color:var(--accent)] opacity-70"
                       : dragging?.idx === origIdx
@@ -1317,7 +1317,7 @@ export function SpriteCanvas({
                   {/* 진행 중 스피너 오버레이. */}
                   {regenBusy === origIdx && (
                     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded bg-black/60">
-                      <RefreshCw size={16} className="animate-spin text-white" />
+                      <Loader2 size={16} className="animate-spin text-white" />
                     </div>
                   )}
                   {/* 인라인 재생성 프롬프트 — 셀 위에 떠서 표시. mouseDown 전파 차단(드래그 방지). */}
@@ -1401,7 +1401,7 @@ export function SpriteCanvas({
           <div className="flex items-start gap-2">
             <span className="text-text-muted">미리보기</span>
             <div className="flex flex-1 flex-col gap-1">
-              <div className="relative flex h-64 items-center justify-center overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+              <div className="checkerboard relative flex h-64 items-center justify-center overflow-hidden rounded border border-border">
                 {previewFrames.length > 0 ? (
                   <canvas ref={previewRef} className="block h-full w-auto" />
                 ) : (
@@ -1536,9 +1536,9 @@ export function SpriteCanvas({
             <button
               onClick={handleApplyEffect}
               disabled={effectBusy}
-              className="flex h-8 w-full items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+              className="flex h-9 w-full items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
             >
-              {effectBusy ? <RefreshCw size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              {effectBusy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
               {effectBusy ? "적용 중…" : "이펙트 적용"}
             </button>
           </div>

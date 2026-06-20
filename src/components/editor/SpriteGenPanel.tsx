@@ -348,7 +348,7 @@ export function SpriteGenPanel({
         {/* 참조 이미지 — 있을 때만 */}
         {referenceImageUrl && (
           <div className="flex shrink-0 items-center gap-3 rounded-lg border border-border bg-bg-card p-2">
-            <div className="overflow-hidden rounded border border-border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/12px_12px]">
+            <div className="checkerboard overflow-hidden rounded border border-border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={referenceImageUrl} alt="참조" className="block h-14 w-14 object-contain" />
             </div>
