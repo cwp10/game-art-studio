@@ -1019,6 +1019,7 @@ export function SpriteCanvas({
         </button>
       </header>
 
+      <div className="flex min-h-0 flex-1">
       <div ref={sizerRef} className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">
           행·열을 지정해서 시트를 N×M 프레임으로 분할합니다. 다운로드는 클라이언트 처리,
@@ -1545,42 +1546,39 @@ export function SpriteCanvas({
         )}
       </div>
 
-      <footer className="mx-auto flex w-full max-w-[1200px] flex-col gap-2 border-t border-border p-3">
+      {/* 우측 레일 — 저장·내보내기(캔버스 우측 레일 자리). 나머지 컨트롤은 중앙 스크롤 유지. */}
+      <div className="flex w-[256px] flex-none flex-col gap-3 overflow-y-auto border-l border-border bg-bg-panel p-3 text-xs">
         {/* ⑤ 보정본 저장 — 현재 오프셋 반영한 전체 시트를 새 generation 으로(원본 보존). */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={saveCorrected}
-            disabled={frames.length === 0 || saving}
-            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-          >
-            <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
-          </button>
-          {savedMsg && (
-            <span className={`text-xs ${savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}>
-              {savedMsg}
-            </span>
-          )}
-        </div>
-        {/* Atlas 포맷 선택 */}
-        <div className="flex items-center gap-2 text-xs">
+        <button
+          onClick={saveCorrected}
+          disabled={frames.length === 0 || saving}
+          className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+        >
+          <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
+        </button>
+        {savedMsg && (
+          <span className={savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}>
+            {savedMsg}
+          </span>
+        )}
+        {/* Atlas 포맷 + 내보내기 */}
+        <div className="space-y-1.5">
           <span className="text-text-muted">Atlas 포맷</span>
           <select
             value={atlasFormat}
             onChange={e => setAtlasFormat(e.target.value as AtlasFormat)}
             disabled={frames.length === 0}
-            className="h-7 flex-1 rounded border border-border bg-bg-app px-2 text-text-primary disabled:opacity-40"
+            className="h-7 w-full rounded border border-border bg-bg-app px-2 text-text-primary disabled:opacity-40"
           >
             <option value="custom">Custom JSON</option>
             <option value="unity">Unity (TexturePacker)</option>
             <option value="godot">Godot</option>
             <option value="phaser">Phaser 3</option>
           </select>
-        </div>
-        <div className="flex gap-2">
           <button
             onClick={downloadAtlasJson}
             disabled={frames.length === 0}
-            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+            className="flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
             title="셀·그리드·방향·앵커 메타데이터 .json (엔진 슬라이싱용)"
           >
             <FileJson size={14} /> .json
@@ -1588,19 +1586,20 @@ export function SpriteCanvas({
           <button
             onClick={downloadZip}
             disabled={adjustedFrames.length === 0 || !!downloading}
-            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+            className="flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
           >
             <FileArchive size={14} /> {downloading === "zip" ? "..." : "프레임 zip"}
           </button>
           <button
             onClick={downloadGif}
             disabled={!gifUrl || !!downloading}
-            className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
+            className="flex h-9 w-full items-center justify-center gap-1 rounded-lg border border-border text-sm text-text-primary hover:bg-bg-card disabled:opacity-40"
           >
             <Download size={14} /> {downloading === "gif" ? "..." : "GIF"}
           </button>
         </div>
-      </footer>
+      </div>
+      </div>
     </aside>
   );
 }
