@@ -906,6 +906,88 @@ export function CanvasEditor({
         </span>
       </div>
 
+      {/* 선택 레이어 도구 (상단 툴바) — 변형 · 생성형 액션 · 분리. 레이어 선택 시에만 표시. */}
+      {selected && (
+        <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-border px-3.5 py-2 text-xs">
+          <button
+            onClick={() => flipSelected(selected.id)}
+            className={`rounded-md border px-2 py-1 text-[11px] ${
+              selected.flipH
+                ? "border-[color:var(--accent)] text-text-primary"
+                : "border-border text-text-muted hover:text-text-primary"
+            }`}
+            title="좌우반전"
+          >
+            ↔ 반전
+          </button>
+          <button
+            onClick={() => resetTransform(selected.id)}
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+            title="위치·크기·회전 리셋"
+          >
+            <RotateCcw size={11} /> 리셋
+          </button>
+          <span className="mx-1 h-4 w-px bg-border" />
+          <button
+            onClick={() => runLayerOp("bg", selected.id)}
+            disabled={!!layerOp}
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+            title="선택 레이어의 배경을 투명하게 (AI)"
+          >
+            <Sparkles size={11} /> 배경 제거
+          </button>
+          <button
+            onClick={() => runLayerOp("upscale", selected.id)}
+            disabled={!!layerOp}
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+            title="선택 레이어를 고화질로 업스케일 (AI)"
+          >
+            <Sparkles size={11} /> 업스케일
+          </button>
+          <button
+            onClick={() => runLayerOp("trim", selected.id)}
+            disabled={!!layerOp}
+            className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+            title="선택 레이어의 투명 여백을 잘라냄 (sharp)"
+          >
+            <Scissors size={11} /> 여백 제거
+          </button>
+          <button
+            onClick={() => {
+              setInpaintPrompt("");
+              setInpaintNat(null);
+              const im = new window.Image();
+              im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
+              im.src = `/api/images/${selected.generationId}`;
+              setInpaintLayerId(selected.id);
+            }}
+            className="flex items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
+            title="영역 편집 — 칠한 영역을 프롬프트로 다시 그림 (generative fill)"
+          >
+            <Wand2 size={11} /> 영역 편집
+          </button>
+          <span className="mx-1 h-4 w-px bg-border" />
+          <input
+            value={extractInput}
+            onChange={e => setExtractInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") handleExtract();
+            }}
+            placeholder="분리할 부위 (예: 머리, 무기)"
+            disabled={extracting}
+            className="h-7 w-40 rounded-md border border-border bg-bg-panel px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+          />
+          <button
+            onClick={handleExtract}
+            disabled={extracting || !extractInput.trim()}
+            className="flex shrink-0 items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10 disabled:opacity-40"
+            title="부위를 AI로 추출해 새 레이어로 추가 (쉼표로 여러 부위)"
+          >
+            {extracting ? <Loader2 size={11} className="animate-spin" /> : <Scissors size={11} />} 분리
+          </button>
+        </div>
+      )}
+
       {/* 본문: 스테이지 + 레이어 레일 */}
       <div className="flex min-h-0 flex-1">
         {/* 스테이지 */}
@@ -1269,85 +1351,6 @@ export function CanvasEditor({
           <div className="flex-none border-t border-border bg-bg-card p-3">
             {selected ? (
               <>
-                <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                  <button
-                    onClick={() => flipSelected(selected.id)}
-                    className={`rounded-md border px-2 py-1 text-[11px] ${
-                      selected.flipH
-                        ? "border-[color:var(--accent)] text-text-primary"
-                        : "border-border text-text-muted hover:text-text-primary"
-                    }`}
-                    title="좌우반전"
-                  >
-                    ↔ 반전
-                  </button>
-                  <button
-                    onClick={() => resetTransform(selected.id)}
-                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-                    title="위치·크기·회전 리셋"
-                  >
-                    <RotateCcw size={11} /> 리셋
-                  </button>
-                  <button
-                    onClick={() => runLayerOp("bg", selected.id)}
-                    disabled={!!layerOp}
-                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-                    title="선택 레이어의 배경을 투명하게 (AI)"
-                  >
-                    <Sparkles size={11} /> 배경 제거
-                  </button>
-                  <button
-                    onClick={() => runLayerOp("upscale", selected.id)}
-                    disabled={!!layerOp}
-                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-                    title="선택 레이어를 고화질로 업스케일 (AI)"
-                  >
-                    <Sparkles size={11} /> 업스케일
-                  </button>
-                  <button
-                    onClick={() => runLayerOp("trim", selected.id)}
-                    disabled={!!layerOp}
-                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
-                    title="선택 레이어의 투명 여백을 잘라냄 (sharp)"
-                  >
-                    <Scissors size={11} /> 여백 제거
-                  </button>
-                  <button
-                    onClick={() => {
-                      setInpaintPrompt("");
-                      setInpaintNat(null);
-                      const im = new window.Image();
-                      im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
-                      im.src = `/api/images/${selected.generationId}`;
-                      setInpaintLayerId(selected.id);
-                    }}
-                    className="flex items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10"
-                    title="영역 편집 — 칠한 영역을 프롬프트로 다시 그림 (generative fill)"
-                  >
-                    <Wand2 size={11} /> 영역 편집
-                  </button>
-                </div>
-                {/* 분리(오려내기) — 부위명 입력 → AI 추출 → 새 레이어. 쉼표로 여러 부위. */}
-                <div className="mb-2 flex items-center gap-1.5">
-                  <input
-                    value={extractInput}
-                    onChange={e => setExtractInput(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter") handleExtract();
-                    }}
-                    placeholder="분리할 부위 (예: 머리, 무기)"
-                    disabled={extracting}
-                    className="h-7 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-[11px] text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-                  />
-                  <button
-                    onClick={handleExtract}
-                    disabled={extracting || !extractInput.trim()}
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-[color:var(--accent)]/45 px-2 py-1 text-[11px] text-[color:var(--accent)] hover:bg-[color:var(--accent)]/10 disabled:opacity-40"
-                    title="부위를 AI로 추출해 새 레이어로 추가 (쉼표로 여러 부위)"
-                  >
-                    {extracting ? <Loader2 size={11} className="animate-spin" /> : <Scissors size={11} />} 분리
-                  </button>
-                </div>
                 <div className="mb-1 flex items-center text-[11px] font-semibold">
                   필터
                   <button
@@ -1387,7 +1390,7 @@ export function CanvasEditor({
                 </p>
               </>
             ) : (
-              <p className="text-[11px] text-text-muted/60">레이어를 선택하면 변형·필터가 표시됩니다.</p>
+              <p className="text-[11px] text-text-muted/60">레이어를 선택하면 필터가 표시됩니다.</p>
             )}
           </div>
         </aside>
