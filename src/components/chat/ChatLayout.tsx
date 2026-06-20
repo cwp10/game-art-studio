@@ -9,7 +9,6 @@ import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
 import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
 import { CanvasEditor } from "@/components/editor/CanvasEditor";
-import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
 import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
@@ -70,7 +69,6 @@ type EditTarget = {
   prompt?: string;
 };
 type Editing =
-  | ({ mode: "layer" } & EditTarget)
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image" } & EditTarget)
   | ({ mode: "normal_map" } & EditTarget)
@@ -102,8 +100,6 @@ export function ChatLayout() {
   const [composerPrefill, setComposerPrefill] = useState<{ text: string; seq: number } | null>(null);
   // Composer attachment — 업로드/카드 액션 직후 set. seq 카운터로 동일 generationId 도 새로 trigger.
   const [composerAttachment, setComposerAttachment] = useState<ComposerAttachment | null>(null);
-  // 레이어 분리 패널의 누적 추출 결과 — LayerCanvas 결과 그리드에 표시. layer 편집 진입 시 초기화.
-  const [layerResults, setLayerResults] = useState<Array<{ id: string; url: string; prompt: string }>>([]);
   // preset cache — handleSend 가 suffix 결합에 사용.
   const presetCache = useRef<Map<string, StylePreset>>(new Map());
   // 항상 최신 activeSessionId 를 가리킴 — handleSend 클로저 스테일 방지.
@@ -479,7 +475,6 @@ export function ChatLayout() {
         | "copy_prompt"
         | "resize"
         | "remove_bg"
-        | "layer_split"
         | "sprite_split"
         | "reskin"
         | "overlay"
@@ -501,7 +496,7 @@ export function ChatLayout() {
       },
     ) => {
       // 우측 편집 패널을 여는 공통 진입 — generationId·width·height 가드 후 editing 상태 set.
-      // (edit/layer_split/sprite_split/reskin/normal_map/overlay 가 공유)
+      // (sprite_split/reskin/normal_map/overlay 가 공유)
       const openEditPanel = (
         mode: Exclude<Editing, null>["mode"],
         extra?: Partial<Exclude<Editing, null>>,
@@ -597,10 +592,6 @@ export function ChatLayout() {
               inferSubjectModeFromPrompt(payload.prompt),
           });
         },
-        layer_split: () => {
-          openEditPanel("layer");
-          if (payload.generationId && payload.width && payload.height) setLayerResults([]);
-        },
         sprite_split: () => openEditPanel("sprite"),
         reskin: () => openEditPanel("reskin"),
       };
@@ -680,69 +671,6 @@ export function ChatLayout() {
       setSpriteGen(null);
     },
     [handleSend, setSpriteGen],
-  );
-
-  // LayerCanvas 가 submit 한 부위 이름들 → 부위별로 텍스트 기반 추출을 직렬 호출.
-  // 각 부위마다 handleSend(extractObject:true, 마스크 없음) → 라우트가 [extract] 마커 주입 →
-  // Claude 가 inpaint_image(extractObject=true, prompt=부위명) 호출 → 투명 배경 PNG 추출.
-  // 처리 중 LayerCanvas 는 busy 상태로 유지. 완료 후 사용자가 직접 닫는다.
-  const handleLayerSplit = useCallback(
-    async ({ parts, autoRestore }: { parts: string[]; autoRestore: boolean }) => {
-      if (!editing || editing.mode !== "layer") return;
-      const parentId = editing.generationId;
-      for (const part of parts) {
-        try {
-          const r = await handleSend(
-            `${part} 레이어 추출`,
-            {
-              attachmentGenerationIds: [parentId],
-              extractObject: true,
-              autoRestore,
-              // maskGenerationId 없음 — 텍스트 기반 추출
-            },
-          );
-          if (r) {
-            setLayerResults(prev => [
-              ...prev,
-              { id: r.generationId, url: `/api/images/${r.generationId}`, prompt: part },
-            ]);
-          }
-        } catch (e) {
-          console.error("[layer-extract]", part, e);
-          dispatch({
-            type: "sse",
-            event: { type: "error", message: `${part}: ${(e as Error).message}` },
-          });
-        }
-      }
-    },
-    [editing, handleSend],
-  );
-
-  // LayerCanvas "브러쉬로 분리" — 사용자가 칠한 마스크를 업로드한 뒤 부위명과 함께 추출.
-  // 마스크 기반(maskGenerationId)이라는 점만 handleLayerSplit 과 다르며, 결과 수집은 동일.
-  const handleLayerBrush = useCallback(
-    async ({ maskDataUrl, prompt }: { maskDataUrl: string; prompt: string }) => {
-      if (!editing || editing.mode !== "layer") return;
-      const parentId = editing.generationId;
-      try {
-        const maskId = await uploadMask(parentId, maskDataUrl);
-        const r = await handleSend(
-          `${prompt} 레이어 추출`,
-          { attachmentGenerationIds: [parentId], maskGenerationId: maskId, extractObject: true },
-        );
-        if (r) {
-          setLayerResults(prev => [
-            ...prev,
-            { id: r.generationId, url: `/api/images/${r.generationId}`, prompt },
-          ]);
-        }
-      } catch (e) {
-        console.error("[layer-brush]", e);
-        dispatch({ type: "sse", event: { type: "error", message: friendlyError((e as Error).message) } });
-      }
-    },
-    [editing, handleSend],
   );
 
   // [✨ 제안] — 사용자 입력을 LLM 으로 다양화한 3-4개 컨셉을 chat 에 카드로 표시.
@@ -883,20 +811,6 @@ export function ChatLayout() {
     if (!editing) return null;
     const panel = (() => {
       switch (editing.mode) {
-        case "layer":
-          return (
-            <LayerCanvas
-              parentGenerationId={editing.generationId}
-              imageUrl={editing.imageUrl}
-              imageWidth={editing.width}
-              imageHeight={editing.height}
-              busy={state.generating}
-              results={layerResults}
-              onSubmit={handleLayerSplit}
-              onBrushSubmit={handleLayerBrush}
-              onCancel={closeEditing}
-            />
-          );
         case "sprite":
           return (
             <SpriteCanvas
@@ -1200,12 +1114,22 @@ export function ChatLayout() {
               attachmentGenerationIds: [genId],
             })
           }
-          onExtract={(genId, prompt) =>
+          onExtract={(genId, prompt, autoRestore) =>
             handleSend(`${prompt} 레이어 추출`, {
               attachmentGenerationIds: [genId],
               extractObject: true,
+              autoRestore,
             })
           }
+          onExtractBrush={async (genId, maskDataUrl, prompt) => {
+            // 칠한 마스크를 업로드한 뒤 부위명과 함께 마스크 기반 추출(extractObject + maskGenerationId).
+            const maskId = await uploadMask(genId, maskDataUrl);
+            return handleSend(`${prompt} 레이어 추출`, {
+              attachmentGenerationIds: [genId],
+              maskGenerationId: maskId,
+              extractObject: true,
+            });
+          }}
           onInpaint={async (genId, maskDataUrl, prompt, referenceGenerationId) => {
             const maskId = await uploadMask(genId, maskDataUrl);
             // 참조 이미지가 있으면 첫=입력 둘째=참조 순서로 attachment 에 포함(MCP inpaint_image).

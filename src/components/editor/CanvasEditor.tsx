@@ -14,6 +14,7 @@ import {
   RotateCcw,
   Scissors,
   Sparkles,
+  Tags,
   Trash2,
   Undo2,
   Upload,
@@ -23,6 +24,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
 import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 import { useZoomPan } from "./useZoomPan";
@@ -99,9 +101,16 @@ type Props = {
   onUpscale: (
     generationId: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
-  /** 부위 추출(오려내기) — generationId 에서 prompt 부위를 투명 PNG 로 분리. 결과를 새 레이어로. */
+  /** 부위 추출(텍스트 기반) — generationId 에서 prompt 부위를 투명 PNG 로 분리. autoRestore=가려진 부위 복원. 결과를 새 레이어로. */
   onExtract: (
     generationId: string,
+    prompt: string,
+    autoRestore: boolean,
+  ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  /** 부위 추출(브러시 기반) — 칠한 마스크 영역을 prompt 이름의 투명 PNG 로 분리. 결과를 새 레이어로. */
+  onExtractBrush: (
+    generationId: string,
+    maskDataUrl: string,
     prompt: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
   /** 영역 편집(generative fill) — generationId + 마스크(dataUrl) + prompt(+선택 참조)로 칠한 영역 재생성. */
@@ -185,6 +194,7 @@ export function CanvasEditor({
   onRemoveBg,
   onUpscale,
   onExtract,
+  onExtractBrush,
   onInpaint,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
@@ -210,6 +220,13 @@ export function CanvasEditor({
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
   const [extractInput, setExtractInput] = useState("");
   const [extracting, setExtracting] = useState(false);
+  // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반). brush 는 인페인트 브러시 인프라 재사용.
+  const [extractMode, setExtractMode] = useState<"text" | "brush">("text");
+  // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
+  const [extractAutoRestore, setExtractAutoRestore] = useState(true);
+  // 부위명 AI 제안 — /api/layer-suggest. 하단 바라 드롭다운은 위로 연다(placement="bottom").
+  const [extractAiLoading, setExtractAiLoading] = useState(false);
+  const [extractAiSuggestions, setExtractAiSuggestions] = useState<AiSuggestion[] | null>(null);
   // 활성 도구 — 상단 메뉴 클릭 시 하단 바를 띄우는 단일 상태(즉시 실행하지 않음). 대상은 선택 레이어.
   const [tool, setTool] = useState<null | "inpaint" | "extract" | "bg" | "upscale" | "trim">(null);
   const [inpaintPrompt, setInpaintPrompt] = useState("");
@@ -475,7 +492,7 @@ export function CanvasEditor({
     try {
       let pushed = false;
       for (const part of parts) {
-        const r = await onExtract(layer.generationId, part);
+        const r = await onExtract(layer.generationId, part, extractAutoRestore);
         if (r) {
           if (!pushed) {
             pushUndo();
@@ -492,7 +509,26 @@ export function CanvasEditor({
     } finally {
       setExtracting(false);
     }
-  }, [layers, selectedLayerId, extracting, extractInput, onExtract, pushUndo]);
+  }, [layers, selectedLayerId, extracting, extractInput, extractAutoRestore, onExtract, pushUndo]);
+
+  // 부위명 AI 제안 — /api/layer-suggest. 선택 시 부위명을 쉼표로 이어 붙인다.
+  const handleExtractAiSuggest = useCallback(async () => {
+    if (extractAiLoading) return;
+    setExtractAiLoading(true);
+    try {
+      const res = await fetch("/api/layer-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요" }),
+      });
+      const data = (await res.json()) as { suggestions?: AiSuggestion[] };
+      setExtractAiSuggestions(data.suggestions ?? []);
+    } catch {
+      setExtractAiSuggestions([]);
+    } finally {
+      setExtractAiLoading(false);
+    }
+  }, [extractAiLoading]);
 
   // ── 영역 편집(generative fill) — 선택 레이어 위에 마스크를 칠하고 프롬프트로 재생성 ──────────
   // 소스 해상도 캔버스에 #ff0000 으로 칠하고, export 시 검정 배경 + 빨강 = 인페인트 영역(MaskCanvas 포맷).
@@ -501,6 +537,8 @@ export function CanvasEditor({
     setInpaintPrompt("");
     setInpaintNat(null);
     setExtractInput("");
+    setExtractMode("text");
+    setExtractAiSuggestions(null);
     setBrushTool("brush");
     setBrushPainted(false);
     setRefId(null);
@@ -510,14 +548,16 @@ export function CanvasEditor({
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
   }, []);
-  // 상단 메뉴 클릭 → 즉시 실행하지 않고 하단 바를 띄운다. inpaint 는 마스크용 원본 크기 로드.
+  // 상단 메뉴 클릭 → 즉시 실행하지 않고 하단 바를 띄운다. inpaint·extract 는 마스크 브러시용 원본 크기 로드.
   const openTool = useCallback(
     (kind: "inpaint" | "extract" | "bg" | "upscale" | "trim", layer: Layer) => {
       setTool(kind);
       setInpaintPrompt("");
       setExtractInput("");
+      setExtractMode("text");
+      setExtractAiSuggestions(null);
       setInpaintNat(null);
-      if (kind === "inpaint") {
+      if (kind === "inpaint" || kind === "extract") {
         const im = new window.Image();
         im.onload = () => setInpaintNat({ w: im.naturalWidth, h: im.naturalHeight });
         im.src = `/api/images/${layer.generationId}`;
@@ -676,6 +716,39 @@ export function CanvasEditor({
   );
   // 오브젝트 지우기 — 칠한 영역을 주변 배경으로 메워 오브젝트 제거(고정 프롬프트, 참조 없음).
   const handleObjectRemove = useCallback(() => runInpaint(OBJECT_REMOVE_PROMPT, null), [runInpaint]);
+
+  // 브러시 기반 분리 — 칠한 마스크 + 부위명으로 그 영역을 추출해 새 레이어로. 인페인트 export 와 동일 포맷.
+  const handleExtractBrush = useCallback(async () => {
+    const layer = layers.find(l => l.id === selectedLayerId);
+    const canvas = brushCanvasRef.current;
+    if (!layer || !canvas || extracting || !extractInput.trim() || !brushPainted) return;
+    // export: 소스 해상도 검정 배경 + 빨강 칠(MaskCanvas 포맷).
+    const out = document.createElement("canvas");
+    out.width = canvas.width;
+    out.height = canvas.height;
+    const octx = out.getContext("2d");
+    if (!octx) return;
+    octx.fillStyle = "#000000";
+    octx.fillRect(0, 0, out.width, out.height);
+    octx.drawImage(canvas, 0, 0);
+    const maskDataUrl = out.toDataURL("image/png");
+    setExtracting(true);
+    setError(null);
+    try {
+      const r = await onExtractBrush(layer.generationId, maskDataUrl, extractInput.trim());
+      if (r) {
+        pushUndo();
+        const nl = makeLayer(r.generationId);
+        setLayers(prev => [...prev, nl]);
+        setSelectedLayerId(nl.id);
+        closeTool();
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExtracting(false);
+    }
+  }, [layers, selectedLayerId, extracting, extractInput, brushPainted, onExtractBrush, pushUndo, closeTool]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -1016,6 +1089,60 @@ export function CanvasEditor({
   // 레일은 위→아래로 z-역순 표시(맨 위 = 최상단 = 배열 마지막).
   const railLayers = [...layers].reverse();
 
+  // 마스크 브러시 컨트롤(브러시/지우개·크기·되돌리기·전체지우기) — 영역 편집 + 브러시 분리 바가 공유.
+  const brushControls = (
+    <>
+      <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+        <button
+          onClick={() => setBrushTool("brush")}
+          className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+            brushTool === "brush"
+              ? "bg-[color:var(--accent)]/20 text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+          title="브러시 — 영역을 칠하기"
+        >
+          <Brush size={12} /> 브러시
+        </button>
+        <button
+          onClick={() => setBrushTool("eraser")}
+          className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+            brushTool === "eraser"
+              ? "bg-[color:var(--accent)]/20 text-text-primary"
+              : "text-text-muted hover:text-text-primary"
+          }`}
+          title="지우개 — 칠한 영역 깎아내기"
+        >
+          <Eraser size={12} /> 지우개
+        </button>
+      </div>
+      <input
+        type="range"
+        min={5}
+        max={120}
+        value={inpaintBrush}
+        onChange={e => setInpaintBrush(Number(e.target.value))}
+        className="w-20 accent-[color:var(--accent)]"
+        title="브러시 크기"
+      />
+      <button
+        onClick={undoBrushStroke}
+        disabled={brushUndoCount === 0}
+        className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30"
+        title="직전 스트로크 되돌리기"
+      >
+        <RotateCcw size={12} /> 되돌리기
+      </button>
+      <button
+        onClick={clearBrush}
+        className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+        title="칠한 영역 전체 지우기"
+      >
+        전체지우기
+      </button>
+    </>
+  );
+
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-bg-card">
       {/* 상단바: 대화 복귀 + 세션 맥락 + undo/redo */}
@@ -1207,9 +1334,11 @@ export function CanvasEditor({
                         style={{ filter: cssFilter(layer.filters), pointerEvents: "none" }}
                         draggable={false}
                       />
-                      {/* 영역 편집 인라인 마스크 — 레이어와 같은 transform 을 CSS 가 적용(표시),
-                          포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). 내부 res = 원본. */}
-                      {tool === "inpaint" && selectedLayerId === layer.id && inpaintNat && (
+                      {/* 인라인 마스크 브러시 — 영역 편집(inpaint) + 브러시 기반 분리(extract)가 공유.
+                          레이어와 같은 transform 을 CSS 가 적용(표시), 포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). */}
+                      {(tool === "inpaint" || (tool === "extract" && extractMode === "brush")) &&
+                        selectedLayerId === layer.id &&
+                        inpaintNat && (
                         <canvas
                           ref={brushCanvasRef}
                           width={inpaintNat.w}
@@ -1588,55 +1717,7 @@ export function CanvasEditor({
               <>
                 <Wand2 size={14} className="text-[color:var(--accent)]" />
                 <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
-                {/* 브러시/지우개 토글 — 지우개는 destination-out 으로 칠한 빨강을 깎아낸다. */}
-                <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                  <button
-                    onClick={() => setBrushTool("brush")}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      brushTool === "brush"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="브러시 — 다시 그릴 영역을 칠하기"
-                  >
-                    <Brush size={12} /> 브러시
-                  </button>
-                  <button
-                    onClick={() => setBrushTool("eraser")}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      brushTool === "eraser"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="지우개 — 칠한 영역 깎아내기"
-                  >
-                    <Eraser size={12} /> 지우개
-                  </button>
-                </div>
-                <input
-                  type="range"
-                  min={5}
-                  max={120}
-                  value={inpaintBrush}
-                  onChange={e => setInpaintBrush(Number(e.target.value))}
-                  className="w-20 accent-[color:var(--accent)]"
-                  title="브러시 크기"
-                />
-                <button
-                  onClick={undoBrushStroke}
-                  disabled={brushUndoCount === 0}
-                  className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-30"
-                  title="직전 스트로크 되돌리기"
-                >
-                  <RotateCcw size={12} /> 되돌리기
-                </button>
-                <button
-                  onClick={clearBrush}
-                  className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-                  title="칠한 영역 전체 지우기"
-                >
-                  전체지우기
-                </button>
+                {brushControls}
                 {/* 참조 이미지 팝오버(선택) — 선택 시 인페인트의 둘째 첨부(참조)로 전달. */}
                 <div className="relative">
                   <button
@@ -1741,20 +1822,78 @@ export function CanvasEditor({
               <>
                 <Scissors size={14} className="text-[color:var(--accent)]" />
                 <span className="text-[11px] font-medium text-text-primary">레이어 분리</span>
-                <span className="text-[11px] text-text-muted">분리할 부위 (쉼표로 여러 개)</span>
+                {/* 입력(부위명)/브러시(칠한 영역) 서브모드 토글 */}
+                <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                  <button
+                    onClick={() => setExtractMode("text")}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      extractMode === "text"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="부위 이름으로 분리 (AI)"
+                  >
+                    <Tags size={12} /> 입력
+                  </button>
+                  <button
+                    onClick={() => setExtractMode("brush")}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      extractMode === "brush"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="칠한 영역으로 분리 (브러시 마스크)"
+                  >
+                    <Brush size={12} /> 브러시
+                  </button>
+                </div>
+                {extractMode === "brush" && brushControls}
                 <input
                   value={extractInput}
                   onChange={e => setExtractInput(e.target.value)}
                   onKeyDown={e => {
-                    if (e.key === "Enter") handleExtract();
+                    if (e.key !== "Enter") return;
+                    if (extractMode === "brush") handleExtractBrush();
+                    else handleExtract();
                   }}
-                  placeholder="예: 머리, 무기"
+                  placeholder={extractMode === "brush" ? "이 영역의 이름 (예: 머리)" : "예: 머리, 무기"}
                   disabled={extracting}
                   className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
                 />
+                {extractMode === "text" && (
+                  <>
+                    {/* AI 부위 제안 — 선택 시 부위명을 쉼표로 이어 붙임. 하단 바라 위로 연다. */}
+                    <div className="relative">
+                      <AiSuggestButton loading={extractAiLoading} onClick={handleExtractAiSuggest} compact />
+                      {extractAiSuggestions && (
+                        <AiSuggestDropdown
+                          suggestions={extractAiSuggestions}
+                          placement="bottom"
+                          width="w-[280px]"
+                          onSelect={body =>
+                            setExtractInput(prev => (prev.trim() ? `${prev.trim()}, ${body}` : body))
+                          }
+                          onClose={() => setExtractAiSuggestions(null)}
+                        />
+                      )}
+                    </div>
+                    {/* 원본 복원 토글 — 가려진 부위까지 복원(off=보이는 픽셀만). 텍스트 추출에서만 유효. */}
+                    <button
+                      onClick={() => setExtractAutoRestore(v => !v)}
+                      className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${
+                        extractAutoRestore
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary"
+                          : "border-border text-text-muted hover:text-text-primary"
+                      }`}
+                      title="가려진 부위까지 복원해 완전한 레이어로 추출 (끄면 보이는 부분만)"
+                    >
+                      원본 복원 {extractAutoRestore ? "ON" : "OFF"}
+                    </button>
+                  </>
+                )}
                 <button
-                  onClick={handleExtract}
-                  disabled={extracting || !extractInput.trim()}
+                  onClick={extractMode === "brush" ? handleExtractBrush : handleExtract}
+                  disabled={extracting || !extractInput.trim() || (extractMode === "brush" && !brushPainted)}
                   className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
                 >
                   {extracting ? (

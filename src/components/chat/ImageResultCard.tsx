@@ -8,7 +8,6 @@ import {
   Film,
   Gamepad2,
   Grid3x3,
-  Layers,
   Link2,
   Loader2,
   Map,
@@ -27,7 +26,6 @@ type Action =
   | "copy_prompt"
   | "resize"
   | "remove_bg"
-  | "layer_split"
   | "sprite_split"
   | "reskin"
   | "overlay"
@@ -192,13 +190,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               title="편집 — 캔버스 에디터에서 레이어 합성·자유 변형·필터·크롭·영역편집·배경제거·업스케일·여백제거"
             >
               <Edit3 size={12} /> 편집
-            </button>
-            <button
-              onClick={() => onAction?.("layer_split")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="레이어 분리 — 부위별로 색을 칠해 색별 PNG 로 추출"
-            >
-              <Layers size={12} /> 레이어
             </button>
             {kind !== "spritesheet" && (
               <button

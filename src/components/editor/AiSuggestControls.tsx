@@ -37,11 +37,14 @@ export function AiSuggestDropdown({
   onSelect,
   onClose,
   width = "w-[340px]",
+  placement = "top",
 }: {
   suggestions: AiSuggestion[];
   onSelect: (body: string) => void;
   onClose: () => void;
   width?: string;
+  /** "top"(기본) = 버튼 아래로 열림. "bottom" = 위로 열림(하단 바 등 화면 아래쪽 버튼용). */
+  placement?: "top" | "bottom";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -55,7 +58,7 @@ export function AiSuggestDropdown({
   return (
     <div
       ref={ref}
-      className={`absolute right-0 top-full z-30 mt-1 ${width} space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl`}
+      className={`absolute right-0 z-30 ${placement === "bottom" ? "bottom-full mb-1" : "top-full mt-1"} ${width} space-y-1 rounded-xl border border-border bg-bg-panel p-2 shadow-xl`}
     >
       {suggestions.map((s, i) => (
         <div

@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-21 (편집(MaskCanvas)→캔버스 영역편집 통합 완료 + MaskCanvas 은퇴 / ▶다음: Step 3 영속화)
+마지막 업데이트: 2026-06-21 (레이어 분리(LayerCanvas)→캔버스 통합 완료 + 은퇴 / ▶다음: Step 3 영속화)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -66,11 +66,19 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 
 **진입점 단일화 + 원본크기 기본(2026-06-21, 사용자 요청)**: 결과카드 "편집"(edit/initialTool 직진입) 버튼 제거, "캔버스"(canvas_edit) 버튼을 "편집"으로 리네임(Edit3 아이콘) → 진입은 일반 캔버스 1개로 통일. 직진입용 `initialTool` 기계(prop·init effect·openCanvas 인자·canvasOpen 필드·Action union "edit"·ImageResultCard Wand2 import) 전부 죽은 코드라 정리. **캔버스 진입 시 출력 규격 기본값=시드 원본 이미지 크기**(마운트 effect로 `setCustomSize(naturalW/H)`, 프리셋 0 "자유"가 customSize 따름). 하단 도구 바 살짝 띄움(bottom-4→bottom-6). 검증: tsc 0 / build 성공 / 변경파일 lint 클린(ChatLayout 2 error는 기존). 4파일(CanvasEditor·ChatLayout·ImageResultCard·MessageList).
 
+### 레이어 분리(LayerCanvas)→캔버스 통합 + 은퇴 완료 — 2026-06-21
+MaskCanvas 통합과 동일 패턴. 캔버스 "레이어 분리"가 텍스트 추출만 있었는데 **풀 패리티**로 확장(사용자 결정). 백엔드 변경 0.
+- **CanvasEditor**: extract 도구에 `extractMode: "text"|"brush"` 서브모드. **브러시 기반 추출**(인페인트 브러시 인프라 brushCanvasRef·onBrush*·screenToSource·inpaintNat·undo·eraser·brushPainted 그대로 재사용 — 브러시 캔버스 렌더 조건 `inpaint || (extract && brush)`, openTool이 extract에도 inpaintNat 로드). autoRestore 토글(가려진 부위 복원 on/off), AI 부위 제안(/api/layer-suggest, AiSuggestDropdown placement="bottom"). 브러시 컨트롤을 `brushControls` JSX 변수로 추출해 영역편집·extract-brush 공유. `onExtract` 3-arg(+autoRestore), 신규 `onExtractBrush` prop. handleExtractBrush는 closeTool **뒤** 선언(TDZ 회피). import +Tags, +AiSuggest*.
+- **AiSuggestControls**: `AiSuggestDropdown`에 backward-compatible `placement?:"top"|"bottom"`(기본 top, 하단 바용 위로 열기). 기존 Reskin/SpriteGen 영향 0.
+- **ChatLayout**: onExtract autoRestore 배선 + onExtractBrush(uploadMask+maskGenerationId+extractObject). **LayerCanvas 은퇴**(import·Editing "layer"모드·handleLayerSplit·handleLayerBrush·layerResults·render case·layer_split 핸들러/union 제거).
+- **ImageResultCard/MessageList**: "레이어" 버튼+layer_split union 제거(Layers import 정리). **삭제**: LayerCanvas.tsx.
+- 검증(visual-qa PASS): tsc 0 / build 성공 / 변경파일 lint 클린(ChatLayout 2 error는 기존 140/1215). 경계면 3종 prop 일치, layer 실코드 잔존 0(남은 "LayerCanvas"는 route/useZoomPan/client.ts 주석). 헤드리스 한계: 브러시 추출 정밀도·AI 제안·autoRestore 결과는 사용자 테스트 필요.
+- 산출물: `_workspace/contract_layer-merge.md`, `_workspace/qa_layer-merge_summary.md`.
+
 ## ▶ 다음 작업
 
-- **Step 3:** 편집 상태 영속화(DB) → 닫아도 레이어 배치 복원. 현재 휘발.
+- **Step 3(보류 중, 사용자가 "레이어 분리 먼저" 지시로 잠시 미룸):** 편집 상태 영속화(DB) → 닫아도 레이어 배치 복원. 현재 휘발. 미결정(물어볼 것): 복원 동작(자동 저장+자동 복원 vs 수동), 저장 키=seedGenerationId 기준 예정.
 - **(선택)** 나머지 패널(리스킨·노멀맵·9-slice·버튼상태·스프라이트) UX 일관성(원래 과제).
-- **(선택)** 결과카드 "레이어" 버튼도 캔버스 분리와 중복 — 은퇴 검토.
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.
