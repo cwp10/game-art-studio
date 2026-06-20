@@ -128,6 +128,41 @@ export async function recolorImage(args: {
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
+/**
+ * 여러 레이어를 한 캔버스에 합성(flatten) — POST /api/composite (sharp). CanvasEditor 가 사용.
+ * 레이어별 transform(scale·rotation·flip·stretch)과 filters 를 그대로 전달. 신규 필드는 전부
+ * 옵셔널 — 미지정 시 기존 동작과 동일(하위호환). 결과는 kind='composite' generation.
+ */
+export type CompositeLayerArg = {
+  generationId: string;
+  opacity?: number; // 0~100
+  x?: number; // 출력 캔버스 중앙 기준 px
+  y?: number;
+  scale?: number; // 1.0 = contain-fit
+  rotation?: number; // 도(°), 시계방향
+  flipH?: boolean; // 좌우반전
+  stretchW?: number; // 가로 늘이기 배수 (1.0=원본)
+  stretchH?: number; // 세로 늘이기 배수 (1.0=원본)
+  filters?: {
+    brightness?: number; // % (100=중립)
+    saturation?: number; // % (100=중립)
+    hue?: number; // ° (0=중립)
+    contrast?: number; // % (100=중립)
+    blur?: number; // px (0=없음)
+  };
+};
+
+export async function compositeScene(args: {
+  layers: CompositeLayerArg[];
+  sessionId?: string;
+  outputWidth?: number;
+  outputHeight?: number;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await jsonFetch("/api/composite", "POST", args);
+  if (!r.ok) throw new Error(`compositeScene failed: ${await extractError(r)}`);
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
 export type Suggestion = { label: string; body: string };
 
 /**

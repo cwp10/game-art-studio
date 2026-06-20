@@ -8,21 +8,36 @@ export const runtime = "nodejs";
  * POST /api/composite — 씬 프리뷰어. N 개 generation 레이어를 단일 PNG 로 합성해 generation 행으로 저장.
  *
  * Request:
- *   { layers: [{ generationId: string, opacity: number }], sessionId?: string,
- *     outputWidth?: number, outputHeight?: number }
+ *   { layers: [{ generationId, opacity?, x?, y?, scale?, rotation?, flipH?, stretchW?, stretchH?,
+ *                filters?: { brightness?, saturation?, hue?, contrast?, blur? } }],
+ *     sessionId?: string, outputWidth?: number, outputHeight?: number }
  *   - layers 는 입력 순서대로 합성(배열[0]=최하단). opacity 0~100.
+ *   - 레이어 변형은 resize/stretch → rotate → flipH → filters 순으로 굽고 opacity·x/y 로 배치한다.
+ *     신규 필드(rotation/flipH/stretchW/stretchH/filters)는 전부 옵셔널, 미지정/중립이면 기존 동작.
  *   - outputWidth/outputHeight 미지정 시 첫 레이어 이미지의 실제 크기로 폴백.
  *
  * Response:
  *   { generationId: string, imagePath: string, width: number, height: number }
  */
 
+type CompositeLayerFilters = {
+  brightness?: number;
+  saturation?: number;
+  hue?: number;
+  contrast?: number;
+  blur?: number;
+};
 type CompositeLayerInput = {
   generationId?: string;
   opacity?: number;
   x?: number;
   y?: number;
   scale?: number;
+  rotation?: number;
+  flipH?: boolean;
+  stretchW?: number;
+  stretchH?: number;
+  filters?: CompositeLayerFilters;
 };
 type CompositeBody = {
   layers?: CompositeLayerInput[];
@@ -60,6 +75,11 @@ export async function POST(req: NextRequest) {
       x: l.x,
       y: l.y,
       scale: l.scale,
+      rotation: l.rotation,
+      flipH: l.flipH,
+      stretchW: l.stretchW,
+      stretchH: l.stretchH,
+      filters: l.filters,
     })),
     sessionId: body.sessionId,
     outputWidth: body.outputWidth,

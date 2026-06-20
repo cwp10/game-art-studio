@@ -1,9 +1,34 @@
-마지막 업데이트: 2026-06-20 (rotation 추가)
+마지막 업데이트: 2026-06-20 (통합 캔버스 에디터 1단계)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
 
 ## 완료된 작업
+
+### 통합 캔버스 에디터 1단계 — 2026-06-20
+편집·이미지 도구·씬에 추가·레이어 분리를 하나의 "포토샵식 전체전환 레이어 캔버스"로 통합하는 작업의 1단계(결정적/비-AI 부분만).
+**동기:** 사용자가 합성·오려내기·크롭·색보정을 이 도구로 끝까지 못 해서 매번 포토샵으로 라운드트립 → 그 이탈을 없애는 게 목표. (DB 근거: composite/resize/filter 실사용, normal_map 0건 등)
+
+**설계 결정(돌아온 사용자가 대안 검토 예정):**
+- D1 진입=추가형(결과카드 ⋯ "🎨 캔버스 편집" 신규, 기존 패널 보존, 회귀0). 검증 후 진입점 교체는 차후.
+- D2 1단계=결정적만(합성/자유변형/크롭/필터/배경제거1회/드래그정렬/undo). 정밀분리·브러시 영역편집(생성형)은 **2단계 보류**.
+- D3 크롭=캔버스 프레이밍(출력 W×H + 레이어 배치, 정밀 마퀴크롭 없음). D4 편집상태=휘발(합친 결과만 카드 저장).
+
+**신규 파일:** `src/components/editor/CanvasEditor.tsx` (950줄 — 전체전환 셸, 자유변형(모서리=크기/노브=회전/변=늘이기), 레이어 레일+드래그정렬, 선택레이어 필터, undo/redo, 에셋피커, 합치기)
+**백엔드 확장:** `/api/composite`·`composite-runner.ts`·`composite-layers.ts` — 레이어별 `rotation`(route에서 silently drop되던 버그 수정)·`flipH`·`stretchW/H`·`filters{brightness,saturation,hue,contrast,blur}` 추가. sharp 순서 scale→rotate→flip, contrast는 채널배열 linear로 알파 보존, 신규필드 전부 옵셔널(byte-identical 회귀0).
+**배선:** `ChatLayout.tsx`(canvasOpen 상태+canvas_edit 핸들러+inset-0 전체전환 렌더+onRemoveBg), `ImageResultCard.tsx`(canvas_edit 액션), `client.ts`(compositeScene 래퍼), `MessageList.tsx`.
+**참고 산출물:** `_workspace/wireframe-canvas-editor.html`(인터랙티브 와이어프레임), `_workspace/contract_canvas-editor.md`(계약), `_workspace/qa_canvas_summary.md`(검증).
+
+**검증:** tsc 0 / build exit0 / 변경파일 lint클린 / 합성스모크(alpha보존+byte-identical) / 실제PNG 육안(회전·flip·stretch·filters+투명보존) / 경계면 일치 / 기존 8패널 변경0.
+**주의(차후):** flip↔rotate 순서 정합 위해 CanvasEditor 미리보기는 flip을 rotate 뒤 적용(scaleX(-1) 분리)하도록 수정함. baked blur는 sigma=px/2라 CSS 미리보기보다 옅게 보이는 건 정상.
+**1차 피드백 반영(2026-06-20, CanvasEditor만 수정 954→1112줄):**
+1. 레이어 드래그 정렬 견고화 — `onRailGripDown`에 setPointerCapture + 드래그 행 opacity 피드백.
+2. 면(변) 핸들 = 포토샵식 반대편 앵커 — 핸들을 t/b/l/r로 구분, 그랩 변만 이동하고 반대 변 고정(stretchW/H + 레이어 중심 x/y 보정, 회전 로컬축 투영). 모서리는 균일 scale 유지.
+3. (#2가 포토샵 기준)
+4. 레이어 추가 3경로 — 피커 탭 "이 세션"/"갤러리(전체 listGenerations)" + "⬆ 업로드"(uploadImage) 버튼 + 캔버스 이미지 드롭(dropOver 오버레이). 백엔드 변경 0.
+검증: tsc 0 / build exit0 / CanvasEditor lint 클린 / 기존 패널 회귀 0.
+
+**다음 단계:** 사용자 브라우저 확인(인터랙션, 특히 #1 드래그·#2 한쪽늘이기 회전 상태) → OK면 진입점 교체(D1) 검토 → 2단계(분리·브러시 영역편집 생성형) 흡수.
 
 ### 씬 프리뷰어 Phase 1 — 2026-06-20
 여러 생성 이미지를 레이어로 쌓아 게임 화면처럼 미리보고 PNG로 병합하는 기능.

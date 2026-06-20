@@ -18,6 +18,7 @@ import {
   Palette,
   RotateCw,
   Scissors,
+  Wand2,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -40,6 +41,7 @@ type Action =
   | "add_to_scene"
   | "open_nine_slice"
   | "open_button_states"
+  | "canvas_edit"
   | "reference"
   | "compare";
 
@@ -282,6 +284,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                     title="씬 합성에 추가 — 여러 이미지를 레이어로 쌓아 한 장으로 병합"
                   >
                     <Clapperboard size={12} /> 씬에 추가
+                  </button>
+                  <button
+                    onClick={() => { onAction?.("canvas_edit"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="캔버스 편집 — 여러 레이어를 자유 변형·필터하며 한 장으로 합치는 통합 캔버스"
+                  >
+                    <Wand2 size={12} /> 🎨 캔버스 편집
                   </button>
                   {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
                   {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (

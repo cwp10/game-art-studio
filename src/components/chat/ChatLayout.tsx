@@ -8,6 +8,7 @@ import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
 import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
+import { CanvasEditor } from "@/components/editor/CanvasEditor";
 import { ImageToolsPanel, POST_FILTER_DEFS, type FilterArg } from "@/components/editor/ImageToolsPanel";
 import { LayerCanvas } from "@/components/editor/LayerCanvas";
 import { MaskCanvas } from "@/components/editor/MaskCanvas";
@@ -94,6 +95,8 @@ export function ChatLayout() {
   const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
   // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
   const [buttonStateOpen, setButtonStateOpen] = useState<{ generationId: string } | null>(null);
+  // 통합 캔버스 에디터 — 전체전환(inset-0). seedGenerationId 로 첫 레이어. null 이면 닫힘.
+  const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -470,6 +473,7 @@ export function ChatLayout() {
   const closeScene = useCallback(() => setSceneOpen(null), []);
   const closeNineSlice = useCallback(() => setNineSliceOpen(null), []);
   const closeButtonState = useCallback(() => setButtonStateOpen(null), []);
+  const closeCanvas = useCallback(() => setCanvasOpen(null), []);
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
   // 자동 입력되어 보내짐 — 즉 버튼은 단축어, 실행 경로는 동일하게 자연어 → Claude".
@@ -494,6 +498,7 @@ export function ChatLayout() {
         | "add_to_scene"
         | "open_nine_slice"
         | "open_button_states"
+        | "canvas_edit"
         | "reference"
         | "compare",
       payload: {
@@ -562,6 +567,16 @@ export function ChatLayout() {
           setEditing(null);
           setSpriteGen(null);
           setSceneOpen({ seedGenerationId: payload.generationId });
+        },
+        canvas_edit: () => {
+          if (!payload.generationId) return;
+          // 전체전환 캔버스 에디터 — 다른 패널을 모두 닫고 진입.
+          setEditing(null);
+          setSpriteGen(null);
+          setSceneOpen(null);
+          setNineSliceOpen(null);
+          setButtonStateOpen(null);
+          setCanvasOpen({ seedGenerationId: payload.generationId });
         },
         open_nine_slice: () => {
           if (!payload.generationId) return;
@@ -1206,7 +1221,8 @@ export function ChatLayout() {
     spriteGen !== null ||
     sceneOpen !== null ||
     nineSliceOpen !== null ||
-    buttonStateOpen !== null;
+    buttonStateOpen !== null ||
+    canvasOpen !== null;
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
@@ -1399,6 +1415,32 @@ export function ChatLayout() {
             }}
           />
         </div>
+      )}
+      {canvasOpen && (
+        // 전체전환(full-takeover) — CanvasEditor 가 내부에서 fixed inset-0 z-40 으로 렌더.
+        <CanvasEditor
+          seedGenerationId={canvasOpen.seedGenerationId}
+          sessionId={state.activeSessionId}
+          busy={state.generating}
+          onClose={closeCanvas}
+          onComposited={res => {
+            dispatch({
+              type: "add_result_card",
+              tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+              userText: "🎨 캔버스 합성",
+              generationId: res.generationId,
+              width: res.width,
+              height: res.height,
+              kind: "composite",
+            });
+            closeCanvas();
+          }}
+          onRemoveBg={genId =>
+            handleSend("이 이미지의 배경을 투명하게 제거해줘.", {
+              attachmentGenerationIds: [genId],
+            })
+          }
+        />
       )}
       <PromptLibrarySheet
         open={libOpen}

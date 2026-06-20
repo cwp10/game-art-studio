@@ -28,6 +28,7 @@ type Props = {
       | "add_to_scene"
       | "open_nine_slice"
       | "open_button_states"
+      | "canvas_edit"
       | "reference"
       | "compare",
     payload: {

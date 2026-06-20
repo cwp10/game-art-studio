@@ -9,7 +9,7 @@ import {
   toRelative,
   resolveImagePath,
 } from "../util/paths";
-import { mergeImages } from "./composite-layers";
+import { mergeImages, type LayerFilters } from "./composite-layers";
 
 /**
  * 씬 합성 공통 오케스트레이터. Next 라우트(/api/composite)와 MCP 도구(composite_scene)가
@@ -27,6 +27,10 @@ export interface CompositeLayerSpec {
   y?: number;
   scale?: number; // 1.0 = contain-fit
   rotation?: number; // 회전 각도 도(°), 기본 0
+  flipH?: boolean; // 좌우반전, 기본 false
+  stretchW?: number; // 가로 늘이기 배수, 기본 1 (scale 과 곱해짐)
+  stretchH?: number; // 세로 늘이기 배수, 기본 1
+  filters?: LayerFilters; // 색보정(밝기/채도/색조/대비/흐림), 중립이면 패스
 }
 
 export interface RunCompositeParams {
@@ -59,6 +63,10 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
     y?: number;
     scale?: number;
     rotation?: number;
+    flipH?: boolean;
+    stretchW?: number;
+    stretchH?: number;
+    filters?: LayerFilters;
   }[] = [];
   for (const [i, l] of layers.entries()) {
     if (!l.generationId) {
@@ -77,6 +85,10 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       y: typeof l.y === "number" ? l.y : undefined,
       scale: typeof l.scale === "number" ? l.scale : undefined,
       rotation: typeof l.rotation === "number" ? l.rotation : undefined,
+      flipH: typeof l.flipH === "boolean" ? l.flipH : undefined,
+      stretchW: typeof l.stretchW === "number" ? l.stretchW : undefined,
+      stretchH: typeof l.stretchH === "number" ? l.stretchH : undefined,
+      filters: l.filters,
     });
   }
 
@@ -106,6 +118,10 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       y: r.y,
       scale: r.scale,
       rotation: r.rotation,
+      flipH: r.flipH,
+      stretchW: r.stretchW,
+      stretchH: r.stretchH,
+      filters: r.filters,
     })),
     outputWidth,
     outputHeight,
