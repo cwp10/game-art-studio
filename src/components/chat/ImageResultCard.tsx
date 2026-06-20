@@ -14,12 +14,13 @@ import {
   Link2,
   Loader2,
   Map,
+  MoreHorizontal,
   Palette,
   RotateCw,
   Scissors,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCopyPrompt } from "@/lib/hooks/useCopyPrompt";
 
 type Action =
@@ -69,6 +70,8 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // 라이트박스: Esc 닫기
   useEffect(() => {
@@ -77,6 +80,16 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [lightbox]);
+
+  // ⋯ 드롭다운: 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
 
   // 라이트박스 열기: 큰 이미지 onLoad 전 placeholder 표시를 위해 로딩 상태 리셋
   function openLightbox() {
@@ -216,72 +229,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 <Film size={12} /> 스프라이트
               </button>
             )}
-            {kind !== "spritesheet" && (
-              <button
-                onClick={() => onAction?.("reskin")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경)"
-              >
-                <Palette size={12} /> 리스킨
-              </button>
-            )}
-            {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
-              <button
-                onClick={() => onAction?.("make_normal_map")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="노멀맵 — 이 이미지의 라이팅용 노멀맵을 생성"
-              >
-                <Map size={12} /> 노멀맵
-              </button>
-            )}
-            <button
-              onClick={() => onAction?.("compare")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
-            >
-              <Columns2 size={12} /> 비교
-            </button>
-            <button
-              onClick={() => onAction?.("add_to_scene")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="씬 합성에 추가 — 여러 이미지를 레이어로 쌓아 한 장으로 병합"
-            >
-              <Clapperboard size={12} /> 씬에 추가
-            </button>
-            {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
-            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (
-              <button
-                onClick={() => onAction?.("open_nine_slice")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
-              >
-                <Scissors size={12} /> 9-slice
-              </button>
-            )}
-            {/* 버튼 상태 — 단일 일반 이미지(버튼/아이콘)에만. 시트/합성/9-slice/이미 버튼상태 결과는 제외. */}
-            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "button_state"].includes(kind ?? "") && (
-              <button
-                onClick={() => onAction?.("open_button_states")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="버튼 상태 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
-              >
-                <Gamepad2 size={12} /> 버튼 상태
-              </button>
-            )}
-            <button
-              onClick={() => onAction?.("reference")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="이 이미지를 다음 메시지의 reference 로 첨부 → 자연어로 변형 지시"
-            >
-              <Link2 size={12} /> 참조
-            </button>
-            <button
-              onClick={() => onAction?.("duplicate")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="같은 프롬프트로 한 번 더 (variation 효과)"
-            >
-              <RotateCw size={12} /> 복제
-            </button>
             <button
               onClick={download}
               disabled={downloading}
@@ -291,6 +238,88 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
               {downloading ? "저장 중" : "저장"}
             </button>
+            {/* ⋯ 더보기 — 자주 안 쓰는 액션을 위쪽 팝업 메뉴로 숨김 (편집 패널 열린 좁은 카드에서 wrap 방지). */}
+            <div ref={menuRef} className="relative">
+              <button
+                onClick={() => setMenuOpen(o => !o)}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="더보기"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+              >
+                <MoreHorizontal size={12} />
+              </button>
+              {menuOpen && (
+                <div className="absolute bottom-full right-0 z-50 mb-1 flex min-w-[8rem] flex-col rounded-lg border border-border bg-bg-card p-1 shadow-lg">
+                  {kind !== "spritesheet" && (
+                    <button
+                      onClick={() => { onAction?.("reskin"); setMenuOpen(false); }}
+                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경)"
+                    >
+                      <Palette size={12} /> 리스킨
+                    </button>
+                  )}
+                  {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
+                    <button
+                      onClick={() => { onAction?.("make_normal_map"); setMenuOpen(false); }}
+                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="노멀맵 — 이 이미지의 라이팅용 노멀맵을 생성"
+                    >
+                      <Map size={12} /> 노멀맵
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { onAction?.("compare"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
+                  >
+                    <Columns2 size={12} /> 비교
+                  </button>
+                  <button
+                    onClick={() => { onAction?.("add_to_scene"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="씬 합성에 추가 — 여러 이미지를 레이어로 쌓아 한 장으로 병합"
+                  >
+                    <Clapperboard size={12} /> 씬에 추가
+                  </button>
+                  {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
+                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (
+                    <button
+                      onClick={() => { onAction?.("open_nine_slice"); setMenuOpen(false); }}
+                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
+                    >
+                      <Scissors size={12} /> 9-slice
+                    </button>
+                  )}
+                  {/* 버튼 상태 — 단일 일반 이미지(버튼/아이콘)에만. 시트/합성/9-slice/이미 버튼상태 결과는 제외. */}
+                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "button_state"].includes(kind ?? "") && (
+                    <button
+                      onClick={() => { onAction?.("open_button_states"); setMenuOpen(false); }}
+                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="버튼 상태 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
+                    >
+                      <Gamepad2 size={12} /> 버튼 상태
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { onAction?.("reference"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="이 이미지를 다음 메시지의 reference 로 첨부 → 자연어로 변형 지시"
+                  >
+                    <Link2 size={12} /> 참조
+                  </button>
+                  <button
+                    onClick={() => { onAction?.("duplicate"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="같은 프롬프트로 한 번 더 (variation 효과)"
+                  >
+                    <RotateCw size={12} /> 복제
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </figcaption>
