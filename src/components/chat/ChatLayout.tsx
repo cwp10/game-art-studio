@@ -1440,6 +1440,11 @@ export function ChatLayout() {
               attachmentGenerationIds: [genId],
             })
           }
+          onUpscale={genId =>
+            handleSend("이 이미지를 고화질로 업스케일해줘. 선명도와 디테일을 향상시켜줘.", {
+              attachmentGenerationIds: [genId],
+            })
+          }
         />
       )}
       <PromptLibrarySheet

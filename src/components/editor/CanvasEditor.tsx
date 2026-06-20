@@ -9,6 +9,7 @@ import {
   Plus,
   Redo2,
   RotateCcw,
+  Scissors,
   Sparkles,
   Trash2,
   Undo2,
@@ -18,7 +19,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { compositeScene, listGenerations, uploadImage } from "@/lib/api/client";
+import { compositeScene, filterImage, listGenerations, uploadImage } from "@/lib/api/client";
 import type { Generation } from "@/types/db";
 import { useZoomPan } from "./useZoomPan";
 
@@ -91,6 +92,9 @@ type Props = {
   onRemoveBg: (
     generationId: string,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  onUpscale: (
+    generationId: string,
+  ) => Promise<{ generationId: string; width: number; height: number } | null>;
 };
 
 let layerSeq = 0;
@@ -146,6 +150,7 @@ export function CanvasEditor({
   onClose,
   onComposited,
   onRemoveBg,
+  onUpscale,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -164,7 +169,8 @@ export function CanvasEditor({
   // 레이어 레일 드래그 정렬 중인 행 — 시각 피드백.
   const [draggingRowId, setDraggingRowId] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
-  const [removingBg, setRemovingBg] = useState(false);
+  // 선택 레이어 단일 작업 진행 상태 — 배경제거/업스케일(AI) · 여백제거(sharp). 동시 실행 방지.
+  const [layerOp, setLayerOp] = useState<null | "bg" | "upscale" | "trim">(null);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -347,15 +353,21 @@ export function CanvasEditor({
     [pushUndo, patchLayer],
   );
 
-  // ── 배경 제거(AI 1회) — 반환 id 로 레이어 generationId 교체. 슬롯 id 는 유지. ──────────
-  const handleRemoveBg = useCallback(
-    async (id: string) => {
+  // ── 선택 레이어 단일 작업(배경제거·업스케일·여백제거) — 반환 id 로 generationId 교체. 슬롯 id 유지. ──
+  // 배경제거/업스케일은 AI(콜백, 채팅 경유), 여백제거는 결정적(sharp /api/filter). 모두 결과로 레이어 교체.
+  const runLayerOp = useCallback(
+    async (op: "bg" | "upscale" | "trim", id: string) => {
       const layer = layers.find(l => l.id === id);
-      if (!layer || removingBg) return;
-      setRemovingBg(true);
+      if (!layer || layerOp) return;
+      setLayerOp(op);
       setError(null);
       try {
-        const r = await onRemoveBg(layer.generationId);
+        const r =
+          op === "bg"
+            ? await onRemoveBg(layer.generationId)
+            : op === "upscale"
+              ? await onUpscale(layer.generationId)
+              : await filterImage({ generationId: layer.generationId, filter: "trim" });
         if (r) {
           pushUndo();
           patchLayer(id, { generationId: r.generationId });
@@ -363,10 +375,10 @@ export function CanvasEditor({
       } catch (e) {
         setError((e as Error).message);
       } finally {
-        setRemovingBg(false);
+        setLayerOp(null);
       }
     },
-    [layers, removingBg, onRemoveBg, pushUndo, patchLayer],
+    [layers, layerOp, onRemoveBg, onUpscale, pushUndo, patchLayer],
   );
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
@@ -848,9 +860,10 @@ export function CanvasEditor({
               <b className="text-white">변</b> = <span className="text-[color:var(--accent)]">늘이기</span> ·{" "}
               <b className="text-white">노브</b> = <span className="text-[color:var(--accent)]">회전</span>
             </div>
-            {removingBg && (
+            {layerOp && (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/50 text-xs text-text-primary">
-                <Loader2 size={18} className="mr-2 animate-spin" /> 배경 제거 중…
+                <Loader2 size={18} className="mr-2 animate-spin" />{" "}
+                {layerOp === "bg" ? "배경 제거 중…" : layerOp === "upscale" ? "업스케일 중…" : "여백 제거 중…"}
               </div>
             )}
             {/* 줌 컨트롤(휠 줌과 동일 상태) — 모드 토글 없음. 편집은 항상 활성. */}
@@ -1052,7 +1065,7 @@ export function CanvasEditor({
           <div className="flex-none border-t border-border bg-bg-card p-3">
             {selected ? (
               <>
-                <div className="mb-2 flex items-center gap-1.5">
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
                   <button
                     onClick={() => flipSelected(selected.id)}
                     className={`rounded-md border px-2 py-1 text-[11px] ${
@@ -1072,12 +1085,28 @@ export function CanvasEditor({
                     <RotateCcw size={11} /> 리셋
                   </button>
                   <button
-                    onClick={() => handleRemoveBg(selected.id)}
-                    disabled={removingBg}
-                    className="ml-auto flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+                    onClick={() => runLayerOp("bg", selected.id)}
+                    disabled={!!layerOp}
+                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
                     title="선택 레이어의 배경을 투명하게 (AI)"
                   >
                     <Sparkles size={11} /> 배경 제거
+                  </button>
+                  <button
+                    onClick={() => runLayerOp("upscale", selected.id)}
+                    disabled={!!layerOp}
+                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+                    title="선택 레이어를 고화질로 업스케일 (AI)"
+                  >
+                    <Sparkles size={11} /> 업스케일
+                  </button>
+                  <button
+                    onClick={() => runLayerOp("trim", selected.id)}
+                    disabled={!!layerOp}
+                    className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+                    title="선택 레이어의 투명 여백을 잘라냄 (sharp)"
+                  >
+                    <Scissors size={11} /> 여백 제거
                   </button>
                 </div>
                 <div className="mb-1 flex items-center text-[11px] font-semibold">

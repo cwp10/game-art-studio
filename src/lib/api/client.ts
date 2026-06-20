@@ -163,6 +163,17 @@ export async function compositeScene(args: {
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 
+/** 단일 이미지 sharp 필터(여백제거 trim 등) — 결정적. 결과 generation 반환. */
+export async function filterImage(args: {
+  generationId: string;
+  filter: string;
+  param?: number;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await jsonFetch("/api/filter", "POST", args);
+  if (!r.ok) throw new Error(`filterImage failed: ${await extractError(r)}`);
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
 export type Suggestion = { label: string; body: string };
 
 /**
