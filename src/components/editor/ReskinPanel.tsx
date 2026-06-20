@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Palette, Upload, X } from "lucide-react";
+import { Brush, Loader2, Palette, Sparkles, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
 import { PanelFooter } from "@/components/editor/PanelFooter";
@@ -64,6 +64,13 @@ const UI_MODE_LABELS: Record<UIMode, string> = {
   style: "화풍",
 };
 
+// 진입 화면(1단계) 큰 버튼 — 순서: 색 변경 / 외형 교체 / 화풍 변환.
+const ENTRY_CARDS: { mode: UIMode; label: string; desc: string; icon: typeof Brush }[] = [
+  { mode: "color", label: "색 변경", desc: "형태는 그대로, 색 팔레트만", icon: Palette },
+  { mode: "skin", label: "외형 교체", desc: "텍스트·이미지로 외형 재구성", icon: Brush },
+  { mode: "style", label: "화풍 변환", desc: "픽셀·애니 등 아트 스타일 변경", icon: Sparkles },
+];
+
 const SKIN_INPUT_LABELS: Record<SkinInput, string> = {
   text: "텍스트",
   image: "이미지 참조",
@@ -97,8 +104,13 @@ export function ReskinPanel({
   onClose,
   onCancel,
 }: Props) {
+  // 2단계 진입: 진입 화면(3개 큰 버튼) → 모드별 상세. 오버레이 단축어처럼 initial*이
+  // 주어지면 상세로 바로 진입(진입 화면 건너뜀) — ChatLayout 단축어 계약 보존.
+  const [entered, setEntered] = useState(initialMode != null || initialSkinInput != null);
   const [uiMode, setUiMode] = useState<UIMode>(initialMode ?? "skin");
   const [skinInput, setSkinInput] = useState<SkinInput>(initialSkinInput ?? "text");
+  // 색 변경 상세의 "고급 설정"(정밀 픽셀 색교체) 접힘 토글. 기본 닫힘.
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [extra, setExtra] = useState("");
   const [styleRefId, setStyleRefId] = useState<string | null>(null);
@@ -298,22 +310,15 @@ export function ReskinPanel({
       </header>
 
       <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col gap-3 overflow-y-auto p-3">
-        {/* 상단 탭 세그먼트 토글 (외형 교체 / 색만 변경 / 화풍) */}
-        <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-xs">
-          {(["skin", "color", "style"] as const).map(m => (
-            <button
-              key={m}
-              onClick={() => setUiMode(m)}
-              className={`flex h-8 flex-1 items-center justify-center rounded border px-2 ${
-                uiMode === m
-                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : "border-transparent text-text-muted hover:text-text-primary"
-              }`}
-            >
-              {UI_MODE_LABELS[m]}
-            </button>
-          ))}
-        </div>
+        {/* 2단계 진입: 모드 선택 후 뒤로가기 바, 그 전엔 진입 화면 큰 버튼. */}
+        {entered ? (
+          <button
+            onClick={() => setEntered(false)}
+            className="flex shrink-0 items-center gap-1 self-start rounded-lg border border-border bg-bg-card px-3 py-1.5 text-xs text-text-muted hover:text-text-primary"
+          >
+            ← {UI_MODE_LABELS[uiMode]}
+          </button>
+        ) : null}
 
         {/* 원본 미리보기 + kind 배지 — 크게 표시. */}
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2">
@@ -332,8 +337,31 @@ export function ReskinPanel({
           </div>
         </div>
 
+        {/* 진입 화면(1단계) — 무엇을 할지 큰 버튼으로 먼저 고른다. */}
+        {!entered && (
+          <div className="shrink-0 space-y-2">
+            <p className="text-xs text-text-muted">무엇을 바꿀까요?</p>
+            <div className="grid grid-cols-3 gap-2">
+              {ENTRY_CARDS.map(({ mode, label, desc, icon: Icon }) => (
+                <button
+                  key={mode}
+                  onClick={() => {
+                    setUiMode(mode);
+                    setEntered(true);
+                  }}
+                  className="flex flex-col items-center gap-1.5 rounded-lg border border-border bg-bg-card px-3 py-4 text-center transition-colors hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--accent)]/10"
+                >
+                  <Icon size={22} className="text-[color:var(--accent)]" />
+                  <span className="text-sm font-medium text-text-primary">{label}</span>
+                  <span className="text-[10px] leading-tight text-text-muted/70">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* "외형 교체" 탭 내부 서브 토글 (텍스트 / 이미지 참조) */}
-        {uiMode === "skin" && (
+        {entered && uiMode === "skin" && (
           <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
             {(["text", "image"] as const).map(s => (
               <button
@@ -352,7 +380,7 @@ export function ReskinPanel({
         )}
 
         {/* 모드별 입력 */}
-        {uiMode === "skin" && skinInput === "text" && (
+        {entered && uiMode === "skin" && skinInput === "text" && (
           <div className="shrink-0 space-y-1">
             <label className="text-xs text-text-muted">새 스킨 설명</label>
             <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
@@ -391,28 +419,12 @@ export function ReskinPanel({
           </div>
         )}
 
-        {uiMode === "color" && (
+        {entered && uiMode === "color" && (
           <div className="shrink-0 space-y-2">
-            {/* AI(codex) vs 정밀(sharp) 하위 토글 */}
-            <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
-              {(["ai", "precise"] as const).map(bm => (
-                <button
-                  key={bm}
-                  onClick={() => (bm === "precise" ? enterPrecise() : setBMode("ai"))}
-                  className={`flex h-7 flex-1 items-center justify-center rounded border px-2 ${
-                    bMode === bm
-                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                      : "border-transparent text-text-muted hover:text-text-primary"
-                  }`}
-                >
-                  {bm === "ai" ? "AI 변경" : "정밀 (픽셀)"}
-                </button>
-              ))}
-            </div>
-
-            {bMode === "ai" ? (
+            {/* 기본 = AI 팔레트(mode b). 정밀 픽셀 색교체(b-precise)는 고급 설정으로 접어둠. */}
+            {!advancedOpen && (
               <div className="space-y-1">
-                <label className="text-xs text-text-muted">원하는 색 팔레트</label>
+                <label className="text-xs text-text-muted">어떤 색으로?</label>
                 <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
                   <textarea
                     value={prompt}
@@ -448,8 +460,27 @@ export function ReskinPanel({
                   ⚠ img2img 특성상 형태가 미세하게 틀어질 수 있어요.
                 </p>
               </div>
-            ) : (
-              <div className="space-y-2">
+            )}
+
+            {/* 고급 설정 토글 — 펼치면 정밀 픽셀 색교체(b-precise, codex 미사용). */}
+            <button
+              onClick={() => {
+                if (advancedOpen) {
+                  setAdvancedOpen(false);
+                  setBMode("ai");
+                } else {
+                  setAdvancedOpen(true);
+                  enterPrecise();
+                }
+              }}
+              className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary"
+            >
+              고급 설정 {advancedOpen ? "▾" : "▸"}
+              <span className="text-text-muted/50">정밀 픽셀 색교체</span>
+            </button>
+
+            {advancedOpen && (
+              <div className="space-y-2 rounded-lg border border-border bg-bg-card/50 p-2">
                 <label className="text-xs text-text-muted">원본 색 → 바꿀 색</label>
                 {extracting && (
                   <p className="flex items-center gap-1 text-[11px] text-text-muted/60">
@@ -511,7 +542,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {uiMode === "style" && (
+        {entered && uiMode === "style" && (
           <div className="shrink-0 space-y-3">
             {/* 프리셋 그리드 */}
             <div className="space-y-1">
@@ -574,7 +605,7 @@ export function ReskinPanel({
           </div>
         )}
 
-        {uiMode === "skin" && skinInput === "image" && (
+        {entered && uiMode === "skin" && skinInput === "image" && (
           <div className="shrink-0 space-y-2">
             {overlay && (
               <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
@@ -770,31 +801,34 @@ export function ReskinPanel({
           </div>
         )}
 
-        {/* 시트 후처리 안내 — 시트일 때만 */}
-        {isSheet && (
+        {/* 시트 후처리 안내 — 시트면서 상세 진입 후에만 */}
+        {entered && isSheet && (
           <div className="shrink-0 rounded-lg border border-border bg-bg-card p-2 text-[11px] text-text-muted/70">
             ⓘ 스프라이트시트는 셀 정렬·투명 후처리가 자동 적용됩니다.
           </div>
         )}
       </div>
 
-      <PanelFooter
-        busy={busy}
-        canSubmit={canSubmit}
-        onSubmit={submit}
-        onClose={onClose}
-        onCancel={onCancel}
-        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
-        submitTitle={
-          canSubmit || busy
-            ? ""
-            : uiMode === "skin" && skinInput === "image"
-            ? "참조 이미지 선택 필요"
-            : uiMode === "style"
-            ? "스타일 선택 또는 입력 필요"
-            : "설명 입력 필요"
-        }
-      />
+      {/* 진입 화면(1단계)에는 실행 footer 없음 — 모드 선택 후에만 노출. */}
+      {entered && (
+        <PanelFooter
+          busy={busy}
+          canSubmit={canSubmit}
+          onSubmit={submit}
+          onClose={onClose}
+          onCancel={onCancel}
+          submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
+          submitTitle={
+            canSubmit || busy
+              ? ""
+              : uiMode === "skin" && skinInput === "image"
+              ? "참조 이미지 선택 필요"
+              : uiMode === "style"
+              ? "스타일 선택 또는 입력 필요"
+              : "설명 입력 필요"
+          }
+        />
+      )}
 
     </aside>
   );
