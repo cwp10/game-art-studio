@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Scissors, X } from "lucide-react";
+import { ArrowLeft, Loader2, Scissors } from "lucide-react";
 import { useState } from "react";
 
 /**
@@ -96,17 +96,17 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="flex items-center gap-1 font-medium text-text-primary">
-          <Scissors size={14} /> 9-slice 편집기
-        </span>
+      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
         <button
           onClick={onClose}
-          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
-          title="닫기"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+          title="대화로 돌아가기"
         >
-          <X size={14} />
+          <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+          <Scissors size={14} /> 9-slice 편집기
+        </span>
       </header>
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 gap-4 overflow-y-auto p-4">
@@ -186,12 +186,6 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
       )}
 
       <footer className="mx-auto flex w-full max-w-[1200px] gap-2 border-t border-border p-3">
-        <button
-          onClick={onClose}
-          className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
-        >
-          ✕ 취소
-        </button>
         <button
           onClick={() => run("/api/nine-slice", "nine_slice")}
           disabled={busy || insetInvalid}

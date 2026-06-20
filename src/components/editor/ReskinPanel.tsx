@@ -1,6 +1,6 @@
 "use client";
 
-import { Brush, Loader2, Palette, Sparkles, Upload, X } from "lucide-react";
+import { ArrowLeft, Brush, Loader2, Palette, Sparkles, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
 import { PanelFooter } from "@/components/editor/PanelFooter";
@@ -292,21 +292,20 @@ export function ReskinPanel({
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="flex items-center gap-1 font-medium text-text-primary">
+      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+          title="대화로 돌아가기"
+        >
+          <ArrowLeft size={14} /> 대화로 돌아가기
+        </button>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
           <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
         </span>
         <span className="text-xs text-text-muted/60">
           {width}×{height} · parent {generationId.slice(0, 6)}…
         </span>
-        <button
-          onClick={onClose}
-          disabled={busy}
-          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary disabled:opacity-40"
-          title="닫기"
-        >
-          <X size={14} />
-        </button>
       </header>
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -815,7 +814,6 @@ export function ReskinPanel({
           busy={busy}
           canSubmit={canSubmit}
           onSubmit={submit}
-          onClose={onClose}
           onCancel={onCancel}
           busyLabel="생성 중…"
           submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}

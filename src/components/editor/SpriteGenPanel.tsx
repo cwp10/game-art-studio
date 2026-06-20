@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid3x3, Lightbulb, Sparkles, X } from "lucide-react";
+import { ArrowLeft, Grid3x3, Lightbulb, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
@@ -331,17 +331,17 @@ export function SpriteGenPanel({
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="flex items-center gap-1 font-medium text-text-primary">
-          <Grid3x3 size={14} /> 스프라이트시트 생성
-        </span>
+      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
         <button
           onClick={onClose}
-          className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
-          title="닫기"
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+          title="대화로 돌아가기"
         >
-          <X size={14} />
+          <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+          <Grid3x3 size={14} /> 스프라이트시트 생성
+        </span>
       </header>
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-4 overflow-y-auto p-3">
@@ -578,7 +578,6 @@ export function SpriteGenPanel({
         busy={busy}
         canSubmit={canSubmit}
         onSubmit={handleSubmit}
-        onClose={onClose}
         onCancel={onCancel}
         submitLabel={<><Sparkles size={14} /> 생성하기</>}
         busyLabel="생성 중…"

@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Layers, Loader2, X } from "lucide-react";
+import { ArrowLeft, Download, Layers, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 type Props = {
@@ -52,13 +52,17 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="mx-auto flex h-12 w-full max-w-[1200px] items-center gap-2 border-b border-border px-3 text-sm">
-        <span className="flex items-center gap-1 font-medium text-text-primary">
+      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+          title="대화로 돌아가기"
+        >
+          <ArrowLeft size={14} /> 대화로 돌아가기
+        </button>
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
           <Layers size={14} /> 노멀맵 생성
         </span>
-        <button onClick={onClose} className="ml-auto rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary">
-          <X size={14} />
-        </button>
       </header>
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-4 overflow-y-auto p-3">
@@ -109,9 +113,6 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
       </div>
 
       <footer className="mx-auto flex w-full max-w-[1200px] flex-wrap gap-2 border-t border-border p-3">
-        <button onClick={onClose} className="h-9 flex-1 rounded-lg border border-border text-sm text-text-muted hover:text-text-primary">
-          ✕ 닫기
-        </button>
         {result && (
           <button
             onClick={download}
