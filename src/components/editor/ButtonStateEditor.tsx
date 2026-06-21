@@ -21,6 +21,7 @@ type ApiResult = { normal: ApiSlot; hover: ApiSlot; pressed: ApiSlot };
 type Props = {
   generationId: string;
   sessionId: string | null;
+  hideHeader?: boolean;
   onClose: () => void;
   /** 3종 생성 성공 시 1회 호출 — 부모가 chat 카드 3개를 일괄 삽입. */
   onResult?: (results: {
@@ -38,7 +39,7 @@ const LABELS: Record<StateKey, string> = {
   pressed: "Pressed",
 };
 
-export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, onAddOne }: Props) {
+export function ButtonStateEditor({ generationId, sessionId, hideHeader, onClose, onResult, onAddOne }: Props) {
   const [hoverBrightness, setHoverBrightness] = useState(1.25);
   const [hoverSaturation, setHoverSaturation] = useState(1.15);
   const [pressedBrightness, setPressedBrightness] = useState(0.75);
@@ -91,19 +92,21 @@ export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, 
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
-          title="대화로 돌아가기"
-        >
-          <ArrowLeft size={14} /> 대화로 돌아가기
-        </button>
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium text-text-primary">이미지 도구</span>
-          <span className="text-[11px] text-text-muted">normal · hover · pressed 3종 버튼 상태를 생성합니다</span>
-        </div>
-      </header>
+      {!hideHeader && (
+        <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+            title="대화로 돌아가기"
+          >
+            <ArrowLeft size={14} /> 대화로 돌아가기
+          </button>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium text-text-primary">이미지 도구</span>
+            <span className="text-[11px] text-text-muted">normal · hover · pressed 3종 버튼 상태를 생성합니다</span>
+          </div>
+        </header>
+      )}
 
       {/* 본문 — 중앙 스테이지(3 상태 슬롯) + 우측 레일(파라미터·생성). 캔버스 에디터와 동일 골격. */}
       <div className="flex min-h-0 flex-1">

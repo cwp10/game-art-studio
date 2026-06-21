@@ -7,13 +7,11 @@ import {
   Edit3,
   Film,
   Grid3x3,
-  Layers,
   Link2,
   Loader2,
   MoreHorizontal,
   Palette,
   RotateCw,
-  Scissors,
   Wrench,
   X,
 } from "lucide-react";
@@ -30,8 +28,6 @@ type Action =
   | "reskin"
   | "overlay"
   | "make_sheet"
-  | "make_normal_map"
-  | "open_nine_slice"
   | "open_image_tools"
   | "canvas_edit"
   | "reference"
@@ -255,29 +251,11 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                   >
                     <Columns2 size={12} /> 비교
                   </button>
-                  {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
-                    <button
-                      onClick={() => { onAction?.("make_normal_map"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="노멀맵 — 이 이미지의 라이팅용 노멀맵을 생성"
-                    >
-                      <Layers size={12} /> 노멀맵
-                    </button>
-                  )}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed"].includes(kind ?? "") && (
-                    <button
-                      onClick={() => { onAction?.("open_nine_slice"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
-                    >
-                      <Scissors size={12} /> 9-slice
-                    </button>
-                  )}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state"].includes(kind ?? "") && (
+                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state", "normal_map", "mask", "layer"].includes(kind ?? "") && (
                     <button
                       onClick={() => { onAction?.("open_image_tools"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="이미지 도구 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
+                      title="이미지 도구 — 노멀맵 · 9-Slice · 버튼 상태 생성"
                     >
                       <Wrench size={12} /> 이미지 도구
                     </button>

@@ -16,6 +16,7 @@ import { useRef, useState } from "react";
 type Props = {
   generationId: string; // 슬라이싱할 원본 이미지 id
   sessionId: string | null;
+  hideHeader?: boolean;
   onClose: () => void;
   onResult?: (result: {
     generationId: string;
@@ -29,7 +30,7 @@ type ApiResult = { generationId: string; imagePath: string; width: number; heigh
 
 type DragAxis = "top" | "bottom" | "left" | "right";
 
-export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: Props) {
+export function NineSliceEditor({ generationId, sessionId, hideHeader, onClose, onResult }: Props) {
   const [insetLeft, setInsetLeft] = useState(20);
   const [insetRight, setInsetRight] = useState(20);
   const [insetTop, setInsetTop] = useState(20);
@@ -148,19 +149,21 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
-          title="대화로 돌아가기"
-        >
-          <ArrowLeft size={14} /> 대화로 돌아가기
-        </button>
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium text-text-primary">9-Slice 편집기</span>
-          <span className="text-[11px] text-text-muted">모서리를 유지한 채 크기를 조절합니다</span>
-        </div>
-      </header>
+      {!hideHeader && (
+        <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+            title="대화로 돌아가기"
+          >
+            <ArrowLeft size={14} /> 대화로 돌아가기
+          </button>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium text-text-primary">9-Slice 편집기</span>
+            <span className="text-[11px] text-text-muted">모서리를 유지한 채 크기를 조절합니다</span>
+          </div>
+        </header>
+      )}
 
       {/* 도구 스트립 — 출력 규격(리사이즈). 캔버스 에디터 상단 스트립과 동일 위치. */}
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2 text-xs">

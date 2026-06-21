@@ -8,11 +8,12 @@ type Props = {
   imageUrl: string;
   width: number;
   height: number;
+  hideHeader?: boolean;
   onResult: (result: { generationId: string; imageUrl: string; width: number; height: number }) => void;
   onClose: () => void;
 };
 
-export function NormalMapPanel({ generationId, imageUrl, width, height, onResult, onClose }: Props) {
+export function NormalMapPanel({ generationId, imageUrl, width, height, hideHeader, onResult, onClose }: Props) {
   const [strength, setStrength] = useState(1.0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,19 +53,21 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
-          title="대화로 돌아가기"
-        >
-          <ArrowLeft size={14} /> 대화로 돌아가기
-        </button>
-        <div className="flex flex-col leading-tight">
-          <span className="text-sm font-medium text-text-primary">노멀맵 생성</span>
-          <span className="text-[11px] text-text-muted">라이팅용 노멀맵 텍스처를 생성합니다</span>
-        </div>
-      </header>
+      {!hideHeader && (
+        <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+            title="대화로 돌아가기"
+          >
+            <ArrowLeft size={14} /> 대화로 돌아가기
+          </button>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-medium text-text-primary">노멀맵 생성</span>
+            <span className="text-[11px] text-text-muted">라이팅용 노멀맵 텍스처를 생성합니다</span>
+          </div>
+        </header>
+      )}
 
       {/* 본문 — 중앙 스테이지(원본·결과 미리보기) + 우측 레일(옵션·액션). 캔버스 에디터와 동일 골격. */}
       <div className="flex min-h-0 flex-1">
