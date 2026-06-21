@@ -9,6 +9,7 @@ import {
   GripVertical,
   Image as ImageIcon,
   Loader2,
+  Palette,
   Plus,
   Redo2,
   RotateCcw,
@@ -128,6 +129,8 @@ type Props = {
     prompt: string,
     referenceGenerationId?: string | null,
   ) => Promise<{ generationId: string; width: number; height: number } | null>;
+  /** 색 변경 / 화풍 변환 — 선택 레이어 generationId 와 초기 모드를 부모로 전달해 ReskinPanel 오픈. */
+  onReskin?: (generationId: string, initialMode: "color" | "style") => void;
 };
 
 let layerSeq = 0;
@@ -220,6 +223,7 @@ export function CanvasEditor({
   onExtract,
   onExtractBrush,
   onInpaint,
+  onReskin,
 }: Props) {
   // 레이어 스택 — 배열 순서 = z-order(마지막이 최상단). seed 를 첫 레이어로 lazy init.
   const [layers, setLayers] = useState<Layer[]>(() => [makeLayer(seedGenerationId)]);
@@ -1358,6 +1362,25 @@ export function CanvasEditor({
                 <Icon size={11} /> {label}
               </button>
             ))}
+            {onReskin && (
+              <>
+                <span className="mx-1 h-4 w-px bg-border" />
+                <button
+                  onClick={() => onReskin(selected.generationId, "color")}
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                  title="색 변경 — ReskinPanel에서 색 팔레트 교체"
+                >
+                  <Palette size={11} /> 색 변경
+                </button>
+                <button
+                  onClick={() => onReskin(selected.generationId, "style")}
+                  className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                  title="화풍 변환 — ReskinPanel에서 아트 스타일 변경"
+                >
+                  <Sparkles size={11} /> 화풍 변환
+                </button>
+              </>
+            )}
           </>
         )}
       </div>

@@ -7,10 +7,8 @@ import { Composer, type ComposerAttachment } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
-import { ButtonStateEditor } from "@/components/editor/ButtonStateEditor";
 import { CanvasEditor } from "@/components/editor/CanvasEditor";
-import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
-import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
+import { ImageToolsPanel } from "@/components/editor/ImageToolsPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
@@ -22,6 +20,7 @@ import {
   createSession,
   deleteSession,
   galleryInsert,
+  getGeneration,
   listMessages,
   listPresets,
   listSessions,
@@ -51,6 +50,15 @@ function friendlyError(raw: string): string {
  *
  * 단일 useReducer 로 SSE 이벤트와 사용자 입력을 모두 받아 ChatItem 배열을 시간 순으로 누적.
  */
+/**
+ * 시트 베이스 캐릭터 오버레이 메시지 — system-orchestrator.md 의 reskin_image 라우팅과 정합.
+ * 첨부 순서 [베이스 시트, 참조 캐릭터] 전제. handleReskin(모드 c·시트)와 SpriteCanvas
+ * 오버레이 탭이 공유 — 외부 라우팅 계약과 묶여 있어 drift 방지로 한 곳에 둔다.
+ */
+function buildSheetOverlayMessage(extra: string): string {
+  return `베이스 시트(첫 번째 이미지)의 모든 포즈에 두 번째 이미지의 캐릭터를 입혀줘. 포즈·프레임 구성은 그대로 유지.${extra ? ` ${extra}` : ""}`;
+}
+
 /** 사용자 프롬프트에서 캐릭터/오브젝트 모드를 추론 — args 추출이 실패했을 때 2차 fallback. */
 function inferSubjectModeFromPrompt(prompt?: string): "character" | "object" | undefined {
   if (!prompt) return undefined;
@@ -70,8 +78,7 @@ type EditTarget = {
 };
 type Editing =
   | ({ mode: "sprite" } & EditTarget)
-  | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image" } & EditTarget)
-  | ({ mode: "normal_map" } & EditTarget)
+  | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image"; fromCanvasSeedId?: string } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -82,10 +89,14 @@ export function ChatLayout() {
   const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget; initialSubjectMode?: "character" | "object" } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
-  // 9-slice 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
-  const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
-  // 버튼 상태 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
-  const [buttonStateOpen, setButtonStateOpen] = useState<{ generationId: string } | null>(null);
+  // 이미지 도구 오버레이(노멀맵/9-slice/버튼 상태 통합 탭) — null 이면 닫힘.
+  const [imageToolsOpen, setImageToolsOpen] = useState<{
+    generationId: string;
+    imageUrl: string;
+    width: number;
+    height: number;
+    kind?: string;
+  } | null>(null);
   // 통합 캔버스 에디터 — 전체전환(inset-0). seedGenerationId 로 첫 레이어. null 이면 닫힘.
   const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
@@ -459,8 +470,7 @@ export function ChatLayout() {
   // 편집/스프라이트 패널 닫기 — JSX inline 화살표 대신 안정 참조로 공유(원자적 상태 정리).
   const closeEditing = useCallback(() => setEditing(null), []);
   const closeSpriteGen = useCallback(() => setSpriteGen(null), []);
-  const closeNineSlice = useCallback(() => setNineSliceOpen(null), []);
-  const closeButtonState = useCallback(() => setButtonStateOpen(null), []);
+  const closeImageTools = useCallback(() => setImageToolsOpen(null), []);
   const closeCanvas = useCallback(() => setCanvasOpen(null), []);
 
   // 결과 카드의 액션. plan §S3: "버튼 클릭 시 채팅창에 새 유저 메시지로 자연어가
@@ -479,9 +489,7 @@ export function ChatLayout() {
         | "reskin"
         | "overlay"
         | "make_sheet"
-        | "make_normal_map"
-        | "open_nine_slice"
-        | "open_button_states"
+        | "open_image_tools"
         | "canvas_edit"
         | "reference"
         | "compare",
@@ -518,8 +526,7 @@ export function ChatLayout() {
       const openCanvas = (genId: string) => {
         setEditing(null);
         setSpriteGen(null);
-        setNineSliceOpen(null);
-        setButtonStateOpen(null);
+        setImageToolsOpen(null);
         setCanvasOpen({ seedGenerationId: genId });
       };
 
@@ -554,22 +561,21 @@ export function ChatLayout() {
             attachmentGenerationIds: [payload.generationId],
           });
         },
-        make_normal_map: () => openEditPanel("normal_map"),
         canvas_edit: () => {
           if (!payload.generationId) return;
           openCanvas(payload.generationId);
         },
-        open_nine_slice: () => {
-          if (!payload.generationId) return;
+        open_image_tools: () => {
+          if (!payload.generationId || !payload.width || !payload.height) return;
           setEditing(null);
           setSpriteGen(null);
-          setNineSliceOpen({ generationId: payload.generationId });
-        },
-        open_button_states: () => {
-          if (!payload.generationId) return;
-          setEditing(null);
-          setSpriteGen(null);
-          setButtonStateOpen({ generationId: payload.generationId });
+          setImageToolsOpen({
+            generationId: payload.generationId,
+            imageUrl: `/api/images/${payload.generationId}`,
+            width: payload.width,
+            height: payload.height,
+            kind: payload.kind,
+          });
         },
         overlay: () =>
           // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
@@ -649,7 +655,7 @@ export function ChatLayout() {
         );
       } else {
         const msg = isSheetBase
-          ? `베이스 시트(첫 번째 이미지)의 모든 포즈에 두 번째 이미지의 캐릭터를 입혀줘. 포즈·프레임 구성은 그대로 유지.${payload.extra ? ` ${payload.extra}` : ""}`
+          ? buildSheetOverlayMessage(payload.extra)
           : `이 캐릭터(첫 번째 이미지)에 두 번째 이미지의 화풍·스타일을 입혀줘.${payload.extra ? ` ${payload.extra}` : ""}`;
         await handleSend(msg, { attachmentGenerationIds: [genId, payload.styleReferenceId] });
       }
@@ -822,6 +828,16 @@ export function ChatLayout() {
               sessionId={state.activeSessionId}
               sheetGenerationId={editing.generationId}
               onRegenBusyChange={setSpriteRegenBusy}
+              onOverlay={(styleRefId, extra) => {
+                // SpriteCanvas 오버레이 탭 = 베이스 시트 위에 참조 캐릭터를 입히는 reskin 모드 c 경로.
+                // SpriteCanvas 안에선 베이스가 항상 시트라 editing.kind 를 보지 않고 시트 메시지로 직행.
+                // 첨부 순서 [베이스 시트, 참조] — route.ts 의 inputGenerationId/styleReferenceId 계약과 정합.
+                if (!editing || editing.mode !== "sprite") return;
+                void handleSend(buildSheetOverlayMessage(extra), {
+                  attachmentGenerationIds: [editing.generationId, styleRefId],
+                });
+                setEditing(null);
+              }}
               onSheetUpdated={res => {
                 // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
                 // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
@@ -871,31 +887,14 @@ export function ChatLayout() {
               initialSkinInput={editing.initialSkinInput}
               sessionId={state.activeSessionId}
               busy={state.generating}
+              backLabel={editing.fromCanvasSeedId ? "뒤로 가기" : undefined}
               onSubmit={handleReskin}
-              onClose={closeEditing}
-              onCancel={handleCancel}
-            />
-          );
-        case "normal_map":
-          return (
-            <NormalMapPanel
-              generationId={editing.generationId}
-              imageUrl={editing.imageUrl}
-              width={editing.width}
-              height={editing.height}
-              onResult={res => {
-                dispatch({
-                  type: "add_result_card",
-                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                  userText: "🗺️ 노멀맵",
-                  generationId: res.generationId,
-                  width: res.width,
-                  height: res.height,
-                  kind: "normal_map",
-                });
-                setEditing(null);
+              onClose={() => {
+                const seedId = editing.fromCanvasSeedId;
+                closeEditing();
+                if (seedId) setCanvasOpen({ seedGenerationId: seedId });
               }}
-              onClose={closeEditing}
+              onCancel={handleCancel}
             />
           );
       }
@@ -905,13 +904,12 @@ export function ChatLayout() {
   }
 
   const hasItems = state.items.length > 0;
-  // 편집/스프라이트/리스킨/노멀맵/9-slice/버튼상태/캔버스 패널이 열리면 세션 리스트를 숨긴다.
+  // 편집/스프라이트/리스킨/이미지도구/캔버스 패널이 열리면 세션 리스트를 숨긴다.
   // (패널은 모두 전체화면 fixed inset-0 라 대화창을 덮는다.)
   const editorPanelOpen =
     editing !== null ||
     spriteGen !== null ||
-    nineSliceOpen !== null ||
-    buttonStateOpen !== null ||
+    imageToolsOpen !== null ||
     canvasOpen !== null;
 
   return (
@@ -1023,13 +1021,29 @@ export function ChatLayout() {
           />
         </div>
       )}
-      {nineSliceOpen && (
+      {imageToolsOpen && (
         <div className="fixed inset-0 z-40">
-          <NineSliceEditor
-            generationId={nineSliceOpen.generationId}
+          <ImageToolsPanel
+            generationId={imageToolsOpen.generationId}
+            imageUrl={imageToolsOpen.imageUrl}
+            width={imageToolsOpen.width}
+            height={imageToolsOpen.height}
+            kind={imageToolsOpen.kind}
             sessionId={state.activeSessionId}
-            onClose={closeNineSlice}
-            onResult={res => {
+            onClose={closeImageTools}
+            onNormalMapResult={res => {
+              dispatch({
+                type: "add_result_card",
+                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                userText: "🗺️ 노멀맵",
+                generationId: res.generationId,
+                width: res.width,
+                height: res.height,
+                kind: "normal_map",
+              });
+              closeImageTools();
+            }}
+            onNineSliceResult={res => {
               dispatch({
                 type: "add_result_card",
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
@@ -1044,18 +1058,9 @@ export function ChatLayout() {
                 height: res.height,
                 kind: res.kind,
               });
-              closeNineSlice();
+              closeImageTools();
             }}
-          />
-        </div>
-      )}
-      {buttonStateOpen && (
-        <div className="fixed inset-0 z-40">
-          <ButtonStateEditor
-            generationId={buttonStateOpen.generationId}
-            sessionId={state.activeSessionId}
-            onClose={closeButtonState}
-            onResult={res => {
+            onButtonStateResult={res => {
               // 3종(normal/hover/pressed)을 각각 별도 카드로 일괄 삽입 — tempId 는 슬롯마다 새로.
               const labels: Array<["normal" | "hover" | "pressed", string]> = [
                 ["normal", "🎮 버튼 Normal"],
@@ -1073,9 +1078,9 @@ export function ChatLayout() {
                   kind: "button_state",
                 });
               }
-              // 패널은 닫지 않는다 — 슬롯에서 파라미터 재조정·개별 추가를 이어갈 수 있게.
+              // 버튼 상태 패널은 닫지 않음 — 파라미터 재조정을 위해
             }}
-            onAddOne={res => {
+            onButtonStateAddOne={res => {
               const labels = { normal: "🎮 버튼 Normal", hover: "🎮 버튼 Hover", pressed: "🎮 버튼 Pressed" };
               dispatch({
                 type: "add_result_card",
@@ -1143,6 +1148,22 @@ export function ChatLayout() {
                 ? [genId, referenceGenerationId]
                 : [genId],
               maskGenerationId: maskId,
+            });
+          }}
+          onReskin={async (genId, initialMode) => {
+            const seedId = canvasOpen?.seedGenerationId;
+            const gen = await getGeneration(genId);
+            if (!gen) return;
+            closeCanvas();
+            setEditing({
+              mode: "reskin",
+              initialMode,
+              fromCanvasSeedId: seedId,
+              generationId: gen.id,
+              imageUrl: `/api/images/${gen.id}`,
+              width: gen.width ?? 0,
+              height: gen.height ?? 0,
+              kind: gen.kind,
             });
           }}
         />

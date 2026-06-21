@@ -52,6 +52,8 @@ type Props = {
   /** 현재 세션 — 이미지 참조 서브의 참조 썸네일 그리드 조회용. */
   sessionId: string | null;
   busy?: boolean;
+  /** 뒤로 가기 버튼 레이블. 미지정 시 "대화로 돌아가기". */
+  backLabel?: string;
   onSubmit: (payload: ReskinSubmit) => void;
   onClose: () => void;
   onCancel?: () => void;
@@ -93,6 +95,7 @@ export function ReskinPanel({
   initialSkinInput,
   sessionId,
   busy = false,
+  backLabel,
   onSubmit,
   onClose,
   onCancel,
@@ -287,9 +290,9 @@ export function ReskinPanel({
         <button
           onClick={onClose}
           className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
-          title="대화로 돌아가기"
+          title={backLabel ?? "대화로 돌아가기"}
         >
-          <ArrowLeft size={14} /> 대화로 돌아가기
+          <ArrowLeft size={14} /> {backLabel ?? "대화로 돌아가기"}
         </button>
         <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
           <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}

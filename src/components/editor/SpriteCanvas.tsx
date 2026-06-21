@@ -1,10 +1,11 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { getGeneration, uploadSpritesheet } from "@/lib/api/client";
+import { getGeneration, listGenerations, removeGeneration, uploadImage, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
+import type { Generation } from "@/types/db";
 
 type Order = "row" | "col";
 type AtlasFormat = "custom" | "unity" | "godot" | "phaser";
@@ -44,6 +45,8 @@ type Props = {
   }) => void;
   /** 셀 재생성 진행 중 여부 — ChatLayout 이 Composer 입력을 블로킹. */
   onRegenBusyChange?: (busy: boolean) => void;
+  /** 캐릭터 오버레이 실행 — styleRefId(참조 generationId) + extra(추가 지시). */
+  onOverlay?: (styleRefId: string, extra: string) => void;
 };
 
 export function SpriteCanvas({
@@ -58,6 +61,7 @@ export function SpriteCanvas({
   sheetGenerationId,
   onSheetUpdated,
   onRegenBusyChange,
+  onOverlay,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -92,6 +96,20 @@ export function SpriteCanvas({
   const [effectThickness, setEffectThickness] = useState(2);
   const [effectBusy, setEffectBusy] = useState(false);
   const [effectError, setEffectError] = useState<string | null>(null);
+
+  // 헤더 탭 — 분할(기존 본문) / 캐릭터 오버레이(참조 캐릭터를 모든 프레임에 입힘).
+  const [activeTab, setActiveTab] = useState<"split" | "overlay">("split");
+  // 오버레이 탭 — 참조 이미지 피커(세션/갤러리 스코프) + 업로드 + 선택 + 추가 지시.
+  // ReskinPanel 의 이미지 참조 서브와 동일한 패턴(별도 인스턴스라 상태는 독립).
+  const [overlayRefs, setOverlayRefs] = useState<Generation[] | null>(null);
+  const [overlayGalleryRefs, setOverlayGalleryRefs] = useState<Generation[] | null>(null);
+  const [overlayRefScope, setOverlayRefScope] = useState<"session" | "gallery">("session");
+  const [overlayStyleRefId, setOverlayStyleRefId] = useState<string | null>(null);
+  const [overlayExtra, setOverlayExtra] = useState("");
+  const [overlayUploading, setOverlayUploading] = useState(false);
+  const [overlayDragOver, setOverlayDragOver] = useState(false);
+  const overlayDragCounter = useRef(0);
+  const overlayFileInputRef = useRef<HTMLInputElement>(null);
 
   // 마운트 시 parentGenerationId 로 params fetch → 있으면 rows/cols/fps 를 그 값으로 동기화.
   // 사용자 수동 입력은 유지(이후 setRows/setCols 가능)하되 초기값만 params 우선.
@@ -989,6 +1007,49 @@ export function SpriteCanvas({
     }
   }
 
+  // 오버레이 탭 진입 시 세션 이미지 목록 로드 — 현재 시트 자신·마스크 제외(ReskinPanel 패턴).
+  useEffect(() => {
+    if (activeTab !== "overlay" || overlayRefs !== null) return;
+    listGenerations({ sessionId: sessionId ?? undefined, limit: 60 })
+      .then(gens =>
+        setOverlayRefs(gens.filter(g => g.id !== parentGenerationId && g.kind !== "mask")),
+      )
+      .catch(() => setOverlayRefs([]));
+  }, [activeTab, overlayRefs, sessionId, parentGenerationId]);
+
+  // 갤러리 스코프 전환 시 전체 이미지 목록 로드 — 마찬가지로 자신·마스크 제외.
+  useEffect(() => {
+    if (activeTab !== "overlay" || overlayRefScope !== "gallery" || overlayGalleryRefs !== null) return;
+    listGenerations({ limit: 120 })
+      .then(gens =>
+        setOverlayGalleryRefs(gens.filter(g => g.id !== parentGenerationId && g.kind !== "mask")),
+      )
+      .catch(() => setOverlayGalleryRefs([]));
+  }, [activeTab, overlayRefScope, overlayGalleryRefs, parentGenerationId]);
+
+  // 외부 이미지 업로드 → 참조로 선택. uploadImage 는 generationId 반환(그리드 식별은 g.id).
+  async function handleOverlayUploadRef(file: File) {
+    setOverlayUploading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result as string);
+        fr.onerror = () => reject(fr.error);
+        fr.readAsDataURL(file);
+      });
+      const g = await uploadImage({ dataUrl, sessionId, filename: file.name });
+      setOverlayStyleRefId(g.generationId);
+      setOverlayRefs(null); // 재조회 트리거 → 업로드 이미지가 세션 그리드에도 포함.
+    } catch (e) {
+      console.error("[overlay-upload]", e);
+    } finally {
+      setOverlayUploading(false);
+    }
+  }
+
+  const overlayCurrentRefs = overlayRefScope === "session" ? overlayRefs : overlayGalleryRefs;
+  const overlayStyleRefUrl = overlayStyleRefId ? `/api/images/${overlayStyleRefId}` : null;
+
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
       <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
@@ -999,26 +1060,49 @@ export function SpriteCanvas({
         >
           <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Film size={14} /> 스프라이트 분할
-        </span>
+        {/* 헤더 탭 — 분할(기존 본문) / 캐릭터 오버레이. 패널을 벗어나지 않고 전환. */}
+        <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+          <button
+            onClick={() => setActiveTab("split")}
+            className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+              activeTab === "split"
+                ? "bg-[color:var(--accent)]/20 text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            <Film size={13} /> 분할
+          </button>
+          <button
+            onClick={() => setActiveTab("overlay")}
+            className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+              activeTab === "overlay"
+                ? "bg-[color:var(--accent)]/20 text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            <Layers size={13} /> 캐릭터 오버레이
+          </button>
+        </div>
         <span className="text-xs text-text-muted/60">
           {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
         </span>
-        {/* 이펙트 탭 토글 — 시트 전체 후처리(drop_shadow/outline/glow) 패널 노출. */}
-        <button
-          onClick={() => setEffectTabOpen(o => !o)}
-          className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
-            effectTabOpen
-              ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-              : "border-border text-text-muted hover:text-text-primary"
-          }`}
-          title="이펙트: 시트 전체에 그림자/외곽선/광선 후처리"
-        >
-          <Sparkles size={12} /> 이펙트
-        </button>
+        {/* 이펙트 탭 토글 — 시트 전체 후처리(drop_shadow/outline/glow) 패널 노출. 분할 탭에서만. */}
+        {activeTab === "split" && (
+          <button
+            onClick={() => setEffectTabOpen(o => !o)}
+            className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+              effectTabOpen
+                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                : "border-border text-text-muted hover:text-text-primary"
+            }`}
+            title="이펙트: 시트 전체에 그림자/외곽선/광선 후처리"
+          >
+            <Sparkles size={12} /> 이펙트
+          </button>
+        )}
       </header>
 
+      {activeTab === "split" && (
       <div className="flex min-h-0 flex-1">
       <div ref={sizerRef} className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
         <p className="text-xs text-text-muted">
@@ -1601,6 +1685,208 @@ export function SpriteCanvas({
         </div>
       </div>
       </div>
+      )}
+
+      {activeTab === "overlay" && (
+      <div className="flex min-h-0 flex-1">
+        {/* 중앙 — 원본 시트 스테이지(+ 선택 시 참조 미리보기) */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative m-3 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]">
+            <div className="checkerboard overflow-hidden rounded-lg border border-border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt="베이스 시트" className="block max-h-[56vh] max-w-full object-contain" />
+            </div>
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md bg-black/55 px-2 py-1 text-[11px] backdrop-blur">
+              <span className="text-text-muted/80">베이스 시트</span>
+              <span className="text-text-primary">{imageWidth}×{imageHeight}</span>
+            </div>
+          </div>
+
+          {/* 추가 지시 (하단) */}
+          <div className="flex-none border-t border-border p-3">
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+              <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
+                <textarea
+                  value={overlayExtra}
+                  onChange={e => setOverlayExtra(e.target.value)}
+                  placeholder="예: 더 어둡고 차분하게"
+                  rows={2}
+                  className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 우측 레일 — 참조 피커 + 하단 오버레이 실행 */}
+        <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
+          <div className="flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+            <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
+              ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-text-muted">입힐 캐릭터</label>
+              <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[11px]">
+                {(["session", "gallery"] as const).map(scope => (
+                  <button
+                    key={scope}
+                    onClick={() => setOverlayRefScope(scope)}
+                    className={`rounded px-2 py-0.5 ${
+                      overlayRefScope === scope
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                  >
+                    {scope === "session" ? "세션" : "갤러리"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <input
+              ref={overlayFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleOverlayUploadRef(f);
+                e.target.value = "";
+              }}
+            />
+            {overlayCurrentRefs === null ? (
+              <p className="text-[11px] text-text-muted/60">
+                {overlayRefScope === "session" ? "세션 이미지를 불러오는 중…" : "갤러리를 불러오는 중…"}
+              </p>
+            ) : (
+              <div
+                className={`grid grid-cols-4 gap-1 rounded-lg transition-colors ${
+                  overlayDragOver ? "bg-[color:var(--accent)]/10 ring-2 ring-[color:var(--accent)]/40" : ""
+                }`}
+                onDragEnter={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  overlayDragCounter.current += 1;
+                  if (overlayDragCounter.current === 1) setOverlayDragOver(true);
+                }}
+                onDragOver={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDragLeave={() => {
+                  overlayDragCounter.current = Math.max(0, overlayDragCounter.current - 1);
+                  if (overlayDragCounter.current === 0) setOverlayDragOver(false);
+                }}
+                onDrop={e => {
+                  if (!e.dataTransfer.types.includes("Files")) return;
+                  e.preventDefault();
+                  overlayDragCounter.current = 0;
+                  setOverlayDragOver(false);
+                  const f = [...e.dataTransfer.files].find(x => /^image\//.test(x.type));
+                  if (f) handleOverlayUploadRef(f);
+                }}
+              >
+                {/* 업로드 타일 — 클릭 + 드롭 */}
+                <button
+                  onClick={() => overlayFileInputRef.current?.click()}
+                  disabled={overlayUploading}
+                  className={`flex aspect-square flex-col items-center justify-center gap-1 rounded border border-dashed text-text-muted disabled:opacity-50 ${
+                    overlayDragOver
+                      ? "border-[color:var(--accent)] text-[color:var(--accent)]"
+                      : "border-border hover:border-[color:var(--accent)]/60 hover:text-text-primary"
+                  }`}
+                  title="클릭하거나 이미지를 드롭해서 업로드"
+                >
+                  {overlayUploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                  <span className="text-[9px]">{overlayUploading ? "업로드 중" : overlayDragOver ? "드롭!" : "업로드"}</span>
+                </button>
+                {overlayCurrentRefs.map(g => {
+                  const sel = overlayStyleRefId === g.id;
+                  return (
+                    <div key={g.id} className="group relative aspect-square">
+                      <button
+                        onClick={() => setOverlayStyleRefId(sel ? null : g.id)}
+                        className={`h-full w-full overflow-hidden rounded border checkerboard ${
+                          sel
+                            ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
+                            : "border-border hover:border-[color:var(--accent)]/50"
+                        }`}
+                        title={g.prompt ?? g.id}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/images/${g.id}`}
+                          alt={g.prompt ?? "참조"}
+                          className="h-full w-full object-contain"
+                        />
+                        {sel && (
+                          <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[9px] font-bold text-white">
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                      {/* 삭제 — 세션 스코프에서만 */}
+                      {overlayRefScope === "session" && (
+                        <button
+                          onClick={async e => {
+                            e.stopPropagation();
+                            if (sel) setOverlayStyleRefId(null);
+                            setOverlayRefs(prev => prev?.filter(r => r.id !== g.id) ?? prev);
+                            await removeGeneration(g.id);
+                          }}
+                          className="absolute left-0.5 top-0.5 hidden h-4 w-4 items-center justify-center rounded-full bg-black/70 text-[9px] text-white hover:bg-[color:var(--danger)] group-hover:flex"
+                          title="삭제"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 선택 시 원본 시트 → 참조 나란히 미리보기 */}
+            {overlayStyleRefUrl && (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-card p-2">
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border checkerboard">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={imageUrl} alt="원본 시트" className="h-full w-full object-contain" />
+                </div>
+                <span className="text-text-muted">→</span>
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-border checkerboard">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={overlayStyleRefUrl} alt="참조" className="h-full w-full object-contain" />
+                </div>
+                <span className="text-[11px] text-text-muted/70">
+                  이 캐릭터를 모든 프레임에 입힙니다.
+                </span>
+              </div>
+            )}
+
+            <p className="text-[11px] text-[color:var(--danger)]/90">
+              ⚠ 모든 프레임의 머리·얼굴·복장 일관성은 모델에 의존합니다(드리프트 가능). 베이스 시트 정렬 품질이 중요합니다.
+            </p>
+          </div>
+
+          {/* 하단 고정 — 오버레이 실행 */}
+          <div className="flex-none border-t border-border p-3">
+            <button
+              onClick={() => {
+                if (overlayStyleRefId === null) return;
+                onOverlay?.(overlayStyleRefId, overlayExtra.trim());
+              }}
+              disabled={overlayStyleRefId === null}
+              title={overlayStyleRefId === null ? "입힐 캐릭터 선택 필요" : ""}
+              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              <Layers size={14} /> 오버레이 실행 ▸
+            </button>
+          </div>
+        </div>
+      </div>
+      )}
     </aside>
   );
 }

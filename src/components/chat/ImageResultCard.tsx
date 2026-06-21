@@ -6,15 +6,13 @@ import {
   Download,
   Edit3,
   Film,
-  Gamepad2,
   Grid3x3,
-  Layers,
   Link2,
   Loader2,
   MoreHorizontal,
   Palette,
   RotateCw,
-  Scissors,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -30,9 +28,7 @@ type Action =
   | "reskin"
   | "overlay"
   | "make_sheet"
-  | "make_normal_map"
-  | "open_nine_slice"
-  | "open_button_states"
+  | "open_image_tools"
   | "canvas_edit"
   | "reference"
   | "compare";
@@ -248,15 +244,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                       <Palette size={12} /> 리스킨
                     </button>
                   )}
-                  {!["normal_map", "mask", "layer"].includes(kind ?? "") && (
-                    <button
-                      onClick={() => { onAction?.("make_normal_map"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="노멀맵 — 이 이미지의 라이팅용 노멀맵을 생성"
-                    >
-                      <Layers size={12} /> 노멀맵
-                    </button>
-                  )}
                   <button
                     onClick={() => { onAction?.("compare"); setMenuOpen(false); }}
                     className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -264,26 +251,14 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                   >
                     <Columns2 size={12} /> 비교
                   </button>
-                  {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed"].includes(kind ?? "") && (
-                    <button
-                      onClick={() => { onAction?.("open_nine_slice"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="9-slice — 모서리를 유지한 채 늘릴 수 있게 슬라이스 영역 지정 후 리사이즈 출력"
-                    >
-                      <Scissors size={12} /> 9-slice
-                    </button>
-                  )}
-                  {/* 버튼 상태 — 단일 일반 이미지(버튼/아이콘)에만. 시트/합성/9-slice/이미 버튼상태 결과는 제외. */}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state"].includes(kind ?? "") && (
-                    <button
-                      onClick={() => { onAction?.("open_button_states"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="버튼 상태 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
-                    >
-                      <Gamepad2 size={12} /> 버튼 상태
-                    </button>
-                  )}
+                  {/* 이미지 도구 — 노멀맵 / 9-Slice / 버튼 상태 통합. 가용 탭은 패널 내부에서 kind 로 필터. */}
+                  <button
+                    onClick={() => { onAction?.("open_image_tools"); setMenuOpen(false); }}
+                    className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                    title="노멀맵 / 9-Slice / 버튼 상태 생성"
+                  >
+                    <Wrench size={12} /> 이미지 도구
+                  </button>
                   <button
                     onClick={() => { onAction?.("reference"); setMenuOpen(false); }}
                     className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
