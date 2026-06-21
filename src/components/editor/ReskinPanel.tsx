@@ -294,12 +294,12 @@ export function ReskinPanel({
         >
           <ArrowLeft size={14} /> {backLabel ?? "대화로 돌아가기"}
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Palette size={14} /> {overlay ? "캐릭터 오버레이" : "리스킨"}
-        </span>
-        <span className="text-xs text-text-muted/60">
-          {width}×{height} · parent {generationId.slice(0, 6)}…
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium text-text-primary">{overlay ? "캐릭터 오버레이" : "리스킨"}</span>
+          <span className="text-[11px] text-text-muted">
+            {overlay ? "포즈는 그대로, 캐릭터 외형을 교체합니다" : "색·재질·화풍을 바꾼 새 버전을 생성합니다"}
+          </span>
+        </div>
       </header>
 
       {/* 상단 모드 탭 — 색/외형/화풍. 캔버스 도구 스트립 자리(2단계 진입을 펼침). */}

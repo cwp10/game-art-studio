@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Grid3x3, Lightbulb, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Lightbulb, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
@@ -345,9 +345,10 @@ export function SpriteGenPanel({
         >
           <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Grid3x3 size={14} /> 스프라이트시트 생성
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium text-text-primary">스프라이트시트 생성</span>
+          <span className="text-[11px] text-text-muted">방향·프레임 스프라이트시트를 생성합니다</span>
+        </div>
       </header>
 
       {/* 상단 툴스트립 — 캐릭터/오브젝트/이펙트(+이펙트 종류). 캔버스 도구 스트립 자리. */}
