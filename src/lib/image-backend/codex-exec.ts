@@ -16,6 +16,7 @@ import type {
   ImageResult,
   ProgressCallback,
 } from "./index";
+import { chromaKeyFile } from "./chroma-key";
 
 /**
  * CodexExecBackend — `codex exec` 를 spawn 해서 imagegen 스킬을 자동 발동.
@@ -362,46 +363,19 @@ function inferStage(
 }
 
 /**
- * #00ff00 chroma-key 처리 (in-place). greenness(= g - max(r,b)) 기반 feather:
- *   - greenness 강함 → alpha 0 (완전 키)
- *   - greenness 약함(anti-alias fringe) → 그린 채널 탈채도 + greenness 비례 알파 감쇠
- * 색만 빼고 불투명하게 두면 어두운 헤일로 링이 남으므로 fringe 의 알파를 함께 깎는다.
+ * #00ff00 chroma-key 처리 (in-place, green 전용 얇은 래퍼).
  *
- * NOTE: 단일 이미지 remove_bg 전용. 스프라이트시트는 더 강한 후처리(테두리-connected
- *       배경만 키아웃·적응형 임계값·green/magenta 일반화)를 쓰는 별도 구현
- *       src/lib/image-backend/spritesheet-postprocess.ts 의 chromaKeyFile 을 사용한다.
+ * 공유 적응형 구현(chroma-key.ts 의 chromaKeyFile)에 위임한다. 과거에는 codex-exec 가
+ * 단순 greenness-feather 별도 구현을, spritesheet-postprocess 가 적응형(테두리-connected
+ * 배경만 키아웃·flood-fill 본체 보호·despill) 구현을 따로 갖고 있었다. 두 경로가 동일
+ * 알고리즘을 쓰도록 통합했다.
+ *
+ * 단일 이미지 경로(remove_bg/layer_extract/inpaint)이므로 cellArea 는 미지정(=전체 N) 으로
+ * 둔다 — enclosed 배경 포켓 흡수 임계가 단일 이미지 기준으로 올바르게 잡힌다. 반환 keyedOut
+ * 카운트는 이 경로에서 쓰지 않으므로 버린다.
  */
 async function chromaKeyGreen(filePath: string): Promise<void> {
-  const img = sharp(filePath).ensureAlpha();
-  const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
-  const channels = info.channels;
-  for (let i = 0; i < data.length; i += channels) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const greenness = g - Math.max(r, b);
-    // 확실한 키 픽셀 → 완전 투명
-    if (greenness > 40 && g > 90) {
-      data[i + 3] = 0;
-      continue;
-    }
-    // fringe — 탈채도 후 greenness(5~40)를 알파 감쇠(1→0)로 매핑.
-    // 캐릭터에 의도된 녹색이 있으면 같이 영향받지만 게임 캐릭터에서는 드물다.
-    if (data[i + 3] > 0 && greenness > 5) {
-      data[i + 1] = Math.max(r, b);
-      const fade = 1 - Math.min(1, (greenness - 5) / 35);
-      data[i + 3] = Math.round(data[i + 3] * fade);
-    }
-  }
-  // 결과를 임시 경로에 쓰고 atomically rename — destPath 가 sharp 의 read 와 동일 파일이면
-  // truncation race 위험.
-  const tmpPath = filePath + ".chroma.tmp";
-  await sharp(data, {
-    raw: { width: info.width, height: info.height, channels: channels as 1 | 2 | 3 | 4 },
-  })
-    .png()
-    .toFile(tmpPath);
-  await fs.rename(tmpPath, filePath);
+  await chromaKeyFile(filePath, "green");
 }
 
 /**
@@ -569,9 +543,14 @@ export class CodexExecBackend implements ImageBackend {
       await fs.stat(outputCandidate);
       pickedPath = outputCandidate;
     } catch {
-      // fallback: 가장 최근의 .png 파일을 채택
+      // fallback: 가장 최근의 .png 파일을 채택.
+      // 단, workDir 로 복사된 입력 이미지(input0.png, input1.png …)는 제외한다.
+      // codex 가 조용히 실패해 output.png 를 못 만들면 입력 파일이 "가장 최근 PNG"로
+      // 잘못 선택되어 입력이 곧 결과로 반환되는 silent wrong-output 버그를 막는다.
       const entries = await fs.readdir(workDir);
-      const pngs = entries.filter(e => e.toLowerCase().endsWith(".png"));
+      const pngs = entries.filter(
+        e => e.toLowerCase().endsWith(".png") && !/^input\d*\.png$/i.test(e),
+      );
       if (pngs.length === 0) {
         throw new Error(`No PNG produced in ${workDir}. See ${logFile}`);
       }

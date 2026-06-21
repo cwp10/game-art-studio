@@ -140,7 +140,6 @@ export async function applySpritesheetEffect(params: {
   if (imageW % cols !== 0 || imageH % rows !== 0) {
     // 스프라이트시트는 항상 정수 배수로 생성되므로 정상 입력에선 발생하지 않는다.
     // floor 로 진행하되 셀 정렬이 어긋날 수 있어 경고.
-    // eslint-disable-next-line no-console
     console.warn(
       `[sprite-effect] non-integer cell geometry: ${imageW}x${imageH} / ${cols}x${rows}`,
     );

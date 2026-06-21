@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
-import { claudeRunSimple } from "@/lib/cli/claude-cli";
-import { extractJsonArray } from "@/lib/util/json-parse";
+import { callClaudeSuggest } from "@/lib/util/claude-suggest";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -40,7 +39,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
-  const input = body.input?.trim();
+  const input = body.input?.trim().slice(0, 500);
   if (!input) return Response.json({ error: "input required" }, { status: 400 });
 
   // 캐시 적중 — 같은 input + TTL 내 → 즉시 응답.
@@ -52,12 +51,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const raw = await claudeRunSimple({
-      systemPrompt: SYSTEM_PROMPT,
-      userMessage: input,
+    const { array: parsed, raw } = await callClaudeSuggest(SYSTEM_PROMPT, input, {
       signal: req.signal,
     });
-    const parsed = extractJsonArray(raw);
     if (!parsed) {
       return Response.json({ error: "claude returned non-array", raw: raw.slice(0, 400) }, { status: 502 });
     }

@@ -15,6 +15,9 @@ import type { Generation, GenerationKind } from "@/types/db";
  * 마스크/레이어 noise 는 repo 의 listGenerations 가 sessionId·kind 미지정 시 자동 제외.
  */
 
+/** Electron 데스크톱 셸이 preload 로 주입하는 window.electronAPI(웹에선 undefined). */
+type ElectronWindow = Window & { electronAPI?: { openImagesFolder: () => void } };
+
 type Filter = "all" | GenerationKind;
 const KIND_CHIPS: Array<{ key: Filter; label: string }> = [
   { key: "all", label: "전체" },
@@ -83,9 +86,9 @@ export function GallerySheet({ open, onClose, onInsert, generating }: Props) {
           </span>
           <span className="ml-2 text-xs text-text-muted/60">{items.length}개 · Esc 닫기</span>
           <div className="ml-auto flex items-center gap-1">
-            {typeof window !== "undefined" && (window as any).electronAPI && (
+            {typeof window !== "undefined" && (window as ElectronWindow).electronAPI && (
               <button
-                onClick={() => (window as any).electronAPI.openImagesFolder()}
+                onClick={() => (window as ElectronWindow).electronAPI?.openImagesFolder()}
                 className="rounded p-1 text-text-muted hover:bg-bg-card hover:text-text-primary"
                 title="images 폴더 열기"
               >

@@ -441,7 +441,7 @@ export function ReskinPanel({
         </div>
 
         {/* 우측 레일 — 하위 옵션 + 하단 리스킨 실행. */}
-        <div className="flex w-[300px] flex-none flex-col border-l border-border bg-bg-panel">
+        <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
           <div className="flex-1 space-y-3 overflow-y-auto p-3">
             {/* 외형: 텍스트/이미지 참조 토글 */}
             {uiMode === "skin" && (

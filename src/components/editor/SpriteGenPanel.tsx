@@ -221,6 +221,8 @@ export function SpriteGenPanel({
   // 참조 이미지 연결·해제 시 방향 자동 전환 — 함수형 업데이트로 stale closure 방지
   useEffect(() => {
     if (referenceImageUrl) {
+      // 참조 이미지 연결 시 방향을 REF 로 동기화 — 외부 prop 변화에 대한 동기화.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDirection("REF");
     } else {
       setDirection(prev => prev === "REF" ? "DOWN" : prev);
@@ -233,6 +235,8 @@ export function SpriteGenPanel({
     const lower = actionPrompt.toLowerCase();
     for (const hint of ACTION_FRAME_HINTS) {
       if (hint.pattern.test(lower)) {
+        // 동작 텍스트(외부 입력) 변화에 맞춘 프레임·루프 자동 추천 동기화.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setFrames(hint.frames);
         setSeamlessLoop(hint.loop);
         break;
@@ -271,6 +275,9 @@ export function SpriteGenPanel({
   // 카테고리별 최근 프롬프트 — exampleKey 변경 시 갱신
   const [recents, setRecents] = useState<string[]>(() => loadRecents(exampleKey));
   useEffect(() => {
+    // 카테고리(exampleKey) 변경 시 localStorage 에서 최근 목록 재로드 — 외부 저장소 동기화.
+    // (recents 는 saveRecent 로도 쓰이므로 render-derived 로 만들 수 없음)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecents(loadRecents(exampleKey));
   }, [exampleKey]);
 

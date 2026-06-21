@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
-import { claudeRunSimple } from "@/lib/cli/claude-cli";
-import { extractJsonArray } from "@/lib/util/json-parse";
+import { callClaudeSuggest } from "@/lib/util/claude-suggest";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -107,15 +106,14 @@ export async function POST(req: NextRequest) {
     .join("\n");
 
   try {
-    const raw = await claudeRunSimple({
-      systemPrompt: SYSTEM_PROMPT,
-      userMessage,
+    // question 은 위에서 이미 500 자로 슬라이스했고 userMessage 는 시스템 컨텍스트를
+    // 덧붙인 합성 메시지라 util 단계에서 추가 절단하지 않는다.
+    const { array: parsed, raw: text } = await callClaudeSuggest(SYSTEM_PROMPT, userMessage, {
       signal: req.signal,
+      maxInputLength: Infinity,
     });
-    const text = raw.trim();
     if (!text) return Response.json({ error: "empty suggestion" }, { status: 502 });
 
-    const parsed = extractJsonArray(text);
     if (parsed) {
       const suggestions = parsed.filter(
         (x): x is Suggestion =>

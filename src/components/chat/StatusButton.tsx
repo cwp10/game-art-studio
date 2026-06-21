@@ -92,9 +92,15 @@ export function StatusButton() {
     }
   }
 
-  useEffect(() => { fetchStatus(); }, []);
+  useEffect(() => {
+    // 마운트 시 1회 상태 fetch — fetchStatus 내부 setLoading/setStatus 는 의도된 동기화.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchStatus();
+  }, []);
 
   useEffect(() => {
+    // 패널 열림 시 아직 상태가 없으면 fetch — 외부(CLI) 상태와의 동기화.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open && !status) fetchStatus();
   }, [open, status]);
 

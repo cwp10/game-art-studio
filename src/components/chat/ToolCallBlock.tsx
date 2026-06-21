@@ -23,6 +23,8 @@ export function ToolCallBlock({ state, onRetry }: Props) {
   useEffect(() => {
     if (state.status !== "running") {
       startedAtRef.current = null;
+      // 실행 상태가 끝나면 경과 타이머 리셋 — 외부 상태(state.status)와의 동기화.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsed(0);
       return;
     }
