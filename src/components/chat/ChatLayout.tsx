@@ -1033,7 +1033,12 @@ export function ChatLayout() {
               dispatch({
                 type: "add_result_card",
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: res.kind === "nine_slice_scaled" ? "✂️ 9-slice 리사이즈" : "✂️ 9-slice 그리드",
+                userText:
+                  res.kind === "nine_slice_scaled"
+                    ? "✂️ 9-slice 리사이즈"
+                    : res.kind === "nine_slice_trimmed"
+                      ? "✂️ 9-slice 최적화"
+                      : "✂️ 9-slice 그리드",
                 generationId: res.generationId,
                 width: res.width,
                 height: res.height,

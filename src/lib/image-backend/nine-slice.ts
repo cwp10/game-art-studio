@@ -179,3 +179,65 @@ export async function scaleWithNineSlice(
     .png()
     .toBuffer();
 }
+
+/**
+ * 함수 3: 9-slice trim. 엣지/중앙을 최소(가로/세로 2px)로 압축한 트림 PNG 생성.
+ * 코너는 native 크기 유지, 가로 엣지(TC/BC)는 너비 2px, 세로 엣지(ML/MR)는 높이 2px,
+ * 중앙(MC)은 2×2px 로 리사이즈. 출력 = inset 코너 + 2px 늘림 영역만 남긴 최소 시트.
+ * fit:'fill' — 비율 무시(9-slice 는 의도적으로 비율 깨짐).
+ */
+export async function trimWithNineSlice(
+  inputPath: string,
+  inset: NineSliceInset,
+): Promise<Buffer> {
+  const meta = await sharp(inputPath).metadata();
+  const W = meta.width ?? 0;
+  const H = meta.height ?? 0;
+  assertInsetFits(W, H, inset);
+
+  const { left: l, right: r, top: t, bottom: b } = inset;
+  const outW = l + 2 + r;
+  const outH = t + 2 + b;
+
+  const src = sourceRegions(W, H, inset);
+  const byName = (n: string) => src.find((s) => s.name === n)!;
+
+  // 각 대상 구역: 추출할 소스 사각형 + 대상 위치 + 대상 크기.
+  // 코너는 native 크기 유지. 가로 엣지는 너비 2px, 세로 엣지는 높이 2px, 중앙은 2×2px.
+  const targets: Array<{ region: Region; dstX: number; dstY: number; dstW: number; dstH: number }> = [
+    { region: byName("TL"), dstX: 0, dstY: 0, dstW: l, dstH: t },
+    { region: byName("TC"), dstX: l, dstY: 0, dstW: 2, dstH: t },
+    { region: byName("TR"), dstX: outW - r, dstY: 0, dstW: r, dstH: t },
+    { region: byName("ML"), dstX: 0, dstY: t, dstW: l, dstH: 2 },
+    { region: byName("MC"), dstX: l, dstY: t, dstW: 2, dstH: 2 },
+    { region: byName("MR"), dstX: outW - r, dstY: t, dstW: r, dstH: 2 },
+    { region: byName("BL"), dstX: 0, dstY: outH - b, dstW: l, dstH: b },
+    { region: byName("BC"), dstX: l, dstY: outH - b, dstW: 2, dstH: b },
+    { region: byName("BR"), dstX: outW - r, dstY: outH - b, dstW: r, dstH: b },
+  ];
+
+  const pieces: sharp.OverlayOptions[] = [];
+  for (const tgt of targets) {
+    const { region, dstX, dstY, dstW, dstH } = tgt;
+    if (region.w < 1 || region.h < 1) continue; // 소스 0px 구역 skip
+    if (dstW < 1 || dstH < 1) continue; // 대상 0px 구역 skip
+    const piece = await sharp(inputPath)
+      .extract({ left: region.x, top: region.y, width: region.w, height: region.h })
+      .resize(dstW, dstH, { fit: "fill" })
+      .png()
+      .toBuffer();
+    pieces.push({ input: piece, left: dstX, top: dstY });
+  }
+
+  return sharp({
+    create: {
+      width: outW,
+      height: outH,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite(pieces)
+    .png()
+    .toBuffer();
+}

@@ -49,7 +49,8 @@ export type GenerationKind =
   | "sprite_effect"
   | "nine_slice"
   | "nine_slice_scaled"
-  | "button_state";
+  | "button_state"
+  | "nine_slice_trimmed";
 
 export type GenerationBackend = "codex_exec" | "codex_pty" | "external" | "direct";
 

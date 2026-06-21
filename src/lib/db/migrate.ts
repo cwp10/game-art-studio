@@ -55,6 +55,10 @@ export function runMigrations(db: Database.Database): void {
     migrateV10(db);
     db.pragma("user_version = 10");
   }
+  if ((db.pragma("user_version", { simple: true }) as number) < 11) {
+    migrateV11(db);
+    db.pragma("user_version = 11");
+  }
 }
 
 /**
@@ -540,6 +544,66 @@ function migrateV4(db: Database.Database): void {
         message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
         kind              TEXT NOT NULL
                           CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','external','reskin','resize','emote_sheet','tileset','normal_map')),
+        prompt            TEXT,
+        negative_prompt   TEXT,
+        preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,
+        input_image_ids   TEXT,
+        params            TEXT,
+        image_path        TEXT NOT NULL,
+        thumbnail_path    TEXT,
+        width             INTEGER,
+        height            INTEGER,
+        backend           TEXT NOT NULL DEFAULT 'codex_exec'
+                          CHECK(backend IN ('codex_exec','codex_pty','external','direct')),
+        created_at        INTEGER NOT NULL
+      );
+
+      INSERT INTO generations_new
+      SELECT id, session_id, message_id, kind, prompt, negative_prompt, preset_id,
+        input_image_ids, params, image_path, thumbnail_path, width, height, backend, created_at
+      FROM generations;
+
+      DROP TABLE generations;
+      ALTER TABLE generations_new RENAME TO generations;
+
+      CREATE INDEX IF NOT EXISTS idx_generations_session ON generations(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_generations_kind ON generations(kind, created_at DESC);
+
+      COMMIT;
+    `);
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+/**
+ * v11: generations.kind CHECK 에 'nine_slice_trimmed' 추가
+ * (9-slice 편집기 /api/nine-slice-trim 결과 kind — 모서리/엣지만 남기고 중앙을 2px 로 트림).
+ *
+ * SQLite 는 CHECK 변경에 ALTER 가 불가하므로 테이블 재생성 방식. 데이터 변형은
+ * 없고 CHECK 제약만 확장하므로 straight copy 한다. 테이블 재생성 전 .bak-v11 백업.
+ */
+function migrateV11(db: Database.Database): void {
+  const backupPath = DB_PATH + ".bak-v11";
+  if (fs.existsSync(DB_PATH) && !fs.existsSync(backupPath)) {
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    fs.copyFileSync(DB_PATH, backupPath);
+  }
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      BEGIN;
+
+      CREATE TABLE generations_new (
+        id                TEXT PRIMARY KEY,
+        session_id        TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+        message_id        TEXT REFERENCES messages(id) ON DELETE SET NULL,
+        kind              TEXT NOT NULL
+                          CHECK(kind IN ('text2img','img2img','upscale','remove_bg','inpaint','spritesheet','mask','layer','layer_extract','external','reskin','resize','emote_sheet','tileset','normal_map','composite','sprite_effect','nine_slice','nine_slice_scaled','button_state','nine_slice_trimmed')),
         prompt            TEXT,
         negative_prompt   TEXT,
         preset_id         TEXT REFERENCES style_presets(id) ON DELETE SET NULL,

@@ -231,7 +231,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               </button>
               {menuOpen && (
                 <div className="absolute bottom-full right-0 z-50 mb-1 flex min-w-[8rem] flex-col rounded-lg border border-border bg-bg-card p-1 shadow-lg">
-                  {kind !== "spritesheet" && (
+                  {kind === "spritesheet" ? (
+                    <button
+                      onClick={() => { onAction?.("overlay"); setMenuOpen(false); }}
+                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                      title="캐릭터 오버레이 — 포즈는 그대로, 새 캐릭터 외형으로 교체"
+                    >
+                      <Palette size={12} /> 캐릭터 오버레이
+                    </button>
+                  ) : (
                     <button
                       onClick={() => { onAction?.("reskin"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -257,7 +265,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                     <Columns2 size={12} /> 비교
                   </button>
                   {/* 9-slice 는 단일 일반 이미지에만 — 시트/합성/이미 9-slice 처리된 결과는 제외. */}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled"].includes(kind ?? "") && (
+                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed"].includes(kind ?? "") && (
                     <button
                       onClick={() => { onAction?.("open_nine_slice"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -267,7 +275,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                     </button>
                   )}
                   {/* 버튼 상태 — 단일 일반 이미지(버튼/아이콘)에만. 시트/합성/9-slice/이미 버튼상태 결과는 제외. */}
-                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "button_state"].includes(kind ?? "") && (
+                  {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state"].includes(kind ?? "") && (
                     <button
                       onClick={() => { onAction?.("open_button_states"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
