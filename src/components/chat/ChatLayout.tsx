@@ -810,6 +810,18 @@ export function ChatLayout() {
     [state.activeSessionId],
   );
 
+  const handleSpriteOverlay = useCallback(
+    (styleRefId: string, extra: string) => {
+      if (!editing || editing.mode !== "sprite") return;
+      void handleSend(buildSheetOverlayMessage(extra), {
+        attachmentGenerationIds: [editing.generationId, styleRefId],
+      });
+      setEditing(null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editing],
+  );
+
   // 전체화면 편집 패널 — mode 별로 props 가 전부 달라 config 맵은 불가하지만, 공통 래퍼
   // (fixed inset-0 z-40)를 공유하므로 한 함수로 묶는다. SpriteGenPanel
   // (spriteGen 상태)은 EditTarget 기반이 아니라 별도라 이 함수 밖에 유지.
@@ -828,16 +840,7 @@ export function ChatLayout() {
               sessionId={state.activeSessionId}
               sheetGenerationId={editing.generationId}
               onRegenBusyChange={setSpriteRegenBusy}
-              onOverlay={(styleRefId, extra) => {
-                // SpriteCanvas 오버레이 탭 = 베이스 시트 위에 참조 캐릭터를 입히는 reskin 모드 c 경로.
-                // SpriteCanvas 안에선 베이스가 항상 시트라 editing.kind 를 보지 않고 시트 메시지로 직행.
-                // 첨부 순서 [베이스 시트, 참조] — route.ts 의 inputGenerationId/styleReferenceId 계약과 정합.
-                if (!editing || editing.mode !== "sprite") return;
-                void handleSend(buildSheetOverlayMessage(extra), {
-                  attachmentGenerationIds: [editing.generationId, styleRefId],
-                });
-                setEditing(null);
-              }}
+              onOverlay={handleSpriteOverlay}
               onSheetUpdated={res => {
                 // 셀 재생성 결과를 chat 카드로 삽입 + 패널을 새 시트로 re-point. key=generationId 가
                 // 바뀌면서 SpriteCanvas 가 새 시트 픽셀로 깨끗이 remount → 연속 재생성이 누적된다.
