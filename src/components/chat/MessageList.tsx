@@ -19,7 +19,6 @@ type Props = {
       | "remove_bg"
       | "sprite_split"
       | "reskin"
-      | "overlay"
       | "make_sheet"
       | "open_image_tools"
       | "canvas_edit"

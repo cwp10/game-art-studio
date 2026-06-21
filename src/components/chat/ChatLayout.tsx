@@ -487,7 +487,6 @@ export function ChatLayout() {
         | "remove_bg"
         | "sprite_split"
         | "reskin"
-        | "overlay"
         | "make_sheet"
         | "open_image_tools"
         | "canvas_edit"
@@ -504,7 +503,7 @@ export function ChatLayout() {
       },
     ) => {
       // 우측 편집 패널을 여는 공통 진입 — generationId·width·height 가드 후 editing 상태 set.
-      // (sprite_split/reskin/normal_map/overlay 가 공유)
+      // (sprite_split/reskin/normal_map 이 공유)
       const openEditPanel = (
         mode: Exclude<Editing, null>["mode"],
         extra?: Partial<Exclude<Editing, null>>,
@@ -577,10 +576,6 @@ export function ChatLayout() {
             kind: payload.kind,
           });
         },
-        overlay: () =>
-          // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
-          // 백엔드 동일 — 패널이 시트+이미지참조 서브일 때 "캐릭터 오버레이"로 리프레이밍.
-          openEditPanel("reskin", { initialMode: "skin", initialSkinInput: "image" }),
         make_sheet: () => {
           if (!payload.generationId || !payload.width || !payload.height) return;
           setEditing(null);

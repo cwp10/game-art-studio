@@ -63,7 +63,10 @@ export async function chromaKeyFile(
     const k = keyness(i);
     if (k > 60 && keyChannelBright(i)) strong.push(k);
   }
-  let hardThresh = 40;
+  // 기본 50: 강한 녹색 신호 없을 때(투명 배경 리스킨 등) keyness 41-50 구간의
+  // 파란초록 계열 콘텐츠 픽셀(망토·스카프 등)을 실수로 키아웃하지 않도록 보수적으로 설정.
+  // 실제 green-bg 이미지는 strong.length>N*0.02 로 적응형 분기가 켜져 이 값을 덮어씀.
+  let hardThresh = 50;
   if (strong.length > N * 0.02) {
     strong.sort((a, b) => a - b);
     const median = strong[Math.floor(strong.length / 2)];
