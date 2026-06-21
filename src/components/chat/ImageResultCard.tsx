@@ -170,7 +170,7 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
               title="편집 — 캔버스 에디터에서 레이어 합성·자유 변형·필터·크롭·영역편집·배경제거·업스케일·여백제거"
             >
-              <Edit3 size={12} /> 편집
+              <Edit3 size={12} /> 이미지 편집
             </button>
             {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state", "normal_map", "mask", "layer"].includes(kind ?? "") && (
               <button
@@ -196,16 +196,18 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                 title="스프라이트 시트 분할 + GIF 미리보기 + 프레임 zip / GIF 다운로드"
               >
-                <Film size={12} /> 시트 분할
+                <Film size={12} /> 시트 편집
               </button>
             )}
-            <button
-              onClick={() => onAction?.("compare")}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-              title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
-            >
-              <Columns2 size={12} /> 비교
-            </button>
+            {kind !== "spritesheet" && (
+              <button
+                onClick={() => onAction?.("compare")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="비교 — 같은 세션의 다른 이미지를 before 로 골라 슬라이더로 전/후 비교"
+              >
+                <Columns2 size={12} /> 비교
+              </button>
+            )}
             <button
               onClick={() => onAction?.("reference")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"

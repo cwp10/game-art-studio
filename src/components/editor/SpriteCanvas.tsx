@@ -47,6 +47,8 @@ type Props = {
   onRegenBusyChange?: (busy: boolean) => void;
   /** 캐릭터 오버레이 실행 — styleRefId(참조 generationId) + extra(추가 지시). */
   onOverlay?: (styleRefId: string, extra: string) => void;
+  /** VFX 오버레이 실행 — description(이팩트 설명). */
+  onVfxOverlay?: (description: string) => void;
 };
 
 export function SpriteCanvas({
@@ -62,6 +64,7 @@ export function SpriteCanvas({
   onSheetUpdated,
   onRegenBusyChange,
   onOverlay,
+  onVfxOverlay,
 }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -100,6 +103,9 @@ export function SpriteCanvas({
   // 헤더 탭 — 분할(기존 본문) / 캐릭터 오버레이(참조 캐릭터를 모든 프레임에 입힘).
   const [activeTab, setActiveTab] = useState<"split" | "overlay">("split");
   // 오버레이 탭 — 참조 이미지 피커(세션/갤러리 스코프) + 업로드 + 선택 + 추가 지시.
+  // 캐릭터 오버레이 탭 서브 모드 — "character"(이미지 참조 입히기) / "vfx"(이팩트 추가)
+  const [overlayMode, setOverlayMode] = useState<"character" | "vfx">("character");
+
   // ReskinPanel 의 이미지 참조 서브와 동일한 패턴(별도 인스턴스라 상태는 독립).
   const [overlayRefs, setOverlayRefs] = useState<Generation[] | null>(null);
   const [overlayGalleryRefs, setOverlayGalleryRefs] = useState<Generation[] | null>(null);
@@ -222,7 +228,7 @@ export function SpriteCanvas({
     if (!ctx) return;
     ctx.clearRect(0, 0, displayW, displayH);
     ctx.drawImage(img, 0, 0, displayW, displayH);
-  }, [imgLoaded, displayW, displayH]);
+  }, [imgLoaded, displayW, displayH, activeTab]);
 
   // 비정사각 셀 지원 — cellW/cellH 를 각각 독립 역산(정사각 가정 없음).
   const cellW = Math.floor(imageWidth / cols);
@@ -1087,7 +1093,7 @@ export function SpriteCanvas({
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              <Layers size={13} /> 캐릭터 오버레이
+              <Layers size={13} /> 오버레이
             </button>
           </div>
           {activeTab === "split" && (
@@ -1706,15 +1712,17 @@ export function SpriteCanvas({
             </div>
           </div>
 
-          {/* 추가 지시 (하단) */}
+          {/* 추가 지시 / 이팩트 설명 */}
           <div className="flex-none border-t border-border p-3">
             <div className="space-y-1">
-              <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+              <label className="text-xs text-text-muted">
+                {overlayMode === "vfx" ? "이팩트 설명" : "(선택) 추가 지시"}
+              </label>
               <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
                 <textarea
                   value={overlayExtra}
                   onChange={e => setOverlayExtra(e.target.value)}
-                  placeholder="예: 더 어둡고 차분하게"
+                  placeholder={overlayMode === "vfx" ? "예: 번개 아우라, 파이어 이팩트, 글로우 링" : "예: 더 어둡고 차분하게"}
                   rows={2}
                   className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
                 />
@@ -1723,9 +1731,28 @@ export function SpriteCanvas({
           </div>
         </div>
 
-        {/* 우측 레일 — 참조 피커 + 하단 오버레이 실행 */}
+        {/* 우측 레일 — 서브 모드 토글 + 피커 or VFX 입력 + 하단 실행 */}
         <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
           <div className="flex-1 space-y-3 overflow-y-auto p-3 text-xs">
+            {/* 서브 모드 토글 */}
+            <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-[11px]">
+              {(["character", "vfx"] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => setOverlayMode(m)}
+                  className={`flex-1 rounded-md py-1 transition-colors ${
+                    overlayMode === m
+                      ? "bg-[color:var(--accent)]/20 text-text-primary"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {m === "character" ? "캐릭터 입히기" : "VFX 이팩트"}
+                </button>
+              ))}
+            </div>
+
+            {overlayMode === "character" && (
+              <>
             <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
               ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
             </div>
@@ -1872,21 +1899,105 @@ export function SpriteCanvas({
             <p className="text-[11px] text-[color:var(--danger)]/90">
               ⚠ 모든 프레임의 머리·얼굴·복장 일관성은 모델에 의존합니다(드리프트 가능). 베이스 시트 정렬 품질이 중요합니다.
             </p>
+              </>
+            )}
+
+            {overlayMode === "vfx" && (
+              <>
+                <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
+                  ⓘ 시트 포즈는 그대로 두고, 설명한 이팩트를 모든 프레임에 얹습니다.
+                </div>
+
+                {/* VFX 참조 이미지 피커 (선택) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-text-muted">(선택) VFX 참조 이미지</label>
+                    <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[11px]">
+                      {(["session", "gallery"] as const).map(scope => (
+                        <button
+                          key={scope}
+                          onClick={() => setOverlayRefScope(scope)}
+                          className={`rounded px-2 py-0.5 ${
+                            overlayRefScope === scope
+                              ? "bg-[color:var(--accent)]/20 text-text-primary"
+                              : "text-text-muted hover:text-text-primary"
+                          }`}
+                        >
+                          {scope === "session" ? "세션" : "갤러리"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {overlayCurrentRefs === null ? (
+                    <p className="text-[11px] text-text-muted/60">
+                      {overlayRefScope === "session" ? "세션 이미지를 불러오는 중…" : "갤러리를 불러오는 중…"}
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-1">
+                      <button
+                        onClick={() => overlayFileInputRef.current?.click()}
+                        disabled={overlayUploading}
+                        className="flex aspect-square flex-col items-center justify-center gap-1 rounded border border-dashed border-border text-text-muted hover:border-[color:var(--accent)]/60 hover:text-text-primary disabled:opacity-50"
+                        title="VFX 참조 이미지 업로드"
+                      >
+                        {overlayUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                        <span className="text-[9px]">{overlayUploading ? "업로드 중" : "업로드"}</span>
+                      </button>
+                      {overlayCurrentRefs.map(g => {
+                        const sel = overlayStyleRefId === g.id;
+                        return (
+                          <button
+                            key={g.id}
+                            onClick={() => setOverlayStyleRefId(sel ? null : g.id)}
+                            className={`aspect-square overflow-hidden rounded border checkerboard ${
+                              sel
+                                ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
+                                : "border-border hover:border-[color:var(--accent)]/50"
+                            }`}
+                            title={g.prompt ?? g.id}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={`/api/images/${g.id}`} alt={g.prompt ?? "참조"} className="h-full w-full object-contain" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {overlayStyleRefId && (
+                    <p className="text-[11px] text-text-muted/70">선택한 이미지의 VFX 스타일을 참고합니다.</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
-          {/* 하단 고정 — 오버레이 실행 */}
+          {/* 하단 고정 — 모드별 실행 */}
           <div className="flex-none border-t border-border p-3">
-            <button
-              onClick={() => {
-                if (overlayStyleRefId === null) return;
-                onOverlay?.(overlayStyleRefId, overlayExtra.trim());
-              }}
-              disabled={overlayStyleRefId === null}
-              title={overlayStyleRefId === null ? "입힐 캐릭터 선택 필요" : ""}
-              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-            >
-              <Layers size={14} /> 오버레이 실행 ▸
-            </button>
+            {overlayMode === "character" ? (
+              <button
+                onClick={() => {
+                  if (overlayStyleRefId === null) return;
+                  onOverlay?.(overlayStyleRefId, overlayExtra.trim());
+                }}
+                disabled={overlayStyleRefId === null}
+                title={overlayStyleRefId === null ? "입힐 캐릭터 선택 필요" : ""}
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+              >
+                <Layers size={14} /> 오버레이 실행 ▸
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (!overlayExtra.trim()) return;
+                  onVfxOverlay?.(overlayExtra.trim());
+                }}
+                disabled={!overlayExtra.trim()}
+                title={!overlayExtra.trim() ? "이팩트 설명 입력 필요" : ""}
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+              >
+                <Sparkles size={14} /> VFX 적용 ▸
+              </button>
+            )}
           </div>
         </div>
       </div>

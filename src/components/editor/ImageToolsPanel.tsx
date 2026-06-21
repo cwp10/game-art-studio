@@ -57,24 +57,26 @@ export function ImageToolsPanel({
       </header>
 
       {/* 행 2: 탭 바 */}
-      <div className="flex flex-none items-center gap-1 border-b border-border px-3.5 py-2">
-        {tabs.map(t => {
-          const Icon = t.icon;
-          const isActive = t.id === active;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActive(t.id)}
-              className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm ${
-                isActive
-                  ? "bg-[color:var(--accent)]/10 text-[color:var(--accent)]"
-                  : "text-text-muted hover:bg-bg-card hover:text-text-primary"
-              }`}
-            >
-              <Icon size={14} /> {t.label}
-            </button>
-          );
-        })}
+      <div className="flex flex-none items-center gap-2 border-b border-border px-3.5 py-2 text-xs">
+        <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5">
+          {tabs.map(t => {
+            const Icon = t.icon;
+            const isActive = t.id === active;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActive(t.id)}
+                className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+                  isActive
+                    ? "bg-[color:var(--accent)]/20 text-text-primary"
+                    : "text-text-muted hover:text-text-primary"
+                }`}
+              >
+                <Icon size={13} /> {t.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* 탭 콘텐츠 — 서브 패널의 자체 헤더는 숨김(hideHeader) */}
