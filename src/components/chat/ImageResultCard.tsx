@@ -174,6 +174,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Edit3 size={12} /> 편집
             </button>
+            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state", "normal_map", "mask", "layer"].includes(kind ?? "") && (
+              <button
+                onClick={() => onAction?.("open_image_tools")}
+                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
+                title="이미지 도구 — 노멀맵 · 9-Slice · 버튼 상태 생성"
+              >
+                <Wrench size={12} /> 이미지 도구
+              </button>
+            )}
             {kind !== "spritesheet" && (
               <button
                 onClick={() => onAction?.("make_sheet", { subjectMode: spriteSubjectMode })}
@@ -192,15 +201,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                 <Film size={12} /> 시트 분할
               </button>
             )}
-            <button
-              onClick={download}
-              disabled={downloading}
-              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-text-muted"
-              title="PNG 다운로드"
-            >
-              {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
-              {downloading ? "저장 중" : "저장"}
-            </button>
             {kind === "spritesheet" && (
               <button
                 onClick={() => onAction?.("overlay")}
@@ -217,15 +217,6 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             >
               <Columns2 size={12} /> 비교
             </button>
-            {!["spritesheet", "composite", "nine_slice", "nine_slice_scaled", "nine_slice_trimmed", "button_state", "normal_map", "mask", "layer"].includes(kind ?? "") && (
-              <button
-                onClick={() => onAction?.("open_image_tools")}
-                className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                title="이미지 도구 — 노멀맵 · 9-Slice · 버튼 상태 생성"
-              >
-                <Wrench size={12} /> 이미지 도구
-              </button>
-            )}
             <button
               onClick={() => onAction?.("reference")}
               className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
@@ -239,6 +230,15 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               title="같은 프롬프트로 한 번 더 (variation 효과)"
             >
               <RotateCw size={12} /> 복제
+            </button>
+            <button
+              onClick={download}
+              disabled={downloading}
+              className="flex h-7 items-center gap-1 whitespace-nowrap rounded border border-border px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-text-muted"
+              title="PNG 다운로드"
+            >
+              {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}{" "}
+              {downloading ? "저장 중" : "저장"}
             </button>
           </div>
         </div>
