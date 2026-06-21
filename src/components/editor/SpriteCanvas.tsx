@@ -1052,54 +1052,58 @@ export function SpriteCanvas({
 
   return (
     <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
-      <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
-        <button
-          onClick={onCancel}
-          className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
-          title="대화로 돌아가기"
-        >
-          <ArrowLeft size={14} /> 대화로 돌아가기
-        </button>
-        {/* 헤더 탭 — 분할(기존 본문) / 캐릭터 오버레이. 패널을 벗어나지 않고 전환. */}
-        <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+      <header className="flex flex-none flex-col border-b border-border px-3.5">
+        {/* 1행: 뒤로 + 이미지 정보 */}
+        <div className="flex h-[44px] items-center gap-3">
           <button
-            onClick={() => setActiveTab("split")}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
-              activeTab === "split"
-                ? "bg-[color:var(--accent)]/20 text-text-primary"
-                : "text-text-muted hover:text-text-primary"
-            }`}
+            onClick={onCancel}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted hover:bg-bg-panel hover:text-text-primary"
+            title="대화로 돌아가기"
           >
-            <Film size={13} /> 분할
+            <ArrowLeft size={14} /> 대화로 돌아가기
           </button>
-          <button
-            onClick={() => setActiveTab("overlay")}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
-              activeTab === "overlay"
-                ? "bg-[color:var(--accent)]/20 text-text-primary"
-                : "text-text-muted hover:text-text-primary"
-            }`}
-          >
-            <Layers size={13} /> 캐릭터 오버레이
-          </button>
+          <span className="ml-auto text-xs text-text-muted/60">
+            {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
+          </span>
         </div>
-        <span className="text-xs text-text-muted/60">
-          {imageWidth}×{imageHeight} · parent {parentGenerationId.slice(0, 6)}…
-        </span>
-        {/* 이펙트 탭 토글 — 시트 전체 후처리(drop_shadow/outline/glow) 패널 노출. 분할 탭에서만. */}
-        {activeTab === "split" && (
-          <button
-            onClick={() => setEffectTabOpen(o => !o)}
-            className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
-              effectTabOpen
-                ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                : "border-border text-text-muted hover:text-text-primary"
-            }`}
-            title="이펙트: 시트 전체에 그림자/외곽선/광선 후처리"
-          >
-            <Sparkles size={12} /> 이펙트
-          </button>
-        )}
+        {/* 2행: 탭 + 이펙트 */}
+        <div className="flex h-[38px] items-center gap-2 pb-1.5">
+          <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-0.5 text-xs">
+            <button
+              onClick={() => setActiveTab("split")}
+              className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+                activeTab === "split"
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Film size={13} /> 분할
+            </button>
+            <button
+              onClick={() => setActiveTab("overlay")}
+              className={`flex h-7 items-center gap-1.5 rounded-md px-3 transition-colors ${
+                activeTab === "overlay"
+                  ? "bg-[color:var(--accent)]/20 text-text-primary"
+                  : "text-text-muted hover:text-text-primary"
+              }`}
+            >
+              <Layers size={13} /> 캐릭터 오버레이
+            </button>
+          </div>
+          {activeTab === "split" && (
+            <button
+              onClick={() => setEffectTabOpen(o => !o)}
+              className={`ml-auto flex h-7 items-center gap-1 rounded border px-2 text-xs ${
+                effectTabOpen
+                  ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                  : "border-border text-text-muted hover:text-text-primary"
+              }`}
+              title="이펙트: 시트 전체에 그림자/외곽선/광선 후처리"
+            >
+              <Sparkles size={12} /> 이펙트
+            </button>
+          )}
+        </div>
       </header>
 
       {activeTab === "split" && (

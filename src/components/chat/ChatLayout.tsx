@@ -9,6 +9,8 @@ import { SessionList } from "./SessionList";
 import { StatusButton } from "./StatusButton";
 import { CanvasEditor } from "@/components/editor/CanvasEditor";
 import { ImageToolsPanel } from "@/components/editor/ImageToolsPanel";
+import { NineSliceEditor } from "@/components/editor/NineSliceEditor";
+import { NormalMapPanel } from "@/components/editor/NormalMapPanel";
 import { ReskinPanel, type ReskinSubmit } from "@/components/editor/ReskinPanel";
 import { SpriteCanvas } from "@/components/editor/SpriteCanvas";
 import { SpriteGenPanel } from "@/components/editor/SpriteGenPanel";
@@ -79,6 +81,7 @@ type EditTarget = {
 type Editing =
   | ({ mode: "sprite" } & EditTarget)
   | ({ mode: "reskin"; initialMode?: "skin" | "color" | "style"; initialSkinInput?: "text" | "image"; fromCanvasSeedId?: string } & EditTarget)
+  | ({ mode: "normal_map" } & EditTarget)
   | null;
 
 export function ChatLayout() {
@@ -89,14 +92,10 @@ export function ChatLayout() {
   const [spriteGen, setSpriteGen] = useState<{ reference?: EditTarget; initialSubjectMode?: "character" | "object" } | null>(null);
   // 비교 오버레이 — afterId(현재 이미지) + 활성 세션. null 이면 닫힘.
   const [comparing, setComparing] = useState<{ afterId: string } | null>(null);
-  // 이미지 도구 오버레이(노멀맵/9-slice/버튼 상태 통합 탭) — null 이면 닫힘.
-  const [imageToolsOpen, setImageToolsOpen] = useState<{
-    generationId: string;
-    imageUrl: string;
-    width: number;
-    height: number;
-    kind?: string;
-  } | null>(null);
+  // 9-slice 편집기 오버레이 — generationId 로 원본 지정. null 이면 닫힘.
+  const [nineSliceOpen, setNineSliceOpen] = useState<{ generationId: string } | null>(null);
+  // 버튼 상태 편집기(이미지 도구) 오버레이 — null 이면 닫힘.
+  const [imageToolsOpen, setImageToolsOpen] = useState<{ generationId: string } | null>(null);
   // 통합 캔버스 에디터 — 전체전환(inset-0). seedGenerationId 로 첫 레이어. null 이면 닫힘.
   const [canvasOpen, setCanvasOpen] = useState<{ seedGenerationId: string } | null>(null);
   const [libOpen, setLibOpen] = useState(false);
@@ -489,6 +488,8 @@ export function ChatLayout() {
         | "reskin"
         | "overlay"
         | "make_sheet"
+        | "make_normal_map"
+        | "open_nine_slice"
         | "open_image_tools"
         | "canvas_edit"
         | "reference"
@@ -526,6 +527,7 @@ export function ChatLayout() {
       const openCanvas = (genId: string) => {
         setEditing(null);
         setSpriteGen(null);
+        setNineSliceOpen(null);
         setImageToolsOpen(null);
         setCanvasOpen({ seedGenerationId: genId });
       };
@@ -565,17 +567,18 @@ export function ChatLayout() {
           if (!payload.generationId) return;
           openCanvas(payload.generationId);
         },
-        open_image_tools: () => {
-          if (!payload.generationId || !payload.width || !payload.height) return;
+        make_normal_map: () => openEditPanel("normal_map"),
+        open_nine_slice: () => {
+          if (!payload.generationId) return;
           setEditing(null);
           setSpriteGen(null);
-          setImageToolsOpen({
-            generationId: payload.generationId,
-            imageUrl: `/api/images/${payload.generationId}`,
-            width: payload.width,
-            height: payload.height,
-            kind: payload.kind,
-          });
+          setNineSliceOpen({ generationId: payload.generationId });
+        },
+        open_image_tools: () => {
+          if (!payload.generationId) return;
+          setEditing(null);
+          setSpriteGen(null);
+          setImageToolsOpen({ generationId: payload.generationId });
         },
         overlay: () =>
           // 캐릭터 오버레이 = 리스킨 "외형 교체" 탭의 "이미지 참조" 서브를 시트 베이스로 바로 오픈.
@@ -900,6 +903,28 @@ export function ChatLayout() {
               onCancel={handleCancel}
             />
           );
+        case "normal_map":
+          return (
+            <NormalMapPanel
+              generationId={editing.generationId}
+              imageUrl={editing.imageUrl}
+              width={editing.width}
+              height={editing.height}
+              onResult={res => {
+                dispatch({
+                  type: "add_result_card",
+                  tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
+                  userText: "🗺️ 노멀맵",
+                  generationId: res.generationId,
+                  width: res.width,
+                  height: res.height,
+                  kind: "normal_map",
+                });
+                setEditing(null);
+              }}
+              onClose={closeEditing}
+            />
+          );
       }
     })();
     if (!panel) return null;
@@ -912,6 +937,7 @@ export function ChatLayout() {
   const editorPanelOpen =
     editing !== null ||
     spriteGen !== null ||
+    nineSliceOpen !== null ||
     imageToolsOpen !== null ||
     canvasOpen !== null;
 
@@ -1024,29 +1050,13 @@ export function ChatLayout() {
           />
         </div>
       )}
-      {imageToolsOpen && (
+      {nineSliceOpen && (
         <div className="fixed inset-0 z-40">
-          <ImageToolsPanel
-            generationId={imageToolsOpen.generationId}
-            imageUrl={imageToolsOpen.imageUrl}
-            width={imageToolsOpen.width}
-            height={imageToolsOpen.height}
-            kind={imageToolsOpen.kind}
+          <NineSliceEditor
+            generationId={nineSliceOpen.generationId}
             sessionId={state.activeSessionId}
-            onClose={closeImageTools}
-            onNormalMapResult={res => {
-              dispatch({
-                type: "add_result_card",
-                tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-                userText: "🗺️ 노멀맵",
-                generationId: res.generationId,
-                width: res.width,
-                height: res.height,
-                kind: "normal_map",
-              });
-              closeImageTools();
-            }}
-            onNineSliceResult={res => {
+            onClose={() => setNineSliceOpen(null)}
+            onResult={res => {
               dispatch({
                 type: "add_result_card",
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
@@ -1061,10 +1071,18 @@ export function ChatLayout() {
                 height: res.height,
                 kind: res.kind,
               });
-              closeImageTools();
+              setNineSliceOpen(null);
             }}
+          />
+        </div>
+      )}
+      {imageToolsOpen && (
+        <div className="fixed inset-0 z-40">
+          <ImageToolsPanel
+            generationId={imageToolsOpen.generationId}
+            sessionId={state.activeSessionId}
+            onClose={closeImageTools}
             onButtonStateResult={res => {
-              // 3종(normal/hover/pressed)을 각각 별도 카드로 일괄 삽입 — tempId 는 슬롯마다 새로.
               const labels: Array<["normal" | "hover" | "pressed", string]> = [
                 ["normal", "🎮 버튼 Normal"],
                 ["hover", "🎮 버튼 Hover"],
@@ -1081,7 +1099,6 @@ export function ChatLayout() {
                   kind: "button_state",
                 });
               }
-              // 버튼 상태 패널은 닫지 않음 — 파라미터 재조정을 위해
             }}
             onButtonStateAddOne={res => {
               const labels = { normal: "🎮 버튼 Normal", hover: "🎮 버튼 Hover", pressed: "🎮 버튼 Pressed" };

@@ -21,6 +21,8 @@ type Props = {
       | "reskin"
       | "overlay"
       | "make_sheet"
+      | "make_normal_map"
+      | "open_nine_slice"
       | "open_image_tools"
       | "canvas_edit"
       | "reference"
