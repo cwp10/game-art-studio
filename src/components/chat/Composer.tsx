@@ -1,6 +1,6 @@
 "use client";
 
-import { Grid3x3, LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
+import { LayoutGrid, Send, Sparkles, User, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { StylePresetPicker } from "@/components/library/StylePresetPicker";
@@ -39,8 +39,6 @@ type Props = {
   onAskSuggestions?: (text: string) => void;
   /** 입력창에 이미지 파일을 드롭하면 업로드 → 다음 메시지의 reference 로 자동 첨부. */
   onUploadImage?: (file: File) => void;
-  /** [시트 만들기] 버튼 — 참조 이미지 없이 SpriteGenPanel 을 바로 열기. */
-  onOpenSpritePanel?: () => void;
 };
 
 export function Composer({
@@ -52,7 +50,6 @@ export function Composer({
   attachment,
   onAskSuggestions,
   onUploadImage,
-  onOpenSpritePanel,
 }: Props) {
   const [text, setText] = useState("");
   const [presetId, setPresetId] = useState<string | null>(null);
@@ -288,16 +285,6 @@ export function Composer({
                   ))}
                 </select>
               </label>
-            )}
-            {onOpenSpritePanel && (
-              <button
-                type="button"
-                onClick={onOpenSpritePanel}
-                className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:border-[color:var(--accent)]/40 hover:text-text-primary"
-                title="스프라이트시트 생성 — 캐릭터는 먼저 이미지를 만든 뒤 결과 카드의 [시트 만들기]를 쓰면 스타일이 더 일관됩니다"
-              >
-                <Grid3x3 size={12} /> 시트
-              </button>
             )}
             <button
               type="button"

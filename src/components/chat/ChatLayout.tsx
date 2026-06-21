@@ -1006,7 +1006,6 @@ export function ChatLayout() {
           attachment={composerAttachment}
           onAskSuggestions={handleAskSuggestions}
           onUploadImage={handleUploadImage}
-          onOpenSpritePanel={() => { setEditing(null); setSpriteGen({}); }}
         />
       </div>
       {renderEditPanel()}
