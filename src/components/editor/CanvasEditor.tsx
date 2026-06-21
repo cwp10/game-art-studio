@@ -279,8 +279,11 @@ export function CanvasEditor({
   const [refId, setRefId] = useState<string | null>(null);
   // 선택 레이어 이미지의 변형 전 표시 크기(px) — 핸들 박스를 scale 밖에서 일정 크기로 그리기 위해.
   const [selBox, setSelBox] = useState<{ w: number; h: number } | null>(null);
-  // 드래그 중 센터 스냅 가이드(세로/가로 선) 표시.
-  const [snapGuides, setSnapGuides] = useState<{ v: boolean; h: boolean } | null>(null);
+  // 드래그 중 스냅 가이드(세로/가로 선) 표시. vEdge/hEdge 는 가장자리 스냅 시 방향.
+  const [snapGuides, setSnapGuides] = useState<{
+    v: boolean; h: boolean;
+    vEdge?: "left" | "right"; hEdge?: "top" | "bottom";
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const zp = useZoomPan();
 
@@ -1078,15 +1081,27 @@ export function CanvasEditor({
   }, [zoomAtPoint]);
 
   // ── 레이어 본체 드래그 = 이동 (선택). client delta → canvas px 는 zoom 으로 역산. ──────
-  const moveDragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const moveDragRef = useRef<{
+    sx: number; sy: number; ox: number; oy: number;
+    fhw: number; fhh: number; // 캔버스 반폭/반높이 (canvas px)
+    hw: number; hh: number;   // 레이어 렌더 반폭/반높이 (canvas px)
+  } | null>(null);
   const onLayerBodyDown = useCallback(
     (e: React.PointerEvent, layer: Layer) => {
       e.preventDefault();
       e.stopPropagation();
       setSelectedLayerId(layer.id);
       pushUndo();
-      moveDragRef.current = { sx: e.clientX, sy: e.clientY, ox: layer.x, oy: layer.y };
       const zoom = zp.zoom;
+      const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
+      const frameRect = frame?.getBoundingClientRect();
+      moveDragRef.current = {
+        sx: e.clientX, sy: e.clientY, ox: layer.x, oy: layer.y,
+        fhw: frameRect ? frameRect.width / zoom / 2 : Infinity,
+        fhh: frameRect ? frameRect.height / zoom / 2 : Infinity,
+        hw: selBox ? (selBox.w / 2) * layer.scale * layer.stretchW : 0,
+        hh: selBox ? (selBox.h / 2) * layer.scale * layer.stretchH : 0,
+      };
       const onMove = (ev: PointerEvent) => {
         const d = moveDragRef.current;
         if (!d) return;
@@ -1097,19 +1112,25 @@ export function CanvasEditor({
           if (Math.abs(ev.clientX - d.sx) >= Math.abs(ev.clientY - d.sy)) ny = d.oy;
           else nx = d.ox;
         }
-        // 센터 스냅 — 레이어 중심이 캔버스 중앙(0)에 가까우면 달라붙고 가이드선 표시. 임계값은 화면상 8px.
+        // 스냅 — 임계값 화면상 8px. 중앙 우선, 미달 시 4면(가장자리) 검사.
         const snap = 8 / zoom;
-        let gv = false;
-        let gh = false;
-        if (Math.abs(nx) < snap) {
-          nx = 0;
-          gv = true;
+        const { fhw, fhh, hw, hh } = d;
+        let gv = false, gh = false;
+        let vEdge: "left" | "right" | undefined;
+        let hEdge: "top" | "bottom" | undefined;
+        // 중앙 스냅
+        if (Math.abs(nx) < snap) { nx = 0; gv = true; }
+        if (Math.abs(ny) < snap) { ny = 0; gh = true; }
+        // 면 스냅 — 레이어 엣지가 캔버스 경계에 가까우면 달라붙음
+        if (!gv && hw > 0) {
+          if (Math.abs(nx - hw + fhw) < snap) { nx = hw - fhw; gv = true; vEdge = "left"; }
+          else if (Math.abs(nx + hw - fhw) < snap) { nx = fhw - hw; gv = true; vEdge = "right"; }
         }
-        if (Math.abs(ny) < snap) {
-          ny = 0;
-          gh = true;
+        if (!gh && hh > 0) {
+          if (Math.abs(ny - hh + fhh) < snap) { ny = hh - fhh; gh = true; hEdge = "top"; }
+          else if (Math.abs(ny + hh - fhh) < snap) { ny = fhh - hh; gh = true; hEdge = "bottom"; }
         }
-        setSnapGuides(gv || gh ? { v: gv, h: gh } : null);
+        setSnapGuides(gv || gh ? { v: gv, h: gh, vEdge, hEdge } : null);
         patchLayer(layer.id, { x: nx, y: ny });
       };
       const onUp = () => {
@@ -1121,7 +1142,7 @@ export function CanvasEditor({
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
     },
-    [zp.zoom, pushUndo, patchLayer],
+    [zp.zoom, pushUndo, patchLayer, selBox],
   );
 
   // ── 합치기 → /api/composite (레이어별 transform + filters 전부 포함) ───────────────
@@ -1533,12 +1554,24 @@ export function CanvasEditor({
                         )}
                       </div>
                   )}
-                {/* 센터 스냅 가이드선 — 캔버스 중앙. */}
-                {snapGuides?.v && (
+                {/* 스냅 가이드선 — 중앙 or 가장자리. */}
+                {snapGuides?.v && !snapGuides.vEdge && (
                   <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-px bg-[color:var(--accent)]" />
                 )}
-                {snapGuides?.h && (
+                {snapGuides?.vEdge === "left" && (
+                  <div className="pointer-events-none absolute bottom-0 left-0 top-0 w-px bg-[color:var(--accent)]" />
+                )}
+                {snapGuides?.vEdge === "right" && (
+                  <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-px bg-[color:var(--accent)]" />
+                )}
+                {snapGuides?.h && !snapGuides.hEdge && (
                   <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-px bg-[color:var(--accent)]" />
+                )}
+                {snapGuides?.hEdge === "top" && (
+                  <div className="pointer-events-none absolute left-0 right-0 top-0 h-px bg-[color:var(--accent)]" />
+                )}
+                {snapGuides?.hEdge === "bottom" && (
+                  <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-px bg-[color:var(--accent)]" />
                 )}
               </div>
             </div>
