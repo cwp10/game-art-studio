@@ -99,9 +99,10 @@ export function ButtonStateEditor({ generationId, sessionId, onClose, onResult, 
         >
           <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Gamepad2 size={14} /> 버튼 상태 생성
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium text-text-primary">이미지 도구</span>
+          <span className="text-[11px] text-text-muted">normal · hover · pressed 3종 버튼 상태를 생성합니다</span>
+        </div>
       </header>
 
       {/* 본문 — 중앙 스테이지(3 상태 슬롯) + 우측 레일(파라미터·생성). 캔버스 에디터와 동일 골격. */}

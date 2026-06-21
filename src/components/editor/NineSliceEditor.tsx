@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Loader2, Scissors } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
 
 /**
@@ -156,9 +156,10 @@ export function NineSliceEditor({ generationId, sessionId, onClose, onResult }: 
         >
           <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Scissors size={14} /> 9-slice 편집기
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium text-text-primary">9-Slice 편집기</span>
+          <span className="text-[11px] text-text-muted">모서리를 유지한 채 크기를 조절합니다</span>
+        </div>
       </header>
 
       {/* 도구 스트립 — 출력 규격(리사이즈). 캔버스 에디터 상단 스트립과 동일 위치. */}

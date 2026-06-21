@@ -60,9 +60,10 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, onResult
         >
           <ArrowLeft size={14} /> 대화로 돌아가기
         </button>
-        <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-          <Layers size={14} /> 노멀맵 생성
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm font-medium text-text-primary">노멀맵 생성</span>
+          <span className="text-[11px] text-text-muted">라이팅용 노멀맵 텍스처를 생성합니다</span>
+        </div>
       </header>
 
       {/* 본문 — 중앙 스테이지(원본·결과 미리보기) + 우측 레일(옵션·액션). 캔버스 에디터와 동일 골격. */}

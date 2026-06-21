@@ -6,7 +6,6 @@ import {
   Download,
   Edit3,
   Film,
-  Gamepad2,
   Grid3x3,
   Layers,
   Link2,
@@ -15,6 +14,7 @@ import {
   Palette,
   RotateCw,
   Scissors,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -277,9 +277,9 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
                     <button
                       onClick={() => { onAction?.("open_image_tools"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="버튼 상태 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
+                      title="이미지 도구 — normal/hover/pressed 3종 UI 버튼 상태 이미지를 생성"
                     >
-                      <Gamepad2 size={12} /> 버튼 상태
+                      <Wrench size={12} /> 이미지 도구
                     </button>
                   )}
                   <button
