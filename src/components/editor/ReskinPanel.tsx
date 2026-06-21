@@ -3,7 +3,6 @@
 import { ArrowLeft, Brush, Loader2, Palette, Sparkles, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
-import { PanelFooter } from "@/components/editor/PanelFooter";
 import { AiSuggestButton, AiSuggestDropdown } from "@/components/editor/AiSuggestControls";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 import type { Generation } from "@/types/db";
@@ -319,272 +318,245 @@ export function ReskinPanel({
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col gap-3 overflow-y-auto p-3">
-
-        {/* 원본 미리보기 + kind 배지 — 크게 표시. */}
-        <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-text-muted/80">{overlay ? "베이스 시트" : "원본"}</span>
-            <span className="text-text-primary">{width}×{height}</span>
-            {isSheet && (
-              <span className="inline-flex items-center rounded bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">
-                스프라이트시트{grid ? ` · ${grid.rows}×${grid.cols}` : ""}
-              </span>
-            )}
-          </div>
-          <div className="overflow-hidden rounded border border-border checkerboard">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt="원본" className="mx-auto block max-h-[44vh] w-auto object-contain" />
-          </div>
-        </div>
-
-        {/* "외형 교체" 탭 내부 서브 토글 (텍스트 / 이미지 참조) */}
-        {uiMode === "skin" && (
-          <div className="flex shrink-0 gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
-            {(["text", "image"] as const).map(s => (
-              <button
-                key={s}
-                onClick={() => setSkinInput(s)}
-                className={`flex h-7 flex-1 items-center justify-center rounded border px-2 ${
-                  skinInput === s
-                    ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                    : "border-transparent text-text-muted hover:text-text-primary"
-                }`}
-              >
-                {SKIN_INPUT_LABELS[s]}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* 모드별 입력 */}
-        {uiMode === "skin" && skinInput === "text" && (
-          <div className="shrink-0 space-y-1">
-            <label className="text-xs text-text-muted">새 스킨 설명</label>
-            <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
-              <textarea
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-                placeholder="예: 파란 갑옷의 기사, 은빛 검"
-                rows={3}
-                className="block min-h-[78px] w-full shrink-0 resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
-              />
-              <div className="flex items-center border-t border-border px-2 py-1.5">
-                <div className="relative ml-auto">
-                  <AiSuggestButton
-                    loading={aiLoading && aiTarget === "prompt"}
-                    onClick={() => handleAiSuggest("prompt")}
-                  />
-                  {aiSuggestions && aiTarget === "prompt" && (
-                    <AiSuggestDropdown
-                      suggestions={aiSuggestions}
-                      onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
-                      onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                    />
-                  )}
-                </div>
-              </div>
+      {/* 본문 — 중앙(원본 스테이지 + 대화창) + 우측 레일(하위 옵션 + 실행). 캔버스 골격. */}
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* 원본 스테이지 */}
+          <div className="relative m-3 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]">
+            <div className="checkerboard overflow-hidden rounded-lg border border-border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageUrl} alt={overlay ? "베이스 시트" : "원본"} className="block max-h-[56vh] max-w-full object-contain" />
             </div>
-            <AiSuggestResult
-              show={aiTarget === "prompt" && aiSuggestions === null}
-              result={aiResult}
-              error={aiError}
-              onApply={v => { setPrompt(v); setAiResult(null); }}
-            />
-            <p className="text-[11px] text-text-muted/70">
-              포즈·실루엣·구도는 유지하고 색·재질·테마만 교체됩니다.
-            </p>
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md bg-black/55 px-2 py-1 text-[11px] backdrop-blur">
+              <span className="text-text-muted/80">{overlay ? "베이스 시트" : "원본"}</span>
+              <span className="text-text-primary">{width}×{height}</span>
+              {isSheet && (
+                <span className="inline-flex items-center rounded bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">
+                  스프라이트시트{grid ? ` · ${grid.rows}×${grid.cols}` : ""}
+                </span>
+              )}
+            </div>
           </div>
-        )}
 
-        {uiMode === "color" && (
-          <div className="shrink-0 space-y-2">
-            {/* 기본 = AI 팔레트(mode b). 정밀 픽셀 색교체(b-precise)는 고급 설정으로 접어둠. */}
-            {!advancedOpen && (
+          {/* 대화창 (하단) — 모드별 텍스트 입력 */}
+          <div className="flex-none border-t border-border p-3">
+            {uiMode === "skin" && skinInput === "text" && (
               <div className="space-y-1">
-                <label className="text-xs text-text-muted">어떤 색으로?</label>
-                <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
+                <label className="text-xs text-text-muted">새 스킨 설명</label>
+                <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
                   <textarea
                     value={prompt}
                     onChange={e => setPrompt(e.target.value)}
-                    placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
-                    rows={3}
-                    className="block min-h-[78px] w-full shrink-0 resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                    placeholder="예: 파란 갑옷의 기사, 은빛 검"
+                    rows={2}
+                    className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
                   />
                   <div className="flex items-center border-t border-border px-2 py-1.5">
                     <div className="relative ml-auto">
-                      <AiSuggestButton
-                        loading={aiLoading && aiTarget === "prompt"}
-                        onClick={() => handleAiSuggest("prompt")}
-                      />
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
                       {aiSuggestions && aiTarget === "prompt" && (
-                        <AiSuggestDropdown
-                          suggestions={aiSuggestions}
-                          onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }}
-                          onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                        />
+                        <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
                       )}
                     </div>
                   </div>
                 </div>
-                <AiSuggestResult
-                  show={aiTarget === "prompt" && aiSuggestions === null}
-                  result={aiResult}
-                  error={aiError}
-                  onApply={v => { setPrompt(v); setAiResult(null); }}
-                />
-                <p className="text-[11px] text-text-muted/70">형태·선은 그대로 두고 색 팔레트만 바꿉니다.</p>
-                <p className="text-[11px] text-[color:var(--danger)]/90">
-                  ⚠ img2img 특성상 형태가 미세하게 틀어질 수 있어요.
-                </p>
+                <AiSuggestResult show={aiTarget === "prompt" && aiSuggestions === null} result={aiResult} error={aiError} onApply={v => { setPrompt(v); setAiResult(null); }} />
+                <p className="text-[11px] text-text-muted/70">포즈·실루엣·구도는 유지하고 색·재질·테마만 교체됩니다.</p>
               </div>
             )}
-
-            {/* 고급 설정 토글 — 펼치면 정밀 픽셀 색교체(b-precise, codex 미사용). */}
-            <button
-              onClick={() => {
-                if (advancedOpen) {
-                  setAdvancedOpen(false);
-                  setBMode("ai");
-                } else {
-                  setAdvancedOpen(true);
-                  enterPrecise();
-                }
-              }}
-              className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary"
-            >
-              고급 설정 {advancedOpen ? "▾" : "▸"}
-              <span className="text-text-muted/50">정밀 픽셀 색교체</span>
-            </button>
-
-            {advancedOpen && (
-              <div className="space-y-2 rounded-lg border border-border bg-bg-card/50 p-2">
-                <label className="text-xs text-text-muted">원본 색 → 바꿀 색</label>
-                {extracting && (
-                  <p className="flex items-center gap-1 text-[11px] text-text-muted/60">
-                    <Loader2 size={12} className="animate-spin" /> 팔레트 추출 중…
-                  </p>
-                )}
-                {!extracting && palette && palette.length === 0 && (
-                  <p className="text-[11px] text-text-muted/60">추출된 색이 없습니다(채도가 낮은 이미지).</p>
-                )}
-                {!extracting && palette && palette.length > 0 && (
-                  <div className="space-y-1.5">
-                    {palette.map(c => {
-                      const t = targets[c] ?? c;
-                      const changed = t.toLowerCase() !== c.toLowerCase();
-                      return (
-                        <div key={c} className="flex items-center gap-2 text-xs">
-                          <span
-                            className="h-6 w-6 shrink-0 rounded border border-border"
-                            style={{ background: c }}
-                          />
-                          <span className="w-16 font-mono text-text-muted">{c}</span>
-                          <span className="text-text-muted">→</span>
-                          <input
-                            type="color"
-                            value={t}
-                            onChange={e => setTargets(p => ({ ...p, [c]: e.target.value }))}
-                            className="h-6 w-9 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
-                          />
-                          <span className="flex-1 font-mono text-text-muted/70">
-                            {changed ? t : "(변경 안 함)"}
-                          </span>
-                          {changed && (
-                            <button
-                              onClick={() => setTargets(p => ({ ...p, [c]: c }))}
-                              className="rounded px-1 text-[10px] text-text-muted hover:text-text-primary"
-                              title="원래 색으로"
-                            >
-                              초기화
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                    <label className="flex items-center gap-2 pt-1 text-[11px] text-text-muted">
-                      <input
-                        type="checkbox"
-                        checked={includeGrays}
-                        onChange={e => setIncludeGrays(e.target.checked)}
-                      />
-                      회색·흑백 영역도 포함 (기본: 외곽선 보호 위해 제외)
-                    </label>
+            {uiMode === "color" && !advancedOpen && (
+              <div className="space-y-1">
+                <label className="text-xs text-text-muted">어떤 색으로?</label>
+                <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
+                  <textarea
+                    value={prompt}
+                    onChange={e => setPrompt(e.target.value)}
+                    placeholder="예: 빨강→파랑, 금색 장식은 은색으로"
+                    rows={2}
+                    className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                  />
+                  <div className="flex items-center border-t border-border px-2 py-1.5">
+                    <div className="relative ml-auto">
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
+                      {aiSuggestions && aiTarget === "prompt" && (
+                        <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
+                      )}
+                    </div>
                   </div>
-                )}
-                <p className="text-[11px] text-text-muted/70">
-                  형태·음영을 100% 보존하고 색조만 교체합니다 (codex 미사용, 즉시 처리).
-                </p>
+                </div>
+                <AiSuggestResult show={aiTarget === "prompt" && aiSuggestions === null} result={aiResult} error={aiError} onApply={v => { setPrompt(v); setAiResult(null); }} />
+                <p className="text-[11px] text-text-muted/70">형태·선은 그대로 두고 색 팔레트만 바꿉니다. (⚠ img2img라 형태가 미세하게 틀어질 수 있어요)</p>
+              </div>
+            )}
+            {uiMode === "color" && advancedOpen && (
+              <p className="text-[11px] text-text-muted/60">정밀 색교체는 오른쪽 패널의 팔레트에서 설정하세요.</p>
+            )}
+            {uiMode === "style" && (
+              <div className="space-y-1">
+                <label className="text-xs text-text-muted">직접 입력 (선택)</label>
+                <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
+                  <textarea
+                    value={styleCustom}
+                    onChange={e => setStyleCustom(e.target.value)}
+                    placeholder="예: 16비트 레트로 RPG 스타일"
+                    rows={2}
+                    className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                  />
+                  <div className="flex items-center border-t border-border px-2 py-1.5">
+                    <div className="relative ml-auto">
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
+                      {aiSuggestions && aiTarget === "prompt" && (
+                        <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setStyleCustom(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <AiSuggestResult show={aiTarget === "prompt" && aiSuggestions === null} result={aiResult} error={aiError} onApply={v => { setStyleCustom(v); setAiResult(null); }} />
+              </div>
+            )}
+            {uiMode === "skin" && skinInput === "image" && (
+              <div className="space-y-1">
+                <label className="text-xs text-text-muted">(선택) 추가 지시</label>
+                <div className="rounded-lg border border-border bg-bg-card transition-colors focus-within:border-[color:var(--accent)]/60">
+                  <textarea
+                    value={extra}
+                    onChange={e => setExtra(e.target.value)}
+                    placeholder="예: 더 어둡고 차분하게"
+                    rows={2}
+                    className="block min-h-[60px] w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
+                  />
+                  <div className="flex items-center border-t border-border px-2 py-1.5">
+                    <div className="relative ml-auto">
+                      <AiSuggestButton loading={aiLoading && aiTarget === "extra"} onClick={() => handleAiSuggest("extra")} />
+                      {aiSuggestions && aiTarget === "extra" && (
+                        <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <AiSuggestResult show={aiTarget === "extra" && aiSuggestions === null} result={aiResult} error={aiError} onApply={v => { setExtra(v); setAiResult(null); }} />
               </div>
             )}
           </div>
-        )}
+        </div>
 
-        {uiMode === "style" && (
-          <div className="shrink-0 space-y-3">
-            {/* 프리셋 그리드 */}
-            <div className="space-y-1">
-              <label className="text-xs text-text-muted">스타일 프리셋</label>
-              <div className="grid grid-cols-4 gap-1">
-                {STYLE_PRESETS.map(p => (
+        {/* 우측 레일 — 하위 옵션 + 하단 리스킨 실행. */}
+        <div className="flex w-[300px] flex-none flex-col border-l border-border bg-bg-panel">
+          <div className="flex-1 space-y-3 overflow-y-auto p-3">
+            {/* 외형: 텍스트/이미지 참조 토글 */}
+            {uiMode === "skin" && (
+              <div className="flex gap-1 rounded-lg border border-border bg-bg-card p-1 text-[11px]">
+                {(["text", "image"] as const).map(s => (
                   <button
-                    key={p.value}
-                    onClick={() => setStylePreset(prev => (prev === p.value ? null : p.value))}
-                    className={`rounded border px-2 py-1.5 text-[11px] transition-colors ${
-                      stylePreset === p.value
+                    key={s}
+                    onClick={() => setSkinInput(s)}
+                    className={`flex h-7 flex-1 items-center justify-center rounded border px-2 ${
+                      skinInput === s
                         ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                        : "border-border text-text-muted hover:border-[color:var(--accent)]/50 hover:text-text-primary"
+                        : "border-transparent text-text-muted hover:text-text-primary"
                     }`}
                   >
-                    {p.label}
+                    {SKIN_INPUT_LABELS[s]}
                   </button>
                 ))}
               </div>
-            </div>
+            )}
 
-            {/* 커스텀 입력 */}
-            <div className="space-y-1">
-              <label className="text-xs text-text-muted">직접 입력 (선택)</label>
-              <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
-                <textarea
-                  value={styleCustom}
-                  onChange={e => setStyleCustom(e.target.value)}
-                  placeholder="예: 16비트 레트로 RPG 스타일"
-                  rows={2}
-                  className="block w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
-                />
-                <div className="flex items-center border-t border-border px-2 py-1.5">
-                  <div className="relative ml-auto">
-                    <AiSuggestButton
-                      loading={aiLoading && aiTarget === "prompt"}
-                      onClick={() => handleAiSuggest("prompt")}
-                    />
-                    {aiSuggestions && aiTarget === "prompt" && (
-                      <AiSuggestDropdown
-                        suggestions={aiSuggestions}
-                        onSelect={v => { setStyleCustom(v); setAiSuggestions(null); setAiTarget(null); }}
-                        onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                      />
+            {/* 색: 고급 설정 토글 + 정밀 팔레트 */}
+            {uiMode === "color" && (
+              <div className="space-y-2 text-xs">
+                <button
+                  onClick={() => {
+                    if (advancedOpen) {
+                      setAdvancedOpen(false);
+                      setBMode("ai");
+                    } else {
+                      setAdvancedOpen(true);
+                      enterPrecise();
+                    }
+                  }}
+                  className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary"
+                >
+                  고급 설정 {advancedOpen ? "▾" : "▸"}
+                  <span className="text-text-muted/50">정밀 픽셀 색교체</span>
+                </button>
+                {advancedOpen && (
+                  <div className="space-y-2 rounded-lg border border-border bg-bg-card/50 p-2">
+                    <label className="text-xs text-text-muted">원본 색 → 바꿀 색</label>
+                    {extracting && (
+                      <p className="flex items-center gap-1 text-[11px] text-text-muted/60">
+                        <Loader2 size={12} className="animate-spin" /> 팔레트 추출 중…
+                      </p>
                     )}
+                    {!extracting && palette && palette.length === 0 && (
+                      <p className="text-[11px] text-text-muted/60">추출된 색이 없습니다(채도가 낮은 이미지).</p>
+                    )}
+                    {!extracting && palette && palette.length > 0 && (
+                      <div className="space-y-1.5">
+                        {palette.map(c => {
+                          const t = targets[c] ?? c;
+                          const changed = t.toLowerCase() !== c.toLowerCase();
+                          return (
+                            <div key={c} className="flex items-center gap-1.5 text-xs">
+                              <span className="h-5 w-5 shrink-0 rounded border border-border" style={{ background: c }} />
+                              <span className="font-mono text-[10px] text-text-muted">{c}</span>
+                              <span className="text-text-muted">→</span>
+                              <input
+                                type="color"
+                                value={t}
+                                onChange={e => setTargets(p => ({ ...p, [c]: e.target.value }))}
+                                className="h-5 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0"
+                              />
+                              {changed && (
+                                <button
+                                  onClick={() => setTargets(p => ({ ...p, [c]: c }))}
+                                  className="ml-auto rounded px-1 text-[10px] text-text-muted hover:text-text-primary"
+                                  title="원래 색으로"
+                                >
+                                  ↺
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <label className="flex items-center gap-2 pt-1 text-[11px] text-text-muted">
+                          <input type="checkbox" checked={includeGrays} onChange={e => setIncludeGrays(e.target.checked)} />
+                          회색·흑백도 포함
+                        </label>
+                      </div>
+                    )}
+                    <p className="text-[11px] text-text-muted/70">형태·음영 100% 보존, 색조만 교체(즉시 처리).</p>
                   </div>
-                </div>
+                )}
               </div>
-              <AiSuggestResult
-                show={aiTarget === "prompt" && aiSuggestions === null}
-                result={aiResult}
-                error={aiError}
-                onApply={v => { setStyleCustom(v); setAiResult(null); }}
-              />
-            </div>
+            )}
 
-            <p className="text-[11px] text-text-muted/70">
-              구성·형태는 유지하고 화풍(재질·색조·렌더링 스타일)만 바꿉니다.
-            </p>
-          </div>
-        )}
+            {/* 화풍: 프리셋 그리드 */}
+            {uiMode === "style" && (
+              <div className="space-y-1">
+                <label className="text-xs text-text-muted">스타일 프리셋</label>
+                <div className="grid grid-cols-2 gap-1">
+                  {STYLE_PRESETS.map(p => (
+                    <button
+                      key={p.value}
+                      onClick={() => setStylePreset(prev => (prev === p.value ? null : p.value))}
+                      className={`rounded border px-2 py-1.5 text-[11px] transition-colors ${
+                        stylePreset === p.value
+                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                          : "border-border text-text-muted hover:border-[color:var(--accent)]/50 hover:text-text-primary"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-text-muted/70">구성·형태 유지, 화풍만 변경.</p>
+              </div>
+            )}
 
-        {uiMode === "skin" && skinInput === "image" && (
-          <div className="shrink-0 space-y-2">
+            {/* 외형/이미지 참조 — picker */}
+            {uiMode === "skin" && skinInput === "image" && (
+              <div className="space-y-2 text-xs">
             {overlay && (
               <div className="rounded-lg border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/10 p-2 text-[11px] text-text-primary">
                 ⓘ 베이스 시트의 포즈는 그대로 두고, 선택한 캐릭터의 외형을 모든 프레임에 입힙니다.
@@ -743,67 +715,46 @@ export function ReskinPanel({
               </p>
             )}
 
-            <div className="space-y-1">
-              <label className="text-xs text-text-muted">(선택) 추가 지시</label>
-              <div className="rounded-lg border border-border bg-bg-card focus-within:border-[color:var(--accent)]/60 transition-colors">
-                <textarea
-                  value={extra}
-                  onChange={e => setExtra(e.target.value)}
-                  placeholder="예: 더 어둡고 차분하게"
-                  rows={2}
-                  className="block w-full resize-none bg-transparent px-3 pt-2 pb-1 text-sm text-text-primary outline-none placeholder:text-text-muted/40"
-                />
-                <div className="flex items-center border-t border-border px-2 py-1.5">
-                  <div className="relative ml-auto">
-                    <AiSuggestButton
-                      loading={aiLoading && aiTarget === "extra"}
-                      onClick={() => handleAiSuggest("extra")}
-                    />
-                    {aiSuggestions && aiTarget === "extra" && (
-                      <AiSuggestDropdown
-                        suggestions={aiSuggestions}
-                        onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }}
-                        onClose={() => { setAiSuggestions(null); setAiTarget(null); }}
-                      />
-                    )}
-                  </div>
-                </div>
+          </div>
+        )}
+
+            {/* 시트 후처리 안내 */}
+            {isSheet && (
+              <div className="rounded-lg border border-border bg-bg-card p-2 text-[11px] text-text-muted/70">
+                ⓘ 스프라이트시트는 셀 정렬·투명 후처리가 자동 적용됩니다.
               </div>
-              <AiSuggestResult
-                show={aiTarget === "extra" && aiSuggestions === null}
-                result={aiResult}
-                error={aiError}
-                onApply={v => { setExtra(v); setAiResult(null); }}
-              />
-            </div>
+            )}
           </div>
-        )}
 
-        {/* 시트 후처리 안내 — 시트일 때만 */}
-        {isSheet && (
-          <div className="shrink-0 rounded-lg border border-border bg-bg-card p-2 text-[11px] text-text-muted/70">
-            ⓘ 스프라이트시트는 셀 정렬·투명 후처리가 자동 적용됩니다.
+          {/* 하단 — 리스킨 실행(생성 중엔 중단). 캔버스 합치기 자리. */}
+          <div className="flex-none space-y-2 border-t border-border p-3">
+            {busy && onCancel && (
+              <button
+                onClick={onCancel}
+                className="h-9 w-full rounded-lg border border-border text-sm text-text-muted hover:text-text-primary"
+              >
+                ■ 생성 취소
+              </button>
+            )}
+            <button
+              onClick={submit}
+              disabled={!canSubmit || busy}
+              title={canSubmit || busy ? "" : uiMode === "skin" && skinInput === "image" ? "참조 이미지 선택 필요" : uiMode === "style" ? "스타일 선택 또는 입력 필요" : "설명 입력 필요"}
+              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            >
+              {busy ? (
+                <><Loader2 size={14} className="animate-spin" /> 생성 중…</>
+              ) : overlay || refIsSheet ? (
+                "오버레이 실행 ▸"
+              ) : uiMode === "style" ? (
+                "화풍 변환 ▸"
+              ) : (
+                "리스킨 실행 ▸"
+              )}
+            </button>
           </div>
-        )}
+        </div>
       </div>
-
-      <PanelFooter
-        busy={busy}
-        canSubmit={canSubmit}
-        onSubmit={submit}
-        onCancel={onCancel}
-        busyLabel="생성 중…"
-        submitLabel={overlay || refIsSheet ? "오버레이 실행 ▸" : uiMode === "style" ? "화풍 변환 ▸" : "리스킨 실행 ▸"}
-        submitTitle={
-          canSubmit || busy
-            ? ""
-            : uiMode === "skin" && skinInput === "image"
-            ? "참조 이미지 선택 필요"
-            : uiMode === "style"
-            ? "스타일 선택 또는 입력 필요"
-            : "설명 입력 필요"
-        }
-      />
     </aside>
   );
 }
