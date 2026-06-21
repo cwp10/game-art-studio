@@ -27,7 +27,6 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 - `src/lib/image-backend/button-states.ts` — `generateButtonState()` (normal/hover/pressed sharp 변환)
 - `src/lib/image-backend/recolor.ts` — 색상 재채색 처리
 - `src/lib/image-backend/spritesheet-postprocess.ts` — `normalizeSpritesheetCells()`, `chromaKeyFile()`, `fallbackBgRemove()`
-- `src/lib/image-backend/spritesheet-reorder.ts` — 스프라이트 프레임 재정렬
 - `src/lib/image-backend/pose-reference.ts` — 포즈 참조 이미지 처리
 - `src/lib/mcp/server.ts` — 도구 라우팅 + 공통 생성 처리 (도구: generate_image / make_spritesheet / edit_image / upscale_image / resize_image / remove_background / inpaint_image / composite_scene / apply_sprite_effect)
 - `src/lib/mcp/handlers/spritesheet-handler.ts` — `make_spritesheet` 전체 흐름 (facing 결정, 그리드 검증, 다방향 stitch)
