@@ -227,21 +227,13 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
               </button>
               {menuOpen && (
                 <div className="absolute bottom-full right-0 z-50 mb-1 flex min-w-[8rem] flex-col rounded-lg border border-border bg-bg-card p-1 shadow-lg">
-                  {kind === "spritesheet" ? (
+                  {kind === "spritesheet" && (
                     <button
                       onClick={() => { onAction?.("overlay"); setMenuOpen(false); }}
                       className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
                       title="캐릭터 오버레이 — 포즈는 그대로, 새 캐릭터 외형으로 교체"
                     >
                       <Palette size={12} /> 캐릭터 오버레이
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => { onAction?.("reskin"); setMenuOpen(false); }}
-                      className="flex h-7 items-center gap-2 whitespace-nowrap rounded px-2 text-text-muted hover:bg-bg-panel hover:text-text-primary"
-                      title="리스킨 — 색·재질·화풍을 바꾼 새 버전 (외형 교체 / 색만 변경)"
-                    >
-                      <Palette size={12} /> 리스킨
                     </button>
                   )}
                   <button
