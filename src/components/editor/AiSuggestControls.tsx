@@ -9,22 +9,25 @@ export function AiSuggestButton({
   loading,
   onClick,
   compact = false,
+  disabled = false,
 }: {
   loading: boolean;
   onClick: () => void;
   /** 레이어 캔버스 등 공간이 좁은 패널용 소형 변형 (h-6 / 11px). 기본값 h-7 / xs. */
   compact?: boolean;
+  disabled?: boolean;
 }) {
   const sz = compact ? 11 : 12;
   return (
     <button
       onClick={onClick}
-      disabled={loading}
+      disabled={loading || disabled}
+      title={disabled ? "Claude 모드에서만 사용 가능" : undefined}
       className={`ml-auto flex ${compact ? "h-6 text-[11px]" : "h-7 text-xs"} items-center gap-1 rounded-md border px-2 ${
         loading
           ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
           : "border-border text-text-muted hover:text-text-primary"
-      } disabled:opacity-60`}
+      } disabled:opacity-40 disabled:cursor-not-allowed`}
     >
       {loading ? <Loader2 size={sz} className="animate-spin" /> : <Sparkles size={sz} />}
       {loading ? "생각 중…" : "AI 제안"}

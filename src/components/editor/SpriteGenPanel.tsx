@@ -4,6 +4,7 @@ import { ArrowLeft, Lightbulb, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
+import { useIsCodex } from "@/lib/context/orchestrator-context";
 
 
 /**
@@ -251,6 +252,7 @@ export function SpriteGenPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[] | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const isCodex = useIsCodex();
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -441,7 +443,7 @@ export function SpriteGenPanel({
                     )}
                   </div>
                   <div className="relative">
-                    <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} />
+                    <AiSuggestButton loading={aiLoading} onClick={handleAiSuggest} disabled={isCodex} />
                     {aiSuggestions && (
                       <AiSuggestDropdown
                         suggestions={aiSuggestions}

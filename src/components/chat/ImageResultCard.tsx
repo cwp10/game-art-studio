@@ -53,7 +53,7 @@ function formatCreatedAt(ms: number): string {
 }
 
 export function ImageResultCard({ generationId, imageUrl, width, height, createdAt, kind, prompt, spriteSubjectMode, onAction }: Props) {
-  const { copy: copyPrompt, copied, analyzing, failed } = useCopyPrompt(generationId, prompt);
+  const { copy: copyPrompt, copied, analyzing, failed, disabled: describeDisabled } = useCopyPrompt(generationId, prompt);
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -136,9 +136,9 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
           <div className="flex items-start gap-2">
             <button
               onClick={copyPrompt}
-              disabled={analyzing}
-              className="mt-0.5 rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:opacity-60"
-              title="이미지 분석 → ChatGPT/DALL·E용 영어 프롬프트 복사"
+              disabled={analyzing || describeDisabled}
+              className="mt-0.5 rounded p-1 text-text-muted hover:bg-bg-panel hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+              title={describeDisabled ? "Claude 모드에서만 사용 가능" : "이미지 분석 → ChatGPT/DALL·E용 영어 프롬프트 복사"}
             >
               {analyzing ? <Loader2 size={12} className="animate-spin" /> : <Copy size={12} />}
             </button>
@@ -161,8 +161,8 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
             컨테이너 `flex-wrap` 으로 부족하면 다음 줄로. */}
         <div className="space-y-2 border-t border-border pt-2">
           <div className="text-text-muted/60">
-            {width}×{height}
-            {createdAt ? <span className="ml-2">· {formatCreatedAt(createdAt)}</span> : null}
+            {width > 0 && height > 0 ? `${width}×${height}` : null}
+            {createdAt ? <span className={width > 0 && height > 0 ? "ml-2" : ""}>· {formatCreatedAt(createdAt)}</span> : null}
           </div>
           <div className="flex flex-wrap gap-1">
             <button

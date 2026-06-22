@@ -2,6 +2,7 @@
 
 import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Settings2, Trash2, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useOrchestratorContext } from "@/lib/context/orchestrator-context";
 
 type ToolStatus = { ok: boolean; version?: string; error?: string };
 type Status = { claude: ToolStatus; codex: ToolStatus; mcp: ToolStatus };
@@ -25,39 +26,16 @@ function Dot({ ok, loading }: { ok: boolean; loading: boolean }) {
     : <XCircle size={12} className="text-[color:var(--danger)]" />;
 }
 
-type Orchestrator = "claude" | "codex";
-
 export function StatusButton() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [clearMsg, setClearMsg] = useState<string | null>(null);
-  const [orchestrator, setOrchestrator] = useState<Orchestrator>("claude");
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // 마운트 시 오케스트레이터 설정 fetch. 토글은 낙관적 업데이트 후 PATCH.
-  useEffect(() => {
-    fetch("/api/config")
-      .then(r => r.json())
-      .then((cfg: { orchestrator?: Orchestrator }) => setOrchestrator(cfg.orchestrator === "codex" ? "codex" : "claude"))
-      .catch(() => {});
-  }, []);
-
-  async function handleToggleOrchestrator() {
-    const next: Orchestrator = orchestrator === "claude" ? "codex" : "claude";
-    setOrchestrator(next); // 낙관적
-    try {
-      await fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orchestrator: next }),
-      });
-    } catch {
-      setOrchestrator(orchestrator); // 롤백
-    }
-  }
-  const isClaudeMode = orchestrator === "claude";
+  const { isCodex, toggleOrchestrator } = useOrchestratorContext();
+  const orchestrator = isCodex ? "codex" : "claude";
+  const isClaudeMode = !isCodex;
 
   async function runCleanup() {
     setClearing(true);
@@ -124,8 +102,14 @@ export function StatusButton() {
         className="flex items-center gap-1.5 rounded p-1.5 text-text-muted hover:bg-bg-card hover:text-text-primary"
         title="연결 상태"
       >
-        {status && (
-          <span className={`h-1.5 w-1.5 rounded-full ${allOk ? "bg-[color:var(--success)]" : "bg-[color:var(--danger)]"}`} />
+        {(status || orchestrator === "codex") && (
+          <span className={`h-1.5 w-1.5 rounded-full ${
+            orchestrator === "codex"
+              ? "bg-[color:var(--warning)]"
+              : allOk
+                ? "bg-[color:var(--success)]"
+                : "bg-[color:var(--danger)]"
+          }`} />
         )}
         <Settings2 size={14} />
       </button>
@@ -157,7 +141,7 @@ export function StatusButton() {
                     )}
                     {key === "claude" && (
                       <button
-                        onClick={handleToggleOrchestrator}
+                        onClick={toggleOrchestrator}
                         title={isClaudeMode ? "오케스트레이터: Claude — 클릭 시 Codex 직접 모드로 전환" : "오케스트레이터: Codex 직접 — 클릭 시 Claude로 전환"}
                         className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors ${
                           isClaudeMode

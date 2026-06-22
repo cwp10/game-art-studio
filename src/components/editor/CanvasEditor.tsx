@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
+import { useIsCodex } from "@/lib/context/orchestrator-context";
 import {
   clearCanvasEdit,
   compositeScene,
@@ -255,6 +256,7 @@ export function CanvasEditor({
   const [extractMode, setExtractMode] = useState<"text" | "brush">("text");
   // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
   const [extractAutoRestore, setExtractAutoRestore] = useState(true);
+  const isCodex = useIsCodex();
   // 부위명 AI 제안 — /api/layer-suggest. 하단 바라 드롭다운은 위로 연다(placement="bottom").
   const [extractAiLoading, setExtractAiLoading] = useState(false);
   const [extractAiSuggestions, setExtractAiSuggestions] = useState<AiSuggestion[] | null>(null);
@@ -2021,7 +2023,7 @@ export function CanvasEditor({
                   <>
                     {/* AI 부위 제안 — 선택 시 부위명을 쉼표로 이어 붙임. 하단 바라 위로 연다. */}
                     <div className="relative">
-                      <AiSuggestButton loading={extractAiLoading} onClick={handleExtractAiSuggest} compact />
+                      <AiSuggestButton loading={extractAiLoading} onClick={handleExtractAiSuggest} compact disabled={isCodex} />
                       {extractAiSuggestions && (
                         <AiSuggestDropdown
                           suggestions={extractAiSuggestions}

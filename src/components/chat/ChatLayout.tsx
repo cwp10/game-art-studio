@@ -32,6 +32,7 @@ import {
   uploadMask,
 } from "@/lib/api/client";
 import type { StylePreset } from "@/types/db";
+import { OrchestratorProvider } from "@/lib/context/orchestrator-context";
 
 /** 내부 에러 메시지를 사용자 친화적 한국어로 변환. */
 function friendlyError(raw: string): string {
@@ -140,6 +141,21 @@ export function ChatLayout() {
       .then((cfg: { orchestrator?: "claude" | "codex" }) => setOrchestrator(cfg.orchestrator === "codex" ? "codex" : "claude"))
       .catch(() => {});
   }, []);
+
+  // StatusButton 의 토글 → 낙관적 업데이트 후 PATCH. 실패 시 롤백.
+  const handleToggleOrchestrator = useCallback(async () => {
+    const next: "claude" | "codex" = orchestrator === "claude" ? "codex" : "claude";
+    setOrchestrator(next);
+    try {
+      await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orchestrator: next }),
+      });
+    } catch {
+      setOrchestrator(orchestrator);
+    }
+  }, [orchestrator]);
 
   // 세션 목록 로드 — search 변경 시 reload (debounce 200ms).
   useEffect(() => {
@@ -569,26 +585,26 @@ export function ChatLayout() {
           openCanvas(payload.generationId);
         },
         open_image_tools: () => {
-          if (!payload.generationId || !payload.width || !payload.height) return;
+          if (!payload.generationId) return;
           setEditing(null);
           setSpriteGen(null);
           setImageToolsOpen({
             generationId: payload.generationId,
             imageUrl: `/api/images/${payload.generationId}`,
-            width: payload.width,
-            height: payload.height,
+            width: payload.width ?? 0,
+            height: payload.height ?? 0,
             kind: payload.kind,
           });
         },
         make_sheet: () => {
-          if (!payload.generationId || !payload.width || !payload.height) return;
+          if (!payload.generationId) return;
           setEditing(null);
           setSpriteGen({
             reference: {
               generationId: payload.generationId,
               imageUrl: `/api/images/${payload.generationId}`,
-              width: payload.width,
-              height: payload.height,
+              width: payload.width ?? 0,
+              height: payload.height ?? 0,
               kind: payload.kind,
               prompt: payload.prompt,
             },
@@ -928,6 +944,7 @@ export function ChatLayout() {
     canvasOpen !== null;
 
   return (
+    <OrchestratorProvider isCodex={orchestrator === "codex"} toggleOrchestrator={handleToggleOrchestrator}>
     <div className="flex h-screen w-full overflow-hidden bg-bg-app">
       {!editorPanelOpen && (
         <SessionList
@@ -1006,7 +1023,7 @@ export function ChatLayout() {
         {orchestrator === "codex" && (
           <div className="flex items-center gap-2 border-t border-border bg-bg-card px-4 py-1.5 text-[11px] text-text-muted">
             <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--accent)]/60" />
-            Codex 직접 모드 — 자유형 편집 요청은 정확도가 낮을 수 있습니다
+            Codex 직접 모드 — 채팅 편집 지시는 Claude 모드보다 정확도가 낮을 수 있습니다
           </div>
         )}
         <Composer
@@ -1016,7 +1033,7 @@ export function ChatLayout() {
           onCancel={handleCancel}
           prefill={composerPrefill}
           attachment={composerAttachment}
-          onAskSuggestions={handleAskSuggestions}
+          onAskSuggestions={orchestrator === "codex" ? undefined : handleAskSuggestions}
           onUploadImage={handleUploadImage}
         />
       </div>
@@ -1201,6 +1218,7 @@ export function ChatLayout() {
       )}
       <LogsPanel open={logsOpen} onClose={() => setLogsOpen(false)} />
     </div>
+    </OrchestratorProvider>
   );
 }
 

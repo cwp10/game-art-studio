@@ -11,6 +11,7 @@
   --accent: #8b5cf6;
   --success: #22c55e;
   --danger: #ef4444;
+  --warning: #eab308;
 }
 
 @theme inline {
@@ -23,6 +24,7 @@
   --color-accent: var(--accent);
   --color-success: var(--success);
   --color-danger: var(--danger);
+  --color-warning: var(--warning);
   --font-sans: system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, "SF Mono", monospace;
 }

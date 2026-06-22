@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { describePrompt } from "@/lib/api/client";
+import { useIsCodex } from "@/lib/context/orchestrator-context";
 
 /**
  * 저장된 프롬프트가 이미 영어 t2i 프롬프트 형태인지 — 한글이 전혀 없고 충분히 서술적이면(≥60자)
@@ -22,9 +23,14 @@ export function useCopyPrompt(generationId: string, prompt?: string | null) {
   const [copied, setCopied] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [failed, setFailed] = useState(false);
+  const isCodex = useIsCodex();
+
+  // Codex 모드에서 describe(Claude 비전)가 필요한 경우 버튼 비활성화.
+  // 이미 영어 t2i 형태면 describe 없이 복사 가능하므로 비활성화하지 않음.
+  const disabled = isCodex && !(prompt && isReadyPrompt(prompt));
 
   async function copy() {
-    if (analyzing) return;
+    if (analyzing || disabled) return;
     setFailed(false);
     if (prompt && isReadyPrompt(prompt)) {
       await navigator.clipboard.writeText(prompt);
@@ -47,5 +53,5 @@ export function useCopyPrompt(generationId: string, prompt?: string | null) {
     }
   }
 
-  return { copy, copied, analyzing, failed };
+  return { copy, copied, analyzing, failed, disabled };
 }

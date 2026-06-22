@@ -4,6 +4,7 @@ import { ArrowLeft, Brush, Loader2, Palette, Sparkles, Upload } from "lucide-rea
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
 import { AiSuggestButton, AiSuggestDropdown } from "@/components/editor/AiSuggestControls";
+import { useIsCodex } from "@/lib/context/orchestrator-context";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 import type { Generation } from "@/types/db";
 
@@ -124,6 +125,8 @@ export function ReskinPanel({
   // 화풍 변환 탭: 프리셋 선택(토글) + 커스텀 입력. 둘 중 하나라도 있으면 제출 가능.
   const [stylePreset, setStylePreset] = useState<string | null>(null);
   const [styleCustom, setStyleCustom] = useState("");
+
+  const isCodex = useIsCodex();
 
   // AI 제안
   const [aiLoading, setAiLoading] = useState(false);
@@ -356,7 +359,7 @@ export function ReskinPanel({
                   />
                   <div className="flex items-center border-t border-border px-2 py-1.5">
                     <div className="relative ml-auto">
-                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} disabled={isCodex} />
                       {aiSuggestions && aiTarget === "prompt" && (
                         <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
                       )}
@@ -380,7 +383,7 @@ export function ReskinPanel({
                   />
                   <div className="flex items-center border-t border-border px-2 py-1.5">
                     <div className="relative ml-auto">
-                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} disabled={isCodex} />
                       {aiSuggestions && aiTarget === "prompt" && (
                         <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setPrompt(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
                       )}
@@ -407,7 +410,7 @@ export function ReskinPanel({
                   />
                   <div className="flex items-center border-t border-border px-2 py-1.5">
                     <div className="relative ml-auto">
-                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} />
+                      <AiSuggestButton loading={aiLoading && aiTarget === "prompt"} onClick={() => handleAiSuggest("prompt")} disabled={isCodex} />
                       {aiSuggestions && aiTarget === "prompt" && (
                         <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setStyleCustom(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
                       )}
@@ -430,7 +433,7 @@ export function ReskinPanel({
                   />
                   <div className="flex items-center border-t border-border px-2 py-1.5">
                     <div className="relative ml-auto">
-                      <AiSuggestButton loading={aiLoading && aiTarget === "extra"} onClick={() => handleAiSuggest("extra")} />
+                      <AiSuggestButton loading={aiLoading && aiTarget === "extra"} onClick={() => handleAiSuggest("extra")} disabled={isCodex} />
                       {aiSuggestions && aiTarget === "extra" && (
                         <AiSuggestDropdown suggestions={aiSuggestions} placement="bottom" onSelect={v => { setExtra(v); setAiSuggestions(null); setAiTarget(null); }} onClose={() => { setAiSuggestions(null); setAiTarget(null); }} />
                       )}
