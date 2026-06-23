@@ -1131,11 +1131,27 @@ export function ChatLayout() {
           sessionId={state.activeSessionId}
           busy={state.generating}
           onClose={closeCanvas}
-          onComposited={res => {
+          onComposited={async res => {
+            // 활성 세션이 없으면 새 세션을 만들어 활성화 — handleGalleryInsert 와 동일.
+            // set_active 가 유발하는 listMessages reload 가 합성 카드를 덮지 않도록 1회 skip.
+            let sid = state.activeSessionId;
+            if (!sid) {
+              const newSession = await createSession("캔버스 합성");
+              sid = newSession.id;
+              const next = await listSessions();
+              dispatch({ type: "set_sessions", sessions: next });
+              skipNextLoadRef.current = true;
+              dispatch({ type: "set_active", sessionId: sid });
+            }
+            // 재실행 후 복원을 위해 메시지 쌍을 DB 에 저장 (fire-and-forget).
+            galleryInsert(sid, res.generationId).catch(e => console.error("[gallery-insert]", e));
+            // 라이브 카드 라벨을 gallery-insert 가 영속화하는 gen.prompt 와 일치시킴.
+            const gen = await getGeneration(res.generationId);
+            const userText = gen?.prompt?.slice(0, 80) || "🎨 캔버스 합성";
             dispatch({
               type: "add_result_card",
               tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-              userText: "🎨 캔버스 합성",
+              userText,
               generationId: res.generationId,
               width: res.width,
               height: res.height,

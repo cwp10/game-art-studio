@@ -11,7 +11,7 @@ export const runtime = "nodejs";
  * SpriteCanvas 가 마운트 시 params(rows/cols/cellW/cellH/directions/anchor/fps 등)를
  * source-of-truth 로 가져오기 위해 사용. 미래 재사용(에디터·재오픈) 대비 generic 단일 조회.
  *
- * 응답: { id, kind, params, width, height, imageUrl:'/api/images/<id>' }. 없으면 404.
+ * 응답: { id, kind, prompt, params, width, height, imageUrl:'/api/images/<id>' }. 없으면 404.
  */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -20,6 +20,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   return Response.json({
     id: gen.id,
     kind: gen.kind,
+    prompt: gen.prompt,
     params: gen.params,
     width: gen.width,
     height: gen.height,

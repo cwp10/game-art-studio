@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getGeneration, createGeneration } from "@/lib/db/repo/generations";
 import { runComposite } from "@/lib/image-backend/composite-runner";
 import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
+import { claudeRunSimple } from "@/lib/cli/claude-cli";
 import { newGenerationId, newJobId } from "@/lib/util/ids";
 import { resolveImagePath, toRelative } from "@/lib/util/paths";
 
@@ -17,13 +18,28 @@ export const runtime = "nodejs";
  *   2. 평탄화 결과의 절대 파일 경로를 Codex 에 입력으로 전달(img2img).
  *      ⚠️ runComposite 의 imagePath 는 URL("/api/images/{id}") 이므로 그대로 쓰면 안 된다 —
  *         getGeneration(...).image_path → resolveImagePath() 로 실제 파일 경로를 얻는다.
- *   3. Codex 결과를 generation 행(kind='img2img', backend='codex_exec')으로 저장.
+ *   2.5 Claude Vision(Read 도구)으로 평탄화 이미지를 분석해 img2img 프롬프트를 자동 생성.
+ *      실패하거나 빈 결과면 FALLBACK_PROMPT 로 graceful degradation.
+ *   3. 생성된 프롬프트로 Codex 결과를 generation 행(kind='img2img', backend='codex_exec')으로 저장.
  *
- * Request: /api/composite 와 동일 + prompt(필수).
+ * Request: /api/composite 와 동일 (prompt 는 선택 — 무시되고 Vision 으로 자동 생성).
  * Response: { generationId, imagePath, width, height } (최종 img2img generation 기준).
  *
  * 주의: intermediate(composite)와 최종(img2img) 두 개의 generation 행이 생성된다 — 둘 다 갤러리에 노출됨.
  */
+
+/** Claude Vision 에 평탄화 이미지를 분석시켜 img2img 합성 프롬프트를 받아내는 시스템 프롬프트. */
+const COMPOSITE_AI_SYSTEM_PROMPT = `You are an expert at writing img2img prompts for compositing game assets.
+You will be given the path to a flattened image where several layers (background, characters, objects) have been stacked together. Use the Read tool to view it, then write a single prompt that instructs an img2img model to re-render the image so the layers merge into one cohesive scene.
+Rules:
+- Output ONLY the prompt. No preamble, no explanation, no markdown, no surrounding quotes.
+- One paragraph, English.
+- Preserve the existing composition, positions, and overall subject matter — do not invent new elements.
+- Emphasize: unify the art style across background and characters/objects, harmonize lighting and color so they match, and blend the boundaries/edges between layers naturally so nothing looks pasted on.`;
+
+/** Vision 분석 실패/빈 결과 시 사용할 안전 기본 프롬프트(기존 클라이언트 하드코딩 문자열). */
+const FALLBACK_PROMPT =
+  "Naturally and seamlessly blend the layers in this image into a cohesive scene, preserving positions and styles.";
 
 type CompositeLayerFilters = {
   brightness?: number;
@@ -64,9 +80,7 @@ export async function POST(req: NextRequest) {
   if (!Array.isArray(body.layers) || body.layers.length === 0) {
     return Response.json({ error: "layers must be a non-empty array" }, { status: 400 });
   }
-  if (typeof body.prompt !== "string" || !body.prompt.trim()) {
-    return Response.json({ error: "prompt required" }, { status: 400 });
-  }
+  // prompt 는 더 이상 받지 않는다 — Step 2.5 에서 Claude Vision 으로 자동 생성한다.
 
   // /api/composite 와 동일한 입력 검증(400/404 구분) — 관찰 가능한 HTTP 계약 유지.
   for (const [i, l] of body.layers.entries()) {
@@ -106,6 +120,22 @@ export async function POST(req: NextRequest) {
   }
   const inputPath = resolveImagePath(flatGen.image_path);
 
+  // 2.5 Claude Vision(Read 도구)으로 평탄화 이미지를 분석해 img2img 프롬프트 자동 생성.
+  //     실패하거나 빈 결과면 FALLBACK_PROMPT 로 안전하게 대체(graceful degradation).
+  let generatedPrompt = FALLBACK_PROMPT;
+  try {
+    const raw = await claudeRunSimple({
+      systemPrompt: COMPOSITE_AI_SYSTEM_PROMPT,
+      userMessage: `Image path: ${inputPath}`,
+      allowedTools: ["Read"],
+      signal: req.signal,
+    });
+    const cleaned = raw.trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+    if (cleaned) generatedPrompt = cleaned;
+  } catch {
+    // Vision 분석 실패 — FALLBACK_PROMPT 유지.
+  }
+
   // 3. Codex img2img — chat/route.ts·composite-runner 패턴을 따른다.
   //    PROMPT_HEADER 는 buildNaturalPrompt(img2img)가 자동으로 붙이므로 직접 prepend 하지 않는다.
   const generationId = newGenerationId();
@@ -113,7 +143,7 @@ export async function POST(req: NextRequest) {
     id: newJobId(),
     generationId,
     kind: "img2img",
-    prompt: body.prompt.trim(),
+    prompt: generatedPrompt,
     inputImagePaths: [inputPath],
   };
 
@@ -127,7 +157,7 @@ export async function POST(req: NextRequest) {
     message_id: null,
     kind: "img2img",
     backend: "codex_exec",
-    prompt: body.prompt.trim(),
+    prompt: generatedPrompt,
     input_image_ids: [flattened.generationId],
     params: { aiComposite: true, layers: body.layers, compositeBaseId: flattened.generationId },
     image_path: toRelative(result.imagePath),

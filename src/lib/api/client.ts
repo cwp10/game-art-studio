@@ -167,7 +167,8 @@ export async function compositeScene(args: {
 
 /**
  * AI 합성 — POST /api/composite-ai. compositeScene 과 동일하게 레이어를 sharp 로 평탄화한 뒤
- * Codex img2img 로 한 번 더 재생성해 자연스럽게 합성한다. prompt 로 합성 지시를 전달.
+ * Codex img2img 로 한 번 더 재생성해 자연스럽게 합성한다. 합성 프롬프트는 서버가 평탄화 이미지를
+ * Claude Vision 으로 분석해 자동 생성하므로 prompt 는 보낼 필요가 없다(선택).
  * Codex 실행이 끝날 때까지 블로킹(수십 초). 결과는 최종 img2img generation.
  */
 export async function compositeSceneAI(args: {
@@ -175,7 +176,7 @@ export async function compositeSceneAI(args: {
   sessionId?: string;
   outputWidth?: number;
   outputHeight?: number;
-  prompt: string;
+  prompt?: string;
 }): Promise<{ generationId: string; width: number; height: number }> {
   const r = await jsonFetch("/api/composite-ai", "POST", args);
   if (!r.ok) throw new Error(`compositeSceneAI failed: ${await extractError(r)}`);
@@ -298,6 +299,7 @@ export async function bumpPromptUse(id: string): Promise<void> {
 export async function getGeneration(id: string): Promise<{
   id: string;
   kind: string;
+  prompt: string | null;
   params: Record<string, unknown>;
   width: number | null;
   height: number | null;
@@ -308,6 +310,7 @@ export async function getGeneration(id: string): Promise<{
   return (await r.json()) as {
     id: string;
     kind: string;
+    prompt: string | null;
     params: Record<string, unknown>;
     width: number | null;
     height: number | null;

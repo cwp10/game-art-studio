@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-23 (합치기 WYSIWYG 정합성 수정 — targetW/H 방식)
+마지막 업데이트: 2026-06-23 (캔버스 편집 결과 DB 영속화 버그 수정)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -141,6 +141,19 @@ Opus가 전체 코드베이스를 분석해 도출한 실제 버그·중복·위
 - `.claude/skills/image-pipeline-dev/SKILL.md` 30행 — 삭제된 spritesheet-reorder.ts 참조 고아 라인. 스킬 파일은 보호되어 자동 수정 불가.
 
 **검증:** tsc 0 / pnpm lint 12→3 (잔존 2건 ChatLayout 의도적, 1건 경고) / chroma-key 통합은 픽셀 수준 동작 변경 (품질 향상).
+
+### 캔버스 편집 결과 DB 영속화 버그 수정 — 2026-06-23
+캔버스 합성(합치기/AI 합성) 결과 카드가 세션 리로드 후 사라지는 버그 수정.
+
+**근본 원인**: `ChatLayout.tsx`의 `onComposited` 핸들러가 `dispatch add_result_card`(라이브 카드, 휘발)만 했고 `galleryInsert`(messages 테이블 영속화)를 누락. chat UI는 세션 복원 시 `messages` 테이블을 읽으므로, 메시지 쌍 없으면 리로드 후 카드 사라짐.
+
+**수정 내용 (3파일)**:
+- `ChatLayout.tsx` `onComposited` 핸들러: `galleryInsert(sid, res.generationId)` 호출 추가. 세션 없을 때 `createSession`→`set_active` 부트스트랩(`handleGalleryInsert` 802-811행 패턴 복제). 라이브 카드 `userText`를 `getGeneration`으로 받은 `gen.prompt.slice(0,80)`으로 교체(영속화 라벨과 일치).
+- `api/generations/[id]/route.ts` GET 응답에 `prompt` 필드 additive 추가 (기존 consumers 비파괴).
+- `lib/api/client.ts` `getGeneration` 반환 타입에 `prompt: string | null` 추가.
+- `합치기`와 `AI 합성` 모두 동일한 `onComposited` 콜백으로 funneling → 한 수정으로 두 경로 커버.
+- 검증: tsc 0 / build 성공.
+- ⚠️ AI 합성 라이브/리로드 라벨은 일치하지만 영문 프롬프트로 표시됨 — 한글화 원하면 `composite-ai` route의 저장 prompt 변경 필요.
 
 ### 합치기 WYSIWYG 정합성 수정 — 2026-06-23
 캔버스 편집기의 레이어 scale/stretch/position이 합성 출력에 정확히 반영되지 않는 버그 수정.
