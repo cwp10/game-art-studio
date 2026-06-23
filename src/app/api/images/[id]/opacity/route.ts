@@ -16,7 +16,7 @@ export async function GET(
   const srcPath = resolveImagePath(gen.image_path);
 
   try {
-    const { data, info } = await sharp(srcPath)
+    const { data } = await sharp(srcPath)
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });

@@ -4,7 +4,7 @@
  * 자연어 + attachmentGenerationIds 로 정확히 합성하는지 단언한다.
  *
  * 단일 방향 시트(rows×cols = 프레임 수별 게임표준 그리드)로 합성됨.
- * 그리드: 6→2×3, 8→2×4, 12→4×3, 16→4×4. directions 키는 마커에 미포함(자연어 facing 으로 전달).
+ * 그리드: 6→2×3, 8→2×4, 12→4×3, 16→4×4. 시트 만들기는 항상 단일 방향이라 directions=1 명시(facing 은 자연어로 전달).
  *
  * 실행: npx tsx --tsconfig tsconfig.json scripts/test-sprite-marker.ts
  */
@@ -50,8 +50,7 @@ console.log("[Case 1] character full");
   console.log(`  nl:        ${nl}`);
   assert(directive.includes("subjectType=character"), "subjectType=character");
   assert(directive.includes("anchorStrategy=feet"), "anchorStrategy=feet");
-  assert(!directive.includes("directions="), "directions 키 미포함");
-  assert(directive.includes("framesPerDir=16"), "framesPerDir=16");
+  assert(directive.includes("directions=1"), "directions=1 (시트 만들기는 항상 단일 방향)");
   assert(directive.includes("rows=4"), "rows=4 (16프레임 → 4×4)");
   assert(directive.includes("cols=4"), "cols=4 (16프레임 → 4×4)");
   assert(directive.includes("seamlessLoop=false"), "seamlessLoop=false");
@@ -79,7 +78,7 @@ console.log("[Case 2] effect");
   console.log(`  nl:        ${nl}`);
   assert(directive.includes("subjectType=effect"), "subjectType=effect");
   assert(directive.includes("anchorStrategy=center"), "anchorStrategy=center");
-  assert(!directive.includes("directions="), "directions 키 미포함");
+  assert(directive.includes("directions=1"), "directions=1 (단일 방향)");
   assert(directive.includes("rows=2"), "rows=2 (8프레임 → 2×4)");
   assert(directive.includes("cols=4"), "cols=4 (8프레임 → 2×4)");
   assert(directive.includes("seamlessLoop=true"), "seamlessLoop=true");

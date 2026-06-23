@@ -167,8 +167,10 @@ export function ChatLayout() {
     return () => clearTimeout(t);
   }, [sessionSearch]);
 
-  // activeSessionIdRef 항상 최신 동기화
-  activeSessionIdRef.current = state.activeSessionId;
+  // activeSessionIdRef 항상 최신 동기화 — 비동기 스트림 콜백(371·445)이 읽는 용도라 effect 커밋 후 동기화로 충분.
+  useEffect(() => {
+    activeSessionIdRef.current = state.activeSessionId;
+  }, [state.activeSessionId]);
 
   // 활성 세션 변경 시 메시지 로드
   useEffect(() => {
@@ -1287,6 +1289,8 @@ function EmptyState({
   // 서버/첫 렌더는 결정적(각 카테고리 첫 항목)으로 두고, 마운트 후 랜덤 교체 — hydration mismatch 방지.
   const [picks, setPicks] = useState<string[]>(() => SEED_POOLS.map(pool => pool[0]));
   useEffect(() => {
+    // 마운트 후 1회 랜덤 교체 — 서버/첫 렌더는 결정적이어야 hydration mismatch 가 안 나므로 의도적 setState.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPicks(SEED_POOLS.map(pool => pool[Math.floor(Math.random() * pool.length)]));
   }, []);
   return (
