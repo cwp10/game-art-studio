@@ -97,24 +97,6 @@ export async function uploadImage(args: {
 }
 
 /**
- * LayerCanvas 가 만든 N(=4)개의 색별 PNG 를 한 번에 generation 행들로 저장.
- * 각 PNG 는 (원본 × 색별 binary mask) 합성 결과.
- */
-export async function uploadLayers(
-  parentGenerationId: string,
-  layers: Array<{ colorLabel: string; name?: string; dataUrl: string }>,
-): Promise<
-  Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>
-> {
-  const r = await jsonFetch("/api/layers", "POST", { parentGenerationId, layers });
-  if (!r.ok) throw new Error(`uploadLayers failed: ${await extractError(r)}`);
-  const { layers: out } = (await r.json()) as {
-    layers: Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>;
-  };
-  return out;
-}
-
-/**
  * 결정적 색교체(리스킨 정밀 모드) — codex 없이 sharp 로 픽셀 단위 색 매핑.
  * 형태 100% 보존. 결과는 kind='reskin' generation.
  */
@@ -216,22 +198,6 @@ export async function describePrompt(generationId: string, signal?: AbortSignal)
   const r = await jsonFetch("/api/describe", "POST", { generationId }, signal);
   if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { prompt: string }).prompt;
-}
-
-/**
- * 레이어 분리용 "분리 가능한 부위" 라벨 4-6개 제안. generation 의 생성 prompt 를 보고
- * Claude 가 추론 (이미지 vision 아님). LayerCanvas 의 부위명 chip 에 사용.
- *
- * 실패 시 빈 배열 반환 — UI 가 graceful 하게 처리 (throw 안 함).
- */
-export async function suggestLayerParts(generationId: string, signal?: AbortSignal): Promise<string[]> {
-  try {
-    const r = await jsonFetch("/api/layer-parts", "POST", { generationId }, signal);
-    if (!r.ok) return [];
-    return ((await r.json()) as { parts?: string[] }).parts ?? [];
-  } catch {
-    return [];
-  }
 }
 
 // ── style presets ───────────────────────────────────────────────────────────

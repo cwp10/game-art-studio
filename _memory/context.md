@@ -1,9 +1,34 @@
-마지막 업데이트: 2026-06-23 (캔버스 편집 결과 DB 영속화 버그 수정)
+마지막 업데이트: 2026-06-24 (전반 검토 + 위생 정비: lint 게이트·죽은 코드·문서/CI·단위테스트 버그)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
 
 ## 완료된 작업
+
+### 전반 검토 + 위생 정비 — 2026-06-24
+프로젝트 전반 검토 후 4영역 정비. **최종 게이트 전부 통과: lint 0 / 단위테스트 5종 통과 / build exit0.**
+
+**1. lint 게이트 회복(깨져 있었음 — 에러 2 + 경고 1, 전부 ChatLayout.tsx 근처):**
+- `activeSessionIdRef.current = state.activeSessionId` 렌더 중 ref 쓰기(에러) → `useEffect`로 이동. 읽는 곳(371·445)이 비동기 스트림 콜백뿐이라 커밋 후 동기화로 충분.
+- EmptyState 랜덤 시드 `setState`-in-effect(에러) → hydration-safe 의도라 `eslint-disable-next-line` + 주석.
+- `images/[id]/opacity/route.ts` 미사용 `info` 구조분해 제거(경고).
+
+**2. 죽은 코드/자산 제거(전부 grep+빌드로 미사용 확인):**
+- 라우트 3개 삭제: `/api/crop`(filter에 흡수), `/api/layers`·`/api/layer-parts`(은퇴한 LayerCanvas 전용, DB `layer` kind 0건). 빌드 산출물에서 사라짐 검증.
+- `client.ts` 죽은 함수 제거: `uploadLayers`(→/api/layers), `suggestLayerParts`(→/api/layer-parts).
+- `data/db.sqlite`(0바이트 고아) 삭제.
+- ⚠️ **`/api/layer-suggest`는 살아있음**(CanvasEditor 부위명 AI 제안) — layer-parts와 혼동 금지.
+
+**3. 단위테스트 버그 3건(codex 미사용 결정적 테스트가 실패 중 → 회귀/노후화 판정 후 처리):**
+- **회귀(코드버그 수정):** `inferSubjectType`가 "검기 트레일"을 effect 아닌 `object`로 오분류. 근본원인 — OBJECT_WORDS의 "검"이 "검기"(EFFECT_WORDS)에 substring 충돌, object 분기(`spritesheet-classify.ts:78`)가 effect 가드 없이 먼저 평가. 수정: 분기 조건에 `&& !hasEffectWord` 추가. 34 PASS로 무회귀 검증.
+- **노후화(테스트만 갱신):** ① `directionLabels(8)`이 verbose 서술형으로 의도적 변경(4e8bd8f) → `test-directions`를 prefix 토큰 검증으로. ② SpriteGenPanel directive가 `framesPerDir`→`directions=1`로 의도적 변경(5fd753e "시트는 항상 단일 방향") → `test-sprite-marker` 단언 갱신.
+
+**4. 문서/CI:**
+- README 갱신: 도구 11→13종(composite/sprite_effect 누락분), 에디터=통합 캔버스, API 목록(crop/layers 제거·nine-slice/sprite-effect 등 추가), mcp 도구수 8→13.
+- `package.json`: `test`(순수단위 3개 — DB·이미지 부수효과 0, CI안전) + `test:post`(spritesheet/smoke — 로컬 결정적) 추가.
+- `.github/workflows/ci.yml` 신규: install(electron skip)→db:init→lint→test→build. codex 생성·시각회귀는 CI 범위 밖(로컬 probe/test:post).
+
+**미완(다음 단계 후보):** 거대 파일 리팩터링 — CanvasEditor 2217 / SpriteCanvas 2131 / ChatLayout 1347 / mcp server.ts 1203·handlers/shared.ts 1154줄. 위험·검증특성(브러시/변형 헤드리스 검증 불가)상 보류. fetchJson 래퍼 통합 → useStreamChat 추출처럼 저위험부터 점진 권장. **제품 신호:** DB 143건 중 normal_map 실사용 0건(숨김/제거 후보), 편집·합성이 절반(주력).
 
 ### 통합 캔버스 에디터 1단계 — 2026-06-20
 편집·이미지 도구·씬에 추가·레이어 분리를 하나의 "포토샵식 전체전환 레이어 캔버스"로 통합하는 작업의 1단계(결정적/비-AI 부분만).
