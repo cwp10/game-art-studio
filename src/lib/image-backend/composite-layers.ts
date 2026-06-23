@@ -42,7 +42,7 @@ function isNeutralFilters(f?: LayerFilters): boolean {
  *   써서 알파 채널엔 항등(a=1,b=0)을 적용 — 투명 배경이 불투명해지는 것을 방지한다.
  * - blur: sigma≈px/2. sharp 는 sigma<0.3 에서 throw 하므로 그 미만은 스킵.
  */
-function applyFilters(chain: sharp.Sharp, f: LayerFilters): sharp.Sharp {
+async function applyFilters(chain: sharp.Sharp, f: LayerFilters): Promise<sharp.Sharp> {
   const brightness = f.brightness ?? 100;
   const saturation = f.saturation ?? 100;
   const hue = f.hue ?? 0;
@@ -55,7 +55,10 @@ function applyFilters(chain: sharp.Sharp, f: LayerFilters): sharp.Sharp {
   if (contrast !== 100) {
     const a = contrast / 100;
     const b = 128 * (1 - a);
-    chain.linear([a, a, a, 1], [b, b, b, 0]);
+    // lazy 파이프라인에서 채널 수가 미결정이면 4원소 배열 linear가 "Band expansion" 에러를 냄.
+    // 버퍼로 플러시해 RGBA 4채널을 확정한 뒤 새 인스턴스에서 per-channel linear를 적용한다.
+    const buf = await chain.ensureAlpha().png().toBuffer();
+    chain = sharp(buf).linear([a, a, a, 1], [b, b, b, 0]);
   }
   const sigma = blur / 2;
   if (sigma >= 0.3) {
@@ -104,21 +107,32 @@ async function placeWithTransform(
   stretchH: number,
   flipH: boolean,
   filters?: LayerFilters,
+  targetW?: number,
+  targetH?: number,
 ): Promise<{ input: Buffer; left: number; top: number } | null> {
-  // 1) scale: contain 비율을 유지하며 scale 배 캔버스에 맞춘다(fit:'inside').
-  const scaledTargetW = Math.max(1, Math.round(outputWidth * scale));
-  const scaledTargetH = Math.max(1, Math.round(outputHeight * scale));
-  let chain = sharp(imagePath)
-    .ensureAlpha()
-    .resize(scaledTargetW, scaledTargetH, { fit: "inside" });
-  // 2) stretch: 비균일 늘이기. fit:'inside' 는 비율을 보존하므로 stretch 는 별도 fill 리사이즈로 적용.
-  //    현재 크기를 메타로 읽어 stretchW/H 를 곱한 목표 크기로 fit:'fill'(비율 무시) 리사이즈한다.
-  if (stretchW !== 1 || stretchH !== 1) {
-    const pre = await chain.png().toBuffer();
-    const preMeta = await sharp(pre).metadata();
-    const tw = Math.max(1, Math.round((preMeta.width ?? scaledTargetW) * stretchW));
-    const th = Math.max(1, Math.round((preMeta.height ?? scaledTargetH) * stretchH));
-    chain = sharp(pre).resize(tw, th, { fit: "fill" });
+  let chain: sharp.Sharp;
+  if (targetW && targetH) {
+    // 클라이언트가 CSS 표시 크기에서 직접 계산한 출력 픽셀 타겟 — fit:'fill'로 정확히 맞춘다.
+    // scale·stretchW/H는 이미 targetW/H에 반영됐으므로 별도 처리 불필요.
+    chain = sharp(imagePath)
+      .ensureAlpha()
+      .resize(Math.max(1, targetW), Math.max(1, targetH), { fit: "fill" });
+  } else {
+    // 레거시(MCP 등): scale 기반 contain-fit + stretch 방식.
+    // 1) scale: contain 비율을 유지하며 scale 배 캔버스에 맞춘다(fit:'inside').
+    const scaledTargetW = Math.max(1, Math.round(outputWidth * scale));
+    const scaledTargetH = Math.max(1, Math.round(outputHeight * scale));
+    chain = sharp(imagePath)
+      .ensureAlpha()
+      .resize(scaledTargetW, scaledTargetH, { fit: "inside" });
+    // 2) stretch: 비균일 늘이기.
+    if (stretchW !== 1 || stretchH !== 1) {
+      const pre = await chain.png().toBuffer();
+      const preMeta = await sharp(pre).metadata();
+      const tw = Math.max(1, Math.round((preMeta.width ?? scaledTargetW) * stretchW));
+      const th = Math.max(1, Math.round((preMeta.height ?? scaledTargetH) * stretchH));
+      chain = sharp(pre).resize(tw, th, { fit: "fill" });
+    }
   }
   // 3) rotate: 0이 아닐 때만. sharp rotate 는 바운딩 박스를 확장해 투명 배경으로 채운다.
   if (rotation !== 0) {
@@ -130,12 +144,12 @@ async function placeWithTransform(
   }
   // 5) filters: 중립이 아니면 색보정을 굽는다(알파 보존).
   if (filters && !isNeutralFilters(filters)) {
-    chain = applyFilters(chain, filters);
+    chain = await applyFilters(chain, filters);
   }
   const scaled = await chain.png().toBuffer();
   const meta = await sharp(scaled).metadata();
-  const scaledW = meta.width ?? scaledTargetW;
-  const scaledH = meta.height ?? scaledTargetH;
+  const scaledW = meta.width ?? targetW ?? Math.round(outputWidth * scale);
+  const scaledH = meta.height ?? targetH ?? Math.round(outputHeight * scale);
 
   const left = Math.round((outputWidth - scaledW) / 2 + x);
   const top = Math.round((outputHeight - scaledH) / 2 + y);
@@ -175,6 +189,8 @@ export async function mergeImages(params: {
     stretchH?: number;
     flipH?: boolean;
     filters?: LayerFilters;
+    targetW?: number;
+    targetH?: number;
   }[];
   outputWidth: number;
   outputHeight: number;
@@ -194,6 +210,8 @@ export async function mergeImages(params: {
       layer.x !== undefined ||
       layer.y !== undefined ||
       layer.scale !== undefined ||
+      layer.targetW !== undefined ||
+      layer.targetH !== undefined ||
       rotation !== 0 ||
       stretchW !== 1 ||
       stretchH !== 1 ||
@@ -212,6 +230,8 @@ export async function mergeImages(params: {
         stretchH,
         flipH,
         layer.filters,
+        layer.targetW,
+        layer.targetH,
       );
       if (!placed) continue; // 완전히 캔버스 밖 — 스킵.
       const withOpacity = await applyOpacity(placed.input, layer.opacity);

@@ -25,12 +25,14 @@ export interface CompositeLayerSpec {
   opacity?: number; // 0-100, 기본 100
   x?: number; // 중앙 기준 오프셋 px
   y?: number;
-  scale?: number; // 1.0 = contain-fit
+  scale?: number; // 1.0 = contain-fit (targetW/H 없을 때만 사용)
   rotation?: number; // 회전 각도 도(°), 기본 0
   flipH?: boolean; // 좌우반전, 기본 false
-  stretchW?: number; // 가로 늘이기 배수, 기본 1 (scale 과 곱해짐)
+  stretchW?: number; // 가로 늘이기 배수, 기본 1
   stretchH?: number; // 세로 늘이기 배수, 기본 1
   filters?: LayerFilters; // 색보정(밝기/채도/색조/대비/흐림), 중립이면 패스
+  targetW?: number; // 출력 이미지 픽셀 너비 (클라이언트 WYSIWYG 계산값, 지정 시 scale/stretch 대체)
+  targetH?: number; // 출력 이미지 픽셀 높이
 }
 
 export interface RunCompositeParams {
@@ -67,6 +69,8 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
     stretchW?: number;
     stretchH?: number;
     filters?: LayerFilters;
+    targetW?: number;
+    targetH?: number;
   }[] = [];
   for (const [i, l] of layers.entries()) {
     if (!l.generationId) {
@@ -89,6 +93,8 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       stretchW: typeof l.stretchW === "number" ? l.stretchW : undefined,
       stretchH: typeof l.stretchH === "number" ? l.stretchH : undefined,
       filters: l.filters,
+      targetW: typeof l.targetW === "number" ? l.targetW : undefined,
+      targetH: typeof l.targetH === "number" ? l.targetH : undefined,
     });
   }
 
@@ -122,6 +128,8 @@ export async function runComposite(params: RunCompositeParams): Promise<Composit
       stretchW: r.stretchW,
       stretchH: r.stretchH,
       filters: r.filters,
+      targetW: r.targetW,
+      targetH: r.targetH,
     })),
     outputWidth,
     outputHeight,

@@ -138,7 +138,7 @@ export type CompositeLayerArg = {
   opacity?: number; // 0~100
   x?: number; // 출력 캔버스 중앙 기준 px
   y?: number;
-  scale?: number; // 1.0 = contain-fit
+  scale?: number; // 1.0 = contain-fit (targetW/H 없을 때만 사용)
   rotation?: number; // 도(°), 시계방향
   flipH?: boolean; // 좌우반전
   stretchW?: number; // 가로 늘이기 배수 (1.0=원본)
@@ -150,6 +150,8 @@ export type CompositeLayerArg = {
     contrast?: number; // % (100=중립)
     blur?: number; // px (0=없음)
   };
+  targetW?: number; // 출력 픽셀 너비 (WYSIWYG 계산값)
+  targetH?: number; // 출력 픽셀 높이
 };
 
 export async function compositeScene(args: {
@@ -160,6 +162,23 @@ export async function compositeScene(args: {
 }): Promise<{ generationId: string; width: number; height: number }> {
   const r = await jsonFetch("/api/composite", "POST", args);
   if (!r.ok) throw new Error(`compositeScene failed: ${await extractError(r)}`);
+  return (await r.json()) as { generationId: string; width: number; height: number };
+}
+
+/**
+ * AI 합성 — POST /api/composite-ai. compositeScene 과 동일하게 레이어를 sharp 로 평탄화한 뒤
+ * Codex img2img 로 한 번 더 재생성해 자연스럽게 합성한다. prompt 로 합성 지시를 전달.
+ * Codex 실행이 끝날 때까지 블로킹(수십 초). 결과는 최종 img2img generation.
+ */
+export async function compositeSceneAI(args: {
+  layers: CompositeLayerArg[];
+  sessionId?: string;
+  outputWidth?: number;
+  outputHeight?: number;
+  prompt: string;
+}): Promise<{ generationId: string; width: number; height: number }> {
+  const r = await jsonFetch("/api/composite-ai", "POST", args);
+  if (!r.ok) throw new Error(`compositeSceneAI failed: ${await extractError(r)}`);
   return (await r.json()) as { generationId: string; width: number; height: number };
 }
 

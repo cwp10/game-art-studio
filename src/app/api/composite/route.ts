@@ -38,6 +38,8 @@ type CompositeLayerInput = {
   stretchW?: number;
   stretchH?: number;
   filters?: CompositeLayerFilters;
+  targetW?: number;
+  targetH?: number;
 };
 type CompositeBody = {
   layers?: CompositeLayerInput[];
@@ -53,38 +55,57 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
+  console.log("[composite] body layers:", JSON.stringify(body.layers?.map(l => ({
+    id: l.generationId, x: l.x, y: l.y, targetW: l.targetW, targetH: l.targetH,
+    scale: l.scale, outW: body.outputWidth, outH: body.outputHeight,
+  }))));
   if (!Array.isArray(body.layers) || body.layers.length === 0) {
     return Response.json({ error: "layers must be a non-empty array" }, { status: 400 });
   }
 
   // 라우트에 입력 검증(400/404 구분)을 유지 — 관찰 가능한 HTTP 계약.
   // 핵심 실행은 runComposite 에 위임해 MCP 도구와 동일 계약을 공유한다.
-  for (const [i, l] of body.layers.entries()) {
-    if (!l.generationId) {
-      return Response.json({ error: `layers[${i}].generationId required` }, { status: 400 });
+  try {
+    for (const [i, l] of body.layers.entries()) {
+      if (!l.generationId) {
+        return Response.json({ error: `layers[${i}].generationId required` }, { status: 400 });
+      }
+      if (!getGeneration(l.generationId)) {
+        return Response.json({ error: `generation not found: ${l.generationId}` }, { status: 404 });
+      }
     }
-    if (!getGeneration(l.generationId)) {
-      return Response.json({ error: `generation not found: ${l.generationId}` }, { status: 404 });
-    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[composite] validation error:", err);
+    return Response.json({ error: `validation failed: ${msg}` }, { status: 500 });
   }
 
-  const result = await runComposite({
-    layers: body.layers.map((l) => ({
-      generationId: l.generationId as string,
-      opacity: l.opacity,
-      x: l.x,
-      y: l.y,
-      scale: l.scale,
-      rotation: l.rotation,
-      flipH: l.flipH,
-      stretchW: l.stretchW,
-      stretchH: l.stretchH,
-      filters: l.filters,
-    })),
-    sessionId: body.sessionId,
-    outputWidth: body.outputWidth,
-    outputHeight: body.outputHeight,
-  });
+  let result;
+  try {
+    result = await runComposite({
+      layers: body.layers.map((l) => ({
+        generationId: l.generationId as string,
+        opacity: l.opacity,
+        x: l.x,
+        y: l.y,
+        scale: l.scale,
+        rotation: l.rotation,
+        flipH: l.flipH,
+        stretchW: l.stretchW,
+        stretchH: l.stretchH,
+        filters: l.filters,
+        targetW: l.targetW,
+        targetH: l.targetH,
+      })),
+      sessionId: body.sessionId,
+      outputWidth: body.outputWidth,
+      outputHeight: body.outputHeight,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[composite] runComposite error:", err);
+    return Response.json({ error: msg }, { status: 500 });
+  }
 
   return Response.json(result);
 }

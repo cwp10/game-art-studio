@@ -30,6 +30,7 @@ import { useIsCodex } from "@/lib/context/orchestrator-context";
 import {
   clearCanvasEdit,
   compositeScene,
+  compositeSceneAI,
   filterImage,
   getCanvasEdit,
   listGenerations,
@@ -89,6 +90,8 @@ type Layer = {
   opacity: number; // 0~100
   filters: LayerFilters;
   visible: boolean;
+  naturalW: number; // 이미지 원본 픽셀 너비 (0=아직 미로드)
+  naturalH: number; // 이미지 원본 픽셀 높이 (0=아직 미로드)
 };
 
 type CanvasSize = { w: number; h: number };
@@ -151,6 +154,8 @@ function makeLayer(generationId: string): Layer {
     opacity: 100,
     filters: { ...FILTER_DEFAULT },
     visible: true,
+    naturalW: 0,
+    naturalH: 0,
   };
 }
 
@@ -247,6 +252,7 @@ export function CanvasEditor({
   // 레이어 레일 드래그 정렬 중인 행 — 시각 피드백.
   const [draggingRowId, setDraggingRowId] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
+  const [composingAI, setComposingAI] = useState(false);
   // 선택 레이어 단일 작업 진행 상태 — 배경제거/업스케일(AI) · 여백제거(sharp). 동시 실행 방지.
   const [layerOp, setLayerOp] = useState<null | "bg" | "upscale" | "trim">(null);
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
@@ -1157,29 +1163,46 @@ export function CanvasEditor({
     setComposing(true);
     setError(null);
     try {
+      const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
+      const frameW = frame?.offsetWidth || 640;
+      // frameH fallback: offsetHeight가 0이면 customSize 종횡비로 계산 (aspect-ratio 미적용 방어)
+      const frameH = frame?.offsetHeight || (frameW * (customSize.h || frameW) / (customSize.w || frameW));
+      const outW = preset.w || customSize.w || frameW;
+      const outH = preset.h || customSize.h || frameH;
+      const kx = outW / frameW;
+      const ky = outH / frameH;
+
       const visibleLayers = layers.filter(l => l.visible);
       const result = await compositeScene({
-        layers: visibleLayers.map(l => ({
-          generationId: l.generationId,
-          opacity: l.opacity,
-          x: l.x,
-          y: l.y,
-          scale: l.scale,
-          rotation: l.rotation,
-          flipH: l.flipH,
-          stretchW: l.stretchW,
-          stretchH: l.stretchH,
-          filters: {
-            brightness: l.filters.brightness,
-            saturation: l.filters.saturation,
-            hue: l.filters.hue,
-            contrast: l.filters.contrast,
-            blur: l.filters.blur,
-          },
-        })),
+        layers: visibleLayers.map(l => {
+          // CSS 표시 크기 = min(naturalW, frameW) × 비율유지 높이.
+          // scale·stretch는 이 표시 크기에 곱해지므로, 출력 픽셀 타겟을 직접 계산해 보낸다.
+          // naturalW=0이면 미로드 — frameW/frameH를 fallback으로 사용(기존 동작 유지).
+          const nw = l.naturalW > 0 ? l.naturalW : frameW;
+          const nh = l.naturalH > 0 ? l.naturalH : frameH;
+          const displayW = Math.min(nw, frameW);
+          const displayH = displayW * nh / nw;
+          return {
+            generationId: l.generationId,
+            opacity: l.opacity,
+            x: Math.round(l.x * kx),
+            y: Math.round(l.y * ky),
+            targetW: Math.max(1, Math.round(displayW * l.scale * l.stretchW * kx)),
+            targetH: Math.max(1, Math.round(displayH * l.scale * l.stretchH * ky)),
+            rotation: l.rotation,
+            flipH: l.flipH,
+            filters: {
+              brightness: l.filters.brightness,
+              saturation: l.filters.saturation,
+              hue: l.filters.hue,
+              contrast: l.filters.contrast,
+              blur: l.filters.blur,
+            },
+          };
+        }),
         sessionId: sessionId ?? undefined,
-        outputWidth: preset.w || customSize.w || undefined,
-        outputHeight: preset.h || customSize.h || undefined,
+        outputWidth: outW,
+        outputHeight: outH,
       });
       onComposited(result);
     } catch (e) {
@@ -1188,6 +1211,58 @@ export function CanvasEditor({
       setComposing(false);
     }
   }, [layers, composing, sessionId, preset.w, preset.h, customSize, onComposited]);
+
+  // ── AI 합성 → /api/composite-ai (sharp 평탄화 + Codex img2img 자연스러운 합성) ──
+  const handleAIComposite = useCallback(async () => {
+    if (layers.length === 0 || composing || composingAI) return;
+    setComposingAI(true);
+    setError(null);
+    try {
+      const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
+      const frameW = frame?.offsetWidth || 640;
+      const frameH = frame?.offsetHeight || (frameW * (customSize.h || frameW) / (customSize.w || frameW));
+      const outW = preset.w || customSize.w || frameW;
+      const outH = preset.h || customSize.h || frameH;
+      const kx = outW / frameW;
+      const ky = outH / frameH;
+
+      const visibleLayers = layers.filter(l => l.visible);
+      const result = await compositeSceneAI({
+        layers: visibleLayers.map(l => {
+          const nw = l.naturalW > 0 ? l.naturalW : frameW;
+          const nh = l.naturalH > 0 ? l.naturalH : frameH;
+          const displayW = Math.min(nw, frameW);
+          const displayH = displayW * nh / nw;
+          return {
+            generationId: l.generationId,
+            opacity: l.opacity,
+            x: Math.round(l.x * kx),
+            y: Math.round(l.y * ky),
+            targetW: Math.max(1, Math.round(displayW * l.scale * l.stretchW * kx)),
+            targetH: Math.max(1, Math.round(displayH * l.scale * l.stretchH * ky)),
+            rotation: l.rotation,
+            flipH: l.flipH,
+            filters: {
+              brightness: l.filters.brightness,
+              saturation: l.filters.saturation,
+              hue: l.filters.hue,
+              contrast: l.filters.contrast,
+              blur: l.filters.blur,
+            },
+          };
+        }),
+        sessionId: sessionId ?? undefined,
+        outputWidth: outW,
+        outputHeight: outH,
+        prompt: "Naturally and seamlessly blend the layers in this image into a cohesive scene, preserving positions and styles.",
+      });
+      onComposited(result);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setComposingAI(false);
+    }
+  }, [layers, composing, composingAI, sessionId, preset.w, preset.h, customSize, onComposited]);
 
   // 스테이지에 표시할 프레임 크기 — 출력 종횡비를 고정 영역에 contain-fit.
   const aspect = canvasSize.w && canvasSize.h ? canvasSize.w / canvasSize.h : 4 / 3;
@@ -1480,6 +1555,12 @@ export function CanvasEditor({
                         className="block max-w-[min(56vw,640px)]"
                         style={{ filter: cssFilter(layer.filters), pointerEvents: "none" }}
                         draggable={false}
+                        onLoad={e => {
+                          const el = e.currentTarget;
+                          if (el.naturalWidth > 0 && el.naturalHeight > 0) {
+                            patchLayer(layer.id, { naturalW: el.naturalWidth, naturalH: el.naturalHeight });
+                          }
+                        }}
                       />
                       {/* 인라인 마스크 브러시 — 영역 편집(inpaint) + 브러시 기반 분리(extract)가 공유.
                           레이어와 같은 transform 을 CSS 가 적용(표시), 포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). */}
@@ -1845,21 +1926,39 @@ export function CanvasEditor({
               <p className="text-[11px] text-text-muted/60">레이어를 선택하면 필터가 표시됩니다.</p>
             )}
           </div>
-          {/* 합치기(flatten) — 모든 레이어를 1장으로. 필터 아래 상시 노출(닫기는 상단 "대화로 돌아가기"). */}
+          {/* 합치기 — 단순(sharp)·AI(sharp+codex img2img) 2종. 필터 아래 상시 노출. */}
           <div className="flex-none border-t border-border p-3">
-            <button
-              onClick={handleComposite}
-              disabled={layers.length === 0 || composing || busy}
-              className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
-            >
-              {composing ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" /> 합치는 중…
-                </>
-              ) : (
-                `합치기 ▸ (${layers.length}개 → 1장)`
-              )}
-            </button>
+            <div className="flex gap-2">
+              {/* 단순 합치기 (sharp 픽셀 병합) */}
+              <button
+                onClick={handleComposite}
+                disabled={layers.length === 0 || composing || composingAI || busy}
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background text-sm font-medium disabled:opacity-40"
+              >
+                {composing ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> 합치는 중…
+                  </>
+                ) : (
+                  `변환 (${layers.length}개)`
+                )}
+              </button>
+
+              {/* AI 합성 (sharp 평탄화 + Codex img2img 재생성) */}
+              <button
+                onClick={handleAIComposite}
+                disabled={layers.length === 0 || composing || composingAI || busy}
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+              >
+                {composingAI ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> AI 합성 중…
+                  </>
+                ) : (
+                  "AI 합성"
+                )}
+              </button>
+            </div>
           </div>
         </aside>
       </div>

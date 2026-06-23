@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-21 (Opus 전체 분석 기반 코드 품질 수정 8건 완료 / ▶다음: 없음 — 필요 시 SKILL.md 30행 수동 삭제)
+마지막 업데이트: 2026-06-23 (합치기 WYSIWYG 정합성 수정 — targetW/H 방식)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -141,6 +141,20 @@ Opus가 전체 코드베이스를 분석해 도출한 실제 버그·중복·위
 - `.claude/skills/image-pipeline-dev/SKILL.md` 30행 — 삭제된 spritesheet-reorder.ts 참조 고아 라인. 스킬 파일은 보호되어 자동 수정 불가.
 
 **검증:** tsc 0 / pnpm lint 12→3 (잔존 2건 ChatLayout 의도적, 1건 경고) / chroma-key 통합은 픽셀 수준 동작 변경 (품질 향상).
+
+### 합치기 WYSIWYG 정합성 수정 — 2026-06-23
+캔버스 편집기의 레이어 scale/stretch/position이 합성 출력에 정확히 반영되지 않는 버그 수정.
+
+**근본 원인**: 백엔드가 `outputWidth * scale`을 fit:inside 타겟으로 사용 → 이미지 자체 AR이 출력 AR과 다르면(예: 512×512 캐릭터 스프라이트를 1774×887 출력에 합성) 실제 CSS 표시 크기와 불일치.
+
+**수정 내용 (5파일)**:
+- `CanvasEditor.tsx`: Layer 타입에 `naturalW/H` 추가. 레이어 img `onLoad`에서 patchLayer로 원본 픽셀 크기 기록. `handleComposite/handleAIComposite`에서 `displayW = min(naturalW, frameW)`, `displayH = displayW * naturalH/naturalW`로 CSS 표시 크기 계산 후 `targetW = displayW * scale * stretchW * kx`, `targetH = displayH * scale * stretchH * ky`를 직접 전송(scale/stretchW/H 대신). frameH fallback도 customSize 종횡비 기반으로 강화.
+- `composite-layers.ts`: `placeWithTransform`에 `targetW?/targetH?` 파라미터 추가. 지정 시 fit:'fill'로 정확한 픽셀 크기에 리사이즈(레거시 fit:'inside'+stretch 경로는 MCP 등 하위 호환용으로 유지). hasTransform 게이트에 targetW/H 조건 추가.
+- `composite-runner.ts`: `CompositeLayerSpec`에 `targetW?/targetH?` 추가 및 resolved 배열 전파.
+- `api/composite/route.ts`, `api/composite-ai/route.ts`: 입력 타입에 `targetW?/targetH?` 추가.
+- `lib/api/client.ts`: `CompositeLayerArg`에 `targetW?/targetH?` 추가.
+- 1774×887 이미지(출력과 동일 AR): 기존과 동일한 결과(회귀 없음). 다른 크기 이미지: 정확한 WYSIWYG.
+- 검증: tsc 0 / build 성공.
 
 ## ▶ 다음 작업
 
