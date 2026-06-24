@@ -8,8 +8,8 @@ import fs from "node:fs";
 // NEXT_IMAGEGEN_DATA_DIR is baked in at Next.js build time (next.config.ts).
 // MCP server (runs without a build) falls back to IMAGEGEN_DATA_DIR, then cwd/data.
 export const DATA_DIR = path.resolve(
-  process.env.NEXT_IMAGEGEN_DATA_DIR ??
-    process.env.IMAGEGEN_DATA_DIR ??
+  process.env.IMAGEGEN_DATA_DIR ??
+    process.env.NEXT_IMAGEGEN_DATA_DIR ??
     path.join(process.cwd(), "data"),
 );
 

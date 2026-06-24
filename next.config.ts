@@ -9,6 +9,8 @@ const nextConfig: NextConfig = {
     NEXT_IMAGEGEN_DATA_DIR:
       process.env.IMAGEGEN_DATA_DIR ?? path.join(process.cwd(), "data"),
   },
+  // 네이티브 모듈을 webpack 외부화 → .next/node_modules/ 해시 폴더 생성 방지
+  serverExternalPackages: ["better-sqlite3", "sharp"],
 };
 
 export default nextConfig;

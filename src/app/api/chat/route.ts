@@ -41,7 +41,29 @@ import { parseIntent, type CodexIntent } from "@/lib/codex-orchestrator";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MCP_CONFIG_PATH = path.join(process.cwd(), "data", "mcp.json");
+function resolveMcpConfigPath(): string {
+  const compiledServer = path.join(process.cwd(), ".next", "mcp-server.js");
+  if (fs.existsSync(compiledServer)) {
+    // 패키징 앱: 컴파일된 JS + 절대 경로로 런타임 mcp 설정 생성
+    const runtimeConfig = {
+      mcpServers: {
+        imggen: {
+          command: process.execPath,
+          args: [compiledServer],
+          env: {
+            IMAGEGEN_DATA_DIR: DATA_DIR,
+            NODE_OPTIONS: "--max-old-space-size=8192",
+          },
+        },
+      },
+    };
+    const runtimePath = path.join(DATA_DIR, ".mcp-runtime.json");
+    fs.writeFileSync(runtimePath, JSON.stringify(runtimeConfig));
+    return runtimePath;
+  }
+  return path.join(DATA_DIR, "mcp.json");
+}
+const MCP_CONFIG_PATH = resolveMcpConfigPath();
 const APP_CONFIG_PATH = path.join(DATA_DIR, "config.json");
 
 let cachedOrchConfig: "claude" | "codex" | null = null;

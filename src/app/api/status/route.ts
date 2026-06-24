@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 
 export const dynamic = "force-dynamic";
@@ -47,14 +48,26 @@ function checkMCP(timeoutMs = 8000): Promise<ToolStatus> {
     let out = "";
     let timedOut = false;
 
-    const serverScript = path.join(process.cwd(), "src", "lib", "mcp", "server.ts");
+    const cwd = process.cwd();
+    const compiledServer = path.join(cwd, ".next", "mcp-server.js");
+    const tsServer = path.join(cwd, "src", "lib", "mcp", "server.ts");
+    const useCompiled = fs.existsSync(compiledServer);
+
+    const spawnArgs = useCompiled
+      ? [process.execPath, [compiledServer]]
+      : [process.execPath, ["--import", "tsx", tsServer]];
+
     const child = spawn(
-      process.execPath,
-      ["--import", "tsx", serverScript],
+      spawnArgs[0] as string,
+      spawnArgs[1] as string[],
       {
-        cwd: process.cwd(),
+        cwd,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env, IMAGEGEN_DATA_DIR: path.join(process.cwd(), "data"), NODE_OPTIONS: "--max-old-space-size=4096" },
+        env: {
+          ...process.env,
+          IMAGEGEN_DATA_DIR: process.env.IMAGEGEN_DATA_DIR ?? path.join(cwd, "data"),
+          NODE_OPTIONS: "--max-old-space-size=4096",
+        },
       },
     );
 

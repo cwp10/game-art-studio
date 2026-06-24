@@ -2,10 +2,11 @@
   "name": "game-art-studio",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
-    "dev": "NODE_OPTIONS=--max-old-space-size=8192 next dev -H 127.0.0.1",
-    "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
-    "start": "NODE_OPTIONS=--max-old-space-size=8192 next start -H 127.0.0.1",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next dev -H 127.0.0.1",
+    "build": "next build --webpack && node scripts/build-mcp.mjs",
+    "start": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next start -H 127.0.0.1",
     "lint": "eslint",
     "app": "electron electron/main.js",
     "db:init": "tsx scripts/init-db.ts",
@@ -13,8 +14,50 @@
     "gen:poses": "tsx scripts/gen-pose-guides.ts",
     "probe": "node scripts/probe-codex-imagegen.mjs",
     "test": "tsx scripts/test-classify.ts && tsx scripts/test-directions.ts && tsx scripts/test-sprite-marker.ts",
+    "test:e2e": "playwright test",
     "test:post": "tsx scripts/test-spritesheet.ts && tsx scripts/smoke-composite-transform.mts",
-    "postinstall": "cp -f node_modules/gif.js/dist/gif.worker.js public/gif.worker.js && /usr/libexec/PlistBuddy -c 'Set :CFBundleName Game Art Studio' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Game Art Studio' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; true"
+    "postinstall": "node scripts/postinstall.mjs",
+    "dist:mac": "pnpm build && electron-builder --mac",
+    "dist:win": "pnpm build && electron-builder --win --x64",
+    "pack:mac": "electron-builder --mac",
+    "pack:win": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.maniplexsoft.game-art-studio",
+    "productName": "Game Art Studio",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "public/**",
+      "node_modules/**",
+      "package.json",
+      "next.config.ts",
+      "src/lib/db/**",
+      "src/lib/prompt/**"
+    ],
+    "extraResources": [
+      {
+        "from": ".next",
+        "to": "app/.next",
+        "filter": [
+          "**/*",
+          "!cache/**"
+        ]
+      }
+    ],
+    "mac": {
+      "target": "dir",
+      "icon": "icon-assets/AppIcon.icns",
+      "category": "public.app-category.graphics-design"
+    },
+    "win": {
+      "target": "dir",
+      "icon": "icon-assets/icon.png"
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -36,7 +79,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "electron": "^42.3.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "playwright": "^1.60.0",

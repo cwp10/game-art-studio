@@ -10,11 +10,26 @@ const http = require("node:http");
 const PROJECT_DIR = path.resolve(__dirname, "..");
 const PORT = 3000;
 const URL = `http://127.0.0.1:${PORT}`;
-const STATE_FILE = path.join(PROJECT_DIR, "data", "window-state.json");
 
-// Finder 의 .app 에서 실행되면 PATH 가 최소화되므로(node/pnpm/codex/claude 못 찾음)
+// 패키징 시 userData(OS 표준 앱 데이터 폴더), 개발 시 프로젝트 내 data/
+const DATA_DIR = app.isPackaged
+  ? app.getPath("userData")
+  : path.join(PROJECT_DIR, "data");
+
+const STATE_FILE = path.join(DATA_DIR, "window-state.json");
+
+// GUI 런처에서 실행되면 PATH 가 최소화되므로(node/pnpm/codex/claude 못 찾음)
 // 도구 위치를 직접 넣는다. 이 PATH 는 spawn 한 Next 서버 → codex/claude 로 그대로 상속된다.
-process.env.PATH = `/opt/homebrew/bin:${process.env.HOME}/.local/bin:/usr/bin:/usr/sbin:/bin:${process.env.PATH || ""}`;
+if (process.platform === "win32") {
+  const home = process.env.USERPROFILE || process.env.HOMEPATH || "";
+  process.env.PATH = [
+    `${home}\\AppData\\Roaming\\npm`,
+    `${home}\\AppData\\Local\\pnpm`,
+    process.env.PATH || "",
+  ].filter(Boolean).join(";");
+} else {
+  process.env.PATH = `/opt/homebrew/bin:${process.env.HOME}/.local/bin:/usr/bin:/usr/sbin:/bin:${process.env.PATH || ""}`;
+}
 
 app.setName("Game Art Studio");
 
@@ -48,9 +63,13 @@ async function waitForServer(timeoutMs = 90000) {
   return false;
 }
 
+const IS_WIN = process.platform === "win32";
+// Windows에서 pnpm/codex 같은 CLI는 .cmd 래퍼를 통해 실행해야 한다.
+const PNPM = IS_WIN ? "pnpm.cmd" : "pnpm";
+
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { cwd: PROJECT_DIR, stdio: "ignore" });
+    const p = spawn(cmd, args, { cwd: PROJECT_DIR, stdio: "ignore", shell: IS_WIN });
     p.on("error", reject);
     p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
   });
@@ -59,41 +78,95 @@ function run(cmd, args) {
 // 서버 기동 책임: 이미 떠 있으면 그대로 사용, 없으면 (필요 시 빌드 후) 우리가 띄운다.
 async function ensureServer() {
   if (await isUp()) return; // 외부에서 이미 떠 있음 → 종료 책임 없음
-  if (!fs.existsSync(path.join(PROJECT_DIR, ".next", "BUILD_ID"))) {
-    await run("pnpm", ["build"]); // 프로덕션 빌드 최초 1회
+
+  // 패키징된 앱: Resources/app/ 이 루트. 개발: 프로젝트 루트.
+  const appRoot = app.isPackaged
+    ? path.join(process.resourcesPath, "app")
+    : PROJECT_DIR;
+
+  if (!app.isPackaged && !fs.existsSync(path.join(appRoot, ".next", "BUILD_ID"))) {
+    await run(PNPM, ["build"]); // 프로덕션 빌드 최초 1회
   }
-  fs.mkdirSync(path.join(PROJECT_DIR, "data", "logs"), { recursive: true });
-  const log = fs.openSync(path.join(PROJECT_DIR, "data", "logs", "app.log"), "a");
-  // detached:true → 자체 프로세스 그룹. 종료 시 그룹 통째로 kill 해 next-server 까지 정리.
-  serverProc = spawn("pnpm", ["start"], {
-    cwd: PROJECT_DIR,
-    detached: true,
-    stdio: ["ignore", log, log],
-  });
+
+  fs.mkdirSync(path.join(DATA_DIR, "logs"), { recursive: true });
+  const logPath = path.join(DATA_DIR, "logs", "app.log");
+  const logStream = fs.createWriteStream(logPath, { flags: "a" });
+
+  const spawnEnv = { ...process.env, IMAGEGEN_DATA_DIR: DATA_DIR, PORT: String(PORT) };
+
+  if (app.isPackaged) {
+    // 패키징 시 pnpm 없음 → node로 next 직접 실행
+    // .bin/ 심볼릭 링크는 패키징 후 소실되므로 실제 경로 직접 지정
+    const nextBin = path.join(appRoot, "node_modules", "next", "dist", "bin", "next");
+    serverProc = spawn("node", [nextBin, "start", "-H", "127.0.0.1"], {
+      cwd: appRoot,
+      detached: true,
+      shell: false,
+      env: spawnEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    serverProc.stdout.pipe(logStream);
+    serverProc.stderr.pipe(logStream);
+    serverProc.on("error", (err) => logStream.write(`[spawn error] ${err.message}\n`));
+    serverProc.on("exit", (code, sig) => logStream.write(`[exit] code=${code} signal=${sig}\n`));
+  } else {
+    // detached:true → 자체 프로세스 그룹. 종료 시 그룹 통째로 kill 해 next-server 까지 정리.
+    serverProc = spawn(PNPM, ["start"], {
+      cwd: appRoot,
+      detached: true,
+      shell: IS_WIN,
+      env: spawnEnv,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    serverProc.stdout.pipe(logStream);
+    serverProc.stderr.pipe(logStream);
+    serverProc.on("error", (err) => logStream.write(`[spawn error] ${err.message}\n`));
+    serverProc.on("exit", (code, sig) => logStream.write(`[exit] code=${code} signal=${sig}\n`));
+  }
+
   if (!(await waitForServer())) throw new Error("Next 서버가 시간 내에 응답하지 않음");
 }
 
 function stopServer() {
+  const { execSync } = require("node:child_process");
   if (serverProc) {
-    try {
-      process.kill(-serverProc.pid, "SIGTERM"); // 프로세스 그룹 종료
-    } catch {
+    if (IS_WIN) {
+      // Windows: taskkill /T 로 자식 프로세스 트리 전체 종료
       try {
-        serverProc.kill("SIGTERM");
+        execSync(`taskkill /pid ${serverProc.pid} /T /F`, { stdio: "ignore" });
       } catch {
         /* 이미 종료됨 */
+      }
+    } else {
+      try {
+        process.kill(-serverProc.pid, "SIGTERM"); // 프로세스 그룹 종료
+      } catch {
+        try {
+          serverProc.kill("SIGTERM");
+        } catch {
+          /* 이미 종료됨 */
+        }
       }
     }
     serverProc = null;
   }
-  // pnpm이 next-server를 별도 프로세스 그룹으로 띄운 경우를 대비해 포트로 직접 정리
-  try {
-    require("node:child_process").execSync(
-      `lsof -t -i:${PORT} | xargs kill -9`,
-      { stdio: "ignore" }
-    );
-  } catch {
-    /* 이미 종료됐거나 포트 미점유 */
+  // 포트로 직접 정리 (pnpm이 next-server를 별도 그룹으로 띄운 경우 대비)
+  if (IS_WIN) {
+    try {
+      const out = execSync(`netstat -ano | findstr :${PORT}`, { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] });
+      const pids = [...new Set(out.trim().split("\n").map((l) => l.trim().split(/\s+/).pop()).filter(Boolean))];
+      for (const pid of pids) {
+        try { execSync(`taskkill /pid ${pid} /F`, { stdio: "ignore" }); } catch { /* 무시 */ }
+      }
+    } catch {
+      /* 포트 미점유 */
+    }
+  } else {
+    try {
+      execSync(`lsof -t -i:${PORT} | xargs kill -9`, { stdio: "ignore" });
+    } catch {
+      /* 이미 종료됐거나 포트 미점유 */
+    }
   }
 }
 
@@ -178,7 +251,7 @@ function buildMenu() {
 }
 
 ipcMain.handle("open-images-folder", () => {
-  shell.openPath(path.join(PROJECT_DIR, "data", "images"));
+  shell.openPath(path.join(DATA_DIR, "images"));
 });
 
 app.whenReady().then(async () => {

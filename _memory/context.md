@@ -1,9 +1,54 @@
-마지막 업데이트: 2026-06-24 (위생 정비 + 후속 점진 리팩터링: fetch 통합·useStreamChat 추출)
+마지막 업데이트: 2026-06-24 (Electron 패키징 완전 동작 + Playwright E2E 테스트)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
 
 ## 완료된 작업
+
+### Windows 크로스 플랫폼 포팅 + Electron 앱 패키징 — 2026-06-24
+
+**Windows 포팅:**
+- `cross-env` 추가 → dev/build/start 스크립트의 `NODE_OPTIONS` 크로스 플랫폼화
+- `scripts/postinstall.mjs` 신규: macOS 전용 PlistBuddy → Node.js 크로스 플랫폼 스크립트
+- `electron/main.js`: IS_WIN/PNPM 분기, `.cmd` 래퍼, `shell: IS_WIN`, Windows PATH(USERPROFILE), `taskkill /T /F`, `netstat|findstr` 포트 정리
+- `src/lib/image-backend/codex-exec.ts`: `codex.cmd` / `shell: IS_WIN` / SIGKILL 조건부 처리
+- `src/lib/util/paths.ts`: `IMAGEGEN_DATA_DIR` 우선순위를 `NEXT_IMAGEGEN_DATA_DIR`보다 높임(런타임 오버라이드)
+
+**Electron 앱 패키징 (`electron-builder` 26.15.3):**
+- `package.json`에 `"main": "electron/main.js"`, `build` 설정(mac DMG + win NSIS, `asar:false`, `npmRebuild:false`, 출력 `dist/`), `dist:mac`/`dist:win`/`pack:mac`/`pack:win` 스크립트 추가
+- `pnpm-workspace.yaml`: `electron-winstaller` `allowBuilds: true` + `onlyBuiltDependencies` 추가
+- `electron/main.js`: `DATA_DIR` = 패키징 시 `app.getPath("userData")`, 개발 시 `data/`; `ensureServer` isPackaged 분기(node로 next 직접 실행); `ipcMain.handle("open-images-folder")` DATA_DIR 기반으로 변경
+- 아이콘: `icon-assets/AppIcon.icns`(mac), `icon-assets/icon.png`(win) 사용 (256px → 1254px 해상도 문제 해결)
+- `.gitignore`에 `/dist` 추가
+
+**검증:** `pnpm dist:mac` → `dist/Game Art Studio-0.1.0-arm64.dmg` (419MB) 생성 성공
+
+### Electron 패키징 완전 동작 — 2026-06-24
+
+**문제 및 해결:**
+- **원인 1 — Turbopack 네이티브 모듈 해시 경로:** `next build`(Turbopack 기본)가 `better-sqlite3`·`sharp`를 `.next/node_modules/<pkg>-<hash>/` 에 복사 → electron-builder가 `node_modules` 이름 디렉토리 제외 → 패키징 앱에서 `Cannot find module`. 해결: `"build": "next build --webpack"` + `serverExternalPackages: ["better-sqlite3","sharp"]` → `.next/node_modules/` 생성 없음.
+- **원인 2 — `src/lib/db/schema.sql` 누락:** 런타임 DB 초기화에 필요한 SQL 파일이 번들 제외. 해결: `files: ["src/lib/db/**"]` 추가.
+- **원인 3 — MCP 서버 `server.ts` 없음:** `checkMCP()`가 TypeScript 소스를 spawn하는데 소스가 번들에 없음. 해결: `scripts/build-mcp.mjs` 신규(esbuild로 `server.ts` → `.next/mcp-server.js` 컴파일) + `pnpm build` 후 자동 실행 + `status/route.ts`에서 `fs.existsSync`로 컴파일본 우선 사용.
+- **원인 4 — stdout/stderr 로깅 방식:** 파일 디스크립터 직접 전달 → pipe + write 방식으로 변경(app.log 정상 기록).
+
+**최종 검증:**
+```
+{"claude":{"ok":true},"codex":{"ok":true},"mcp":{"ok":true,"version":"0.3.0"}}
+```
+
+**주요 설정 변경:**
+- `package.json`: `"build": "next build --webpack && node scripts/build-mcp.mjs"`, `files`에 `"src/lib/db/**"` 추가
+- `next.config.ts`: `serverExternalPackages: ["better-sqlite3","sharp"]`
+- `electron/main.js`: stdio pipe + logStream 방식
+
+### Playwright E2E 테스트 설정 — 2026-06-24
+
+- `playwright.config.ts` 신규: baseURL `http://127.0.0.1:3000`, webServer `pnpm start`, reuseExistingServer
+- `tests/smoke.spec.ts` 신규: 메인 페이지 로드 / 상태 API 전체 OK / 세션 목록 API / Config API / 채팅 UI 렌더링 (5/5 통과)
+- `pnpm test:e2e` 스크립트 추가
+- `playwright` 브라우저: `./node_modules/.bin/playwright install chromium`으로 설치 필요
+
+**Windows 빌드 주의사항:** macOS에서 `pnpm dist:win` 실행 시 `better-sqlite3`·`sharp` 네이티브 모듈이 macOS 빌드본으로 포함됨. Windows 실행은 Windows 머신에서 `pnpm dist:win` 직접 실행 권장.
 
 ### 전반 검토 + 위생 정비 — 2026-06-24
 프로젝트 전반 검토 후 4영역 정비. **최종 게이트 전부 통과: lint 0 / 단위테스트 5종 통과 / build exit0.**

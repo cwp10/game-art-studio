@@ -443,9 +443,13 @@ export class CodexExecBackend implements ImageBackend {
     onProgress("starting", `codex exec (job ${job.id})`);
 
     const startedAt = performance.now();
-    const child = spawn("codex", args, {
+    // Windows에서 CLI 도구는 .cmd 래퍼를 통해 실행해야 한다.
+    const isWin = process.platform === "win32";
+    const codexCmd = isWin ? "codex.cmd" : "codex";
+    const child = spawn(codexCmd, args, {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
+      shell: isWin,
     });
 
     // AbortSignal 연결
@@ -458,7 +462,8 @@ export class CodexExecBackend implements ImageBackend {
         "abort",
         () => {
           child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
+          // SIGKILL은 Windows에서 지원하지 않으므로 SIGTERM만 사용
+          if (!isWin) setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
         },
         { once: true },
       );
@@ -511,7 +516,7 @@ export class CodexExecBackend implements ImageBackend {
       (resolve, reject) => {
         const timer = setTimeout(() => {
           child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
+          if (!isWin) setTimeout(() => child.kill("SIGKILL"), KILL_DELAY_MS).unref();
           reject(new Error(`Codex timed out after ${CODEX_TIMEOUT_MS / 1000}s`));
         }, CODEX_TIMEOUT_MS);
         timer.unref();
