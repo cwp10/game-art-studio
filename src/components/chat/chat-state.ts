@@ -579,3 +579,17 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return state;
   }
 }
+
+/**
+ * 원시 에러 메시지를 사용자 친화적 한국어 문구로 변환. SSE error 이벤트 표시에 사용.
+ */
+export function friendlyError(raw: string): string {
+  if (/timed out|timeout/i.test(raw))
+    return "죄송합니다, 생성 서버가 타임아웃되었습니다 — 잠시 후 다시 시도해 주세요.";
+  if (/aborted|abort/i.test(raw)) return "취소되었습니다.";
+  if (/rate.?limit|429/i.test(raw))
+    return "요청이 너무 많습니다. 잠시 기다린 후 다시 시도해 주세요.";
+  if (/network|ECONNREFUSED|ENOTFOUND|fetch/i.test(raw))
+    return "네트워크 오류가 발생했습니다. 연결 상태를 확인해 주세요.";
+  return raw;
+}
