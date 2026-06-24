@@ -88,13 +88,13 @@ log('working dir:', probeDir);
 log('input    :', inputAbs, `(${(inputStat.size / 1024).toFixed(1)}KB)`);
 log('mode     :', mode);
 log('timeout  :', `${timeoutSec}s`);
-log('cmd      : codex exec --cd <probeDir> --sandbox workspace-write --skip-git-repo-check -i input.png "<prompt>"');
+log('cmd      : codex exec --cd <probeDir> --sandbox workspace-write --skip-git-repo-check -i input.png -- - < "<prompt stdin>"');
 log('──── starting ────');
 
 const start = performance.now();
 
-// `-i, --image <FILE>...` 가 multi-value 옵션이라 그 뒤의 prompt 까지 file 로 흡수한다.
-// `--` 로 옵션 종료를 명시해서 prompt 가 positional argument 로 들어가게 한다.
+// `-i, --image <FILE>...` 가 multi-value 옵션이라 `--` 로 옵션 종료를 명시하고,
+// 프롬프트는 stdin 으로 전달한다.
 const child = spawn(
   'codex',
   [
@@ -104,10 +104,11 @@ const child = spawn(
     '--skip-git-repo-check',
     '-i', inputCopy,
     '--',
-    naturalPrompt,
+    '-',
   ],
-  { stdio: ['ignore', 'pipe', 'pipe'] },
+  { stdio: ['pipe', 'pipe', 'pipe'] },
 );
+child.stdin.end(naturalPrompt);
 
 let stdoutBuf = '';
 let stderrBuf = '';

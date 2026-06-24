@@ -83,10 +83,11 @@ async function main() {
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
-      prompt,
+      "-",
     ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    { stdio: ["pipe", "pipe", "pipe"] },
   );
+  child.stdin.end(prompt);
 
   child.stdout.on("data", (c) => process.stdout.write(c));
   child.stderr.on("data", (c) => process.stderr.write(c));

@@ -23,7 +23,8 @@ import { chromaKeyFile } from "./chroma-key";
  *
  * M0 probe 결과 검증된 흐름:
  *  1. jobDir (`data/tmp/job-{id}`) 생성
- *  2. `codex exec --cd jobDir --sandbox workspace-write --skip-git-repo-check "<자연어>"` spawn
+ *  2. `codex exec --cd jobDir --sandbox workspace-write --skip-git-repo-check -`
+ *     spawn 후 자연어 프롬프트를 stdin 으로 전달
  *  3. Codex 가 SKILL.md 를 읽고 built-in image_gen 도구 호출 (API 키 불필요, 구독 인증)
  *  4. 결과를 `~/.codex/generated_images/{session}/ig_<hash>.png` 에 저장 후
  *     SKILL.md 가이드에 따라 워크스페이스로 `cp` → `./output.png`
@@ -424,9 +425,10 @@ export class CodexExecBackend implements ImageBackend {
     }
 
     const naturalPrompt = buildNaturalPrompt(job);
-    // `-i, --image <FILE>...` 는 multi-value 옵션이라 그 뒤의 positional 인자도
-    // file 로 흡수해버린다. attached image 가 있으면 `--` 로 옵션 종료를 명시해서
-    // prompt 가 PROMPT positional 로 들어가도록 한다.
+    // 프롬프트는 stdin 으로 전달한다. Windows 인자 재파싱 및 `exec <COMMAND> [ARGS]`
+    // 대체 파서가 프롬프트 단어를 명령으로 오인하는 문제를 피한다.
+    // `-i, --image <FILE>...` 는 multi-value 옵션이라, attached image 가 있으면
+    // `--` 로 옵션 종료를 명시한 뒤 stdin sentinel `-` 를 positional 로 둔다.
     const args = [
       "exec",
       "--cd",
@@ -437,20 +439,33 @@ export class CodexExecBackend implements ImageBackend {
       "-c", `model_reasoning_effort="high"`,
       ...attachedImages.flatMap(p => ["-i", p]),
       ...(attachedImages.length > 0 ? ["--"] : []),
-      naturalPrompt,
+      "-",
     ];
 
     onProgress("starting", `codex exec (job ${job.id})`);
 
     const startedAt = performance.now();
-    // Windows에서 CLI 도구는 .cmd 래퍼를 통해 실행해야 한다.
+    // Windows에서 shell:true로 .cmd를 실행하면 인수가 재파싱돼 프롬프트가 쪼개진다.
+    // codex.cmd는 node로 codex.js를 실행하는 래퍼이므로 node를 직접 스폰한다.
     const isWin = process.platform === "win32";
-    const codexCmd = isWin ? "codex.cmd" : "codex";
-    const child = spawn(codexCmd, args, {
-      stdio: ["ignore", "pipe", "pipe"],
+    let spawnCmd: string;
+    let spawnArgs: string[];
+    if (isWin) {
+      const npmBin = process.env.npm_config_prefix
+        ?? `${process.env.APPDATA}\\npm`;
+      const codexJs = `${npmBin}\\node_modules\\@openai\\codex\\bin\\codex.js`;
+      spawnCmd = process.execPath; // node.exe
+      spawnArgs = [codexJs, ...args];
+    } else {
+      spawnCmd = "codex";
+      spawnArgs = args;
+    }
+    const child = spawn(spawnCmd, spawnArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
-      shell: isWin,
+      shell: false,
     });
+    child.stdin!.end(naturalPrompt);
 
     // AbortSignal 연결
     if (signal) {
@@ -531,7 +546,7 @@ export class CodexExecBackend implements ImageBackend {
     const logFile = path.join(LOGS_DIR, `codex-${job.id}.log`);
     await fs.writeFile(
       logFile,
-      `# codex exec args:\n${JSON.stringify(args, null, 2)}\n\n# stdout:\n${stdoutBuf}\n\n# stderr:\n${stderrBuf}`,
+      `# codex exec args:\n${JSON.stringify(args, null, 2)}\n\n# prompt stdin:\n${naturalPrompt}\n\n# stdout:\n${stdoutBuf}\n\n# stderr:\n${stderrBuf}`,
     );
 
     if (exit.code !== 0) {

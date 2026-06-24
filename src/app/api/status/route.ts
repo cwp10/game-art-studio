@@ -6,11 +6,13 @@ export const dynamic = "force-dynamic";
 
 type ToolStatus = { ok: boolean; version?: string; error?: string };
 
+const IS_WIN = process.platform === "win32";
+
 function checkCLI(cmd: string, args: string[], timeoutMs = 5000): Promise<ToolStatus> {
   return new Promise(resolve => {
     let out = "";
     let timedOut = false;
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], shell: IS_WIN });
 
     const timer = setTimeout(() => {
       timedOut = true;

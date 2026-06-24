@@ -47,7 +47,7 @@ log('working dir:', probeDir);
 log('mode:', mode);
 log('timeout:', `${timeoutSec}s`);
 log('prompt:', JSON.stringify(naturalPrompt));
-log('cmd: codex exec --cd <probeDir> --sandbox workspace-write --skip-git-repo-check "<prompt>"');
+log('cmd: codex exec --cd <probeDir> --sandbox workspace-write --skip-git-repo-check - < "<prompt stdin>"');
 log('──── starting ────');
 
 const start = performance.now();
@@ -59,10 +59,11 @@ const child = spawn(
     '--cd', probeDir,
     '--sandbox', 'workspace-write',
     '--skip-git-repo-check',
-    naturalPrompt,
+    '-',
   ],
-  { stdio: ['ignore', 'pipe', 'pipe'] },
+  { stdio: ['pipe', 'pipe', 'pipe'] },
 );
+child.stdin.end(naturalPrompt);
 
 // ─── stream stdio (also buffer) ──────────────────────────────────────────────
 let stdoutBuf = '';

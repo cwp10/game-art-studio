@@ -109,10 +109,11 @@ const child = spawn(
     "-i",
     maskPath,
     "--",
-    naturalPrompt,
+    "-",
   ],
-  { stdio: ["ignore", "pipe", "pipe"] },
+  { stdio: ["pipe", "pipe", "pipe"] },
 );
+child.stdin.end(naturalPrompt);
 
 let stdoutBuf = "";
 let stderrBuf = "";
