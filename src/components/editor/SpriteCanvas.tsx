@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
-import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, jsonFetch, listGenerations, removeGeneration, uploadImage, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
@@ -29,7 +29,6 @@ type Props = {
   imageUrl: string;
   imageWidth: number;
   imageHeight: number;
-  maxDisplayPx?: number;
   sessionId?: string | null;
   onCancel: () => void;
   /** 보정본을 새 generation 으로 저장 후 호출 — ChatLayout 이 결과 카드 삽입. */
@@ -56,7 +55,6 @@ export function SpriteCanvas({
   imageUrl,
   imageWidth,
   imageHeight,
-  maxDisplayPx = 1200,
   sessionId,
   onCancel,
   onSaved,
@@ -69,7 +67,6 @@ export function SpriteCanvas({
   const baseRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const sizerRef = useRef<HTMLDivElement>(null);
-  const [avail, setAvail] = useState<{ w: number; h: number } | null>(null);
   // 이미지 크기에서 GCD로 셀 크기를 역산해 rows/cols 자동 감지. 감지 실패 시 기본값 6×7.
   // params(make_spritesheet 영속) 가 있으면 grid source-of-truth 로 그쪽을 우선(아래 fetch effect).
   const detected = detectSpriteGrid(imageWidth, imageHeight);
@@ -174,33 +171,8 @@ export function SpriteCanvas({
   }, [regenBusy, onRegenBusyChange]);
 
   // 드래그/선택(화살표 nudge) 중 리사이즈로 표시 크기가 재측정되면 진행 중인
-  // 포인터 좌표 변환이 흔들린다. MaskCanvas 와 동일하게 조작 중엔 avail 을 고정.
-  // useLayoutEffect 클로저에서 최신 상태에 접근하기 위해 ref 사용.
-  const interactingRef = useRef(false);
-  useEffect(() => {
-    interactingRef.current = dragging !== null || selectedIdx !== null;
-  }, [dragging, selectedIdx]);
-
-  useLayoutEffect(() => {
-    const sizer = sizerRef.current;
-    if (!sizer) return;
-    const measure = () => {
-      // 셀 조작(드래그·선택 nudge) 중이면 좌표 mismatch 방지를 위해 재측정 건너뜀.
-      if (interactingRef.current) return;
-      const w = Math.max(200, sizer.clientWidth - 24);
-      const h = Math.max(200, sizer.clientHeight - 320);
-      setAvail({ w, h });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(sizer);
-    return () => ro.disconnect();
-  }, []);
-
-  // 가로폭 기준으로 등비 축소 — 가로로 긴 스프라이트시트에서 세로가 찌그러지지 않도록.
-  const scale = avail
-    ? Math.min(1, avail.w / imageWidth)
-    : Math.min(1, maxDisplayPx / imageWidth);
+  // 그리드 미리보기는 항상 240px 너비 고정.
+  const scale = Math.min(1, 240 / imageWidth);
   const displayW = Math.max(1, Math.round(imageWidth * scale));
   const displayH = Math.max(1, Math.round(imageHeight * scale));
 
@@ -616,29 +588,6 @@ export function SpriteCanvas({
     const prev = undoStack[undoStack.length - 1];
     setUndoStack(stack => stack.slice(0, -1));
     setFrames(prev);
-  }
-
-  // bounding box 기반 자동 정렬 — bottom 기준으로 발 라인 통일
-  function autoAlign() {
-    if (frames.length === 0) return;
-    const boxes = frames.map(frame => {
-      const ctx = frame.getContext("2d");
-      if (!ctx) return { maxY: frame.height };
-      const { data, width, height } = ctx.getImageData(0, 0, frame.width, frame.height);
-      let maxY = 0;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const idx = (y * width + x) * 4;
-          const r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3];
-          const isBg = a < 10 || (r > 240 && g > 240 && b > 240);
-          if (!isBg && y > maxY) maxY = y;
-        }
-      }
-      return { maxY };
-    });
-
-    const maxBottom = Math.max(...boxes.map(b => b.maxY));
-    setOffsets(boxes.map(box => ({ x: 0, y: maxBottom - box.maxY })));
   }
 
   function resetOffsets() {
@@ -1188,7 +1137,7 @@ export function SpriteCanvas({
                 ? `${thumbs.length - excludedFrames.size}/${thumbs.length}`
                 : thumbs.length}프레임)
             </span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {/* 제외 프레임 있을 때만 — 전체 다시 포함. */}
               {excludedFrames.size > 0 && (
                 <button
@@ -1226,14 +1175,6 @@ export function SpriteCanvas({
                 title="프레임 순서 변경: 드래그로 프레임 순서 재배열"
               >
                 순서 변경
-              </button>
-              <button
-                onClick={autoAlign}
-                disabled={frames.length === 0}
-                className="flex h-6 items-center gap-1 rounded border border-border px-2 text-text-muted hover:text-text-primary disabled:opacity-40"
-                title="발(bottom) 기준으로 자동 정렬"
-              >
-                <RefreshCw size={10} /> 자동 정렬
               </button>
               <button
                 onClick={resetOffsets}
