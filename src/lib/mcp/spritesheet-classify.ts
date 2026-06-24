@@ -74,8 +74,10 @@ export function inferSubjectType(prompt: string, hasRef: boolean): SubjectType {
   const p = prompt.toLowerCase();
   const hasCharWord = CHAR_WORDS.some(w => p.includes(w));
   const hasObjWord = OBJECT_WORDS.some(w => p.includes(w));
-  // 참조 이미지 없고, 캐릭터 키워드 없고, 오브젝트 키워드만 있으면 object.
-  if (!hasRef && hasObjWord && !hasCharWord) return "object";
+  const hasEffectWord = EFFECT_WORDS.some(w => p.includes(w));
+  // 참조 이미지 없고, 캐릭터·이펙트 키워드 없고, 오브젝트 키워드만 있으면 object.
+  // 이펙트 단어가 있으면 effect 우선 — "검기 트레일"의 검(object) ⊂ 검기(effect) substring 충돌 방지.
+  if (!hasRef && hasObjWord && !hasCharWord && !hasEffectWord) return "object";
   return classifyAnchor(prompt, hasRef) === "effect" ? "effect" : "character";
 }
 

@@ -3,6 +3,8 @@
 import { ArrowLeft, Download, Layers, Loader2 } from "lucide-react";
 import { useState } from "react";
 
+import { jsonFetch } from "@/lib/api/client";
+
 type Props = {
   generationId: string;
   imageUrl: string;
@@ -24,11 +26,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, hideHead
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/normal-map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ generationId, strength }),
-      });
+      const res = await jsonFetch("/api/normal-map", "POST", { generationId, strength });
       const data = await res.json() as { newGenerationId?: string; imageUrl?: string; width?: number; height?: number; error?: string };
       if (!res.ok || !data.newGenerationId) {
         setError(data.error ?? "노멀맵 생성에 실패했습니다.");

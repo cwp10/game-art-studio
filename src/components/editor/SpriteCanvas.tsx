@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { getGeneration, listGenerations, removeGeneration, uploadImage, uploadSpritesheet } from "@/lib/api/client";
+import { getGeneration, jsonFetch, listGenerations, removeGeneration, uploadImage, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
 import type { Generation } from "@/types/db";
@@ -939,11 +939,7 @@ export function SpriteCanvas({
     setRegenBusy(origIdx);
     setRegenError(null);
     try {
-      const res = await fetch("/api/sprite-frame/regenerate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetGenerationId, row: r, col, prompt: regenPrompt.trim() }),
-      });
+      const res = await jsonFetch("/api/sprite-frame/regenerate", "POST", { sheetGenerationId, row: r, col, prompt: regenPrompt.trim() });
       if (!res.ok) {
         const { error } = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(error ?? `재생성 실패 (${res.status})`);
@@ -977,23 +973,19 @@ export function SpriteCanvas({
     setEffectBusy(true);
     setEffectError(null);
     try {
-      const res = await fetch("/api/sprite-effect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          generationId: parentGenerationId,
-          effect: effectType,
-          params: {
-            color: effectColor,
-            opacity: effectOpacity,
-            blur: effectBlur,
-            ...(effectType === "drop_shadow" && { offsetX: effectOffsetX, offsetY: effectOffsetY }),
-            ...(effectType === "outline" && { thickness: effectThickness }),
-          },
-          sessionId: sessionId ?? undefined,
-          cols: apiCols ?? cols,
-          rows: apiRows ?? rows,
-        }),
+      const res = await jsonFetch("/api/sprite-effect", "POST", {
+        generationId: parentGenerationId,
+        effect: effectType,
+        params: {
+          color: effectColor,
+          opacity: effectOpacity,
+          blur: effectBlur,
+          ...(effectType === "drop_shadow" && { offsetX: effectOffsetX, offsetY: effectOffsetY }),
+          ...(effectType === "outline" && { thickness: effectThickness }),
+        },
+        sessionId: sessionId ?? undefined,
+        cols: apiCols ?? cols,
+        rows: apiRows ?? rows,
       });
       if (!res.ok) {
         const { error } = (await res.json().catch(() => ({}))) as { error?: string };

@@ -10,10 +10,11 @@
 - **이미지 엔진** — `codex exec` spawn → imagegen 스킬 자동 발동 → gpt-image (imagegen 2.0)
 - **오케스트레이션** — `claude -p --output-format stream-json` + MCP stdio 서버. 채팅 한 줄이
   Claude CLI → MCP 도구 → Codex CLI 체인을 타고 이미지를 만든다.
-- **도구 11종** — generate / spritesheet / emote_sheet / tileset / normal_map / edit / upscale /
-  resize / remove_bg / inpaint / reskin (MCP 도구로 노출, Claude 가 라우팅)
-- **에디터** — 마스크 인페인트 · 레이어 분리 · 스프라이트시트(방향/onion/anchor/atlas) · 리스킨 ·
-  노멀맵 · 이미지 도구(크롭·투명도·실시간 필터 슬라이더), 16:10 viewbox + zoom/pan 캔버스
+- **도구 13종** — generate / spritesheet / emote_sheet / tileset / normal_map / edit / upscale /
+  resize / remove_bg / inpaint / reskin / composite / sprite_effect (MCP 도구로 노출, Claude 가 라우팅)
+- **에디터** — 통합 캔버스(합성 · 자유변형 · 크롭 · 실시간 필터 · 배경제거 · 영역편집(인페인트) ·
+  레이어 분리 · 업스케일) · 스프라이트시트(방향/onion/anchor/atlas/이펙트) · 리스킨 · 9-slice · 노멀맵,
+  16:10 viewbox + zoom/pan 캔버스
 - **라이브러리** — 스타일 프리셋, 프롬프트 라이브러리, 갤러리(검색·필터), 비교 시트
 - **저장** — 이미지는 `./data/images/`, 썸네일은 `./data/thumbnails/`(on-demand), 메타는
   SQLite (`./data/app.db`, WAL 모드). 세션 삭제 시 그 세션 이미지 정리, `pnpm cleanup` 으로 누적 정리.
@@ -62,21 +63,22 @@ pnpm cleanup --days=30     # 보존 기간 조절
 ```
 src/
 ├── app/                  # Next.js App Router
-│   ├── api/              # chat, sessions, generations, images, thumbnails,
-│   │                     #   layers, layer-parts, presets, prompts, reskin, reskin-suggest,
-│   │                     #   suggest, sprite-suggest, sprite-frame, normal-map,
-│   │                     #   crop, filter, describe, export, upload, logs, status, cleanup
+│   ├── api/              # chat, sessions, generations, images, thumbnails, presets, prompts,
+│   │                     #   canvas-edit, composite, composite-ai, nine-slice(-scale/-trim),
+│   │                     #   sprite-effect, sprite-frame, sprite-suggest, reskin(-suggest), button-states,
+│   │                     #   normal-map, layer-suggest, suggest, filter, describe, export,
+│   │                     #   upload, logs, status, config, cleanup
 │   ├── page.tsx          # ChatLayout
 │   └── globals.css       # 다크 팔레트
 ├── proxy.ts              # 로컬 전용 host 가드 (/api/*)
 ├── components/
-│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList / StatusButton
-│   ├── editor/           # MaskCanvas / LayerCanvas / SpriteCanvas / SpriteGenPanel / ReskinPanel / NormalMapPanel / ImageToolsPanel / useZoomPan
+│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList / StatusButton / chat-state
+│   ├── editor/           # CanvasEditor / SpriteCanvas / SpriteGenPanel / ReskinPanel / NineSliceEditor / ButtonStateEditor / NormalMapPanel / ImageToolsPanel / useZoomPan
 │   └── library/          # GallerySheet / CompareSheet / PromptLibrarySheet / StylePresetPicker / LogsPanel
 ├── lib/
 │   ├── db/               # better-sqlite3 클라이언트 + repo + schema.sql + migrate
 │   ├── image-backend/    # ImageBackend 인터페이스 + codex-exec 어댑터 + 스프라이트시트 후처리 + recolor
-│   ├── mcp/              # MCP stdio 서버 (도구 8종) + 스프라이트시트 분류
+│   ├── mcp/              # MCP stdio 서버 (도구 13종) + handlers + 스프라이트시트 분류
 │   ├── cli/              # Claude CLI 어댑터 (stream-json) + progress tail
 │   ├── prompt/           # system-orchestrator.md
 │   ├── sse/              # SSE 스트림 헬퍼

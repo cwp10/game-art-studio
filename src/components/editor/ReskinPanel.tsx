@@ -2,7 +2,7 @@
 
 import { ArrowLeft, Brush, Loader2, Palette, Sparkles, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
+import { jsonFetch, listGenerations, removeGeneration, uploadImage } from "@/lib/api/client";
 import { AiSuggestButton, AiSuggestDropdown } from "@/components/editor/AiSuggestControls";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
 import { detectSpriteGrid } from "@/lib/shared/detect-sprite-grid";
@@ -209,11 +209,7 @@ export function ReskinPanel({
     const apiMode: "a" | "b" | "c" =
       uiMode === "color" ? "b" : skinInput === "image" ? "c" : "a";
     try {
-      const res = await fetch("/api/reskin-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: apiMode, question, isSheet, isOverlay: overlay }),
-      });
+      const res = await jsonFetch("/api/reskin-suggest", "POST", { mode: apiMode, question, isSheet, isOverlay: overlay });
       const data = (await res.json()) as {
         suggestion?: string;
         suggestions?: { title: string; body: string }[];

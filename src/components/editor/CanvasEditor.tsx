@@ -33,6 +33,7 @@ import {
   compositeSceneAI,
   filterImage,
   getCanvasEdit,
+  jsonFetch,
   listGenerations,
   saveCanvasEdit,
   uploadImage,
@@ -558,10 +559,8 @@ export function CanvasEditor({
     if (extractAiLoading) return;
     setExtractAiLoading(true);
     try {
-      const res = await fetch("/api/layer-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요" }),
+      const res = await jsonFetch("/api/layer-suggest", "POST", {
+        question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요",
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[] };
       setExtractAiSuggestions(data.suggestions ?? []);
@@ -1254,7 +1253,7 @@ export function CanvasEditor({
         sessionId: sessionId ?? undefined,
         outputWidth: outW,
         outputHeight: outH,
-        prompt: "Naturally and seamlessly blend the layers in this image into a cohesive scene, preserving positions and styles.",
+        // prompt 미전송 — 서버가 평탄화 이미지를 Claude Vision 으로 분석해 자동 생성한다.
       });
       onComposited(result);
     } catch (e) {
@@ -1456,7 +1455,16 @@ export function CanvasEditor({
       </div>
 
       {/* 본문: 스테이지 + 레이어 레일 */}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {/* AI 합성 중 편집 잠금 오버레이 — 드래그·핸들·필터·레일 등 모든 입력을 차단. */}
+        {composingAI && (
+          <div className="absolute inset-0 z-50 flex cursor-not-allowed items-center justify-center bg-bg-app/60 backdrop-blur-[2px]">
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-card px-5 py-3 text-sm text-text-muted shadow-xl">
+              <Loader2 size={15} className="animate-spin text-[color:var(--accent)]" />
+              AI 합성 중… 편집이 잠겨 있습니다
+            </div>
+          </div>
+        )}
         {/* 스테이지 */}
         <div className="relative flex min-w-0 flex-1 flex-col">
           {/* 이전 편집 복원 칩 — 저장본이 있을 때만(자동 적용 X, 사용자가 이어서/처음부터 선택). */}

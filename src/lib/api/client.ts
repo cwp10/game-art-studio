@@ -8,7 +8,7 @@ import type { Generation, Message, PromptLibraryItem, Session, StylePreset } fro
 // ─── 내부 헬퍼 ───────────────────────────────────────────────────────────────
 
 /** POST/PATCH/DELETE + JSON body init 보일러플레이트 축약. */
-function jsonFetch(
+export function jsonFetch(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,
@@ -97,24 +97,6 @@ export async function uploadImage(args: {
 }
 
 /**
- * LayerCanvas 가 만든 N(=4)개의 색별 PNG 를 한 번에 generation 행들로 저장.
- * 각 PNG 는 (원본 × 색별 binary mask) 합성 결과.
- */
-export async function uploadLayers(
-  parentGenerationId: string,
-  layers: Array<{ colorLabel: string; name?: string; dataUrl: string }>,
-): Promise<
-  Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>
-> {
-  const r = await jsonFetch("/api/layers", "POST", { parentGenerationId, layers });
-  if (!r.ok) throw new Error(`uploadLayers failed: ${await extractError(r)}`);
-  const { layers: out } = (await r.json()) as {
-    layers: Array<{ generationId: string; colorLabel: string; name?: string; width: number; height: number }>;
-  };
-  return out;
-}
-
-/**
  * 결정적 색교체(리스킨 정밀 모드) — codex 없이 sharp 로 픽셀 단위 색 매핑.
  * 형태 100% 보존. 결과는 kind='reskin' generation.
  */
@@ -167,7 +149,8 @@ export async function compositeScene(args: {
 
 /**
  * AI 합성 — POST /api/composite-ai. compositeScene 과 동일하게 레이어를 sharp 로 평탄화한 뒤
- * Codex img2img 로 한 번 더 재생성해 자연스럽게 합성한다. prompt 로 합성 지시를 전달.
+ * Codex img2img 로 한 번 더 재생성해 자연스럽게 합성한다. 합성 프롬프트는 서버가 평탄화 이미지를
+ * Claude Vision 으로 분석해 자동 생성하므로 prompt 는 보낼 필요가 없다(선택).
  * Codex 실행이 끝날 때까지 블로킹(수십 초). 결과는 최종 img2img generation.
  */
 export async function compositeSceneAI(args: {
@@ -175,7 +158,7 @@ export async function compositeSceneAI(args: {
   sessionId?: string;
   outputWidth?: number;
   outputHeight?: number;
-  prompt: string;
+  prompt?: string;
 }): Promise<{ generationId: string; width: number; height: number }> {
   const r = await jsonFetch("/api/composite-ai", "POST", args);
   if (!r.ok) throw new Error(`compositeSceneAI failed: ${await extractError(r)}`);
@@ -215,22 +198,6 @@ export async function describePrompt(generationId: string, signal?: AbortSignal)
   const r = await jsonFetch("/api/describe", "POST", { generationId }, signal);
   if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { prompt: string }).prompt;
-}
-
-/**
- * 레이어 분리용 "분리 가능한 부위" 라벨 4-6개 제안. generation 의 생성 prompt 를 보고
- * Claude 가 추론 (이미지 vision 아님). LayerCanvas 의 부위명 chip 에 사용.
- *
- * 실패 시 빈 배열 반환 — UI 가 graceful 하게 처리 (throw 안 함).
- */
-export async function suggestLayerParts(generationId: string, signal?: AbortSignal): Promise<string[]> {
-  try {
-    const r = await jsonFetch("/api/layer-parts", "POST", { generationId }, signal);
-    if (!r.ok) return [];
-    return ((await r.json()) as { parts?: string[] }).parts ?? [];
-  } catch {
-    return [];
-  }
 }
 
 // ── style presets ───────────────────────────────────────────────────────────
@@ -298,6 +265,7 @@ export async function bumpPromptUse(id: string): Promise<void> {
 export async function getGeneration(id: string): Promise<{
   id: string;
   kind: string;
+  prompt: string | null;
   params: Record<string, unknown>;
   width: number | null;
   height: number | null;
@@ -308,6 +276,7 @@ export async function getGeneration(id: string): Promise<{
   return (await r.json()) as {
     id: string;
     kind: string;
+    prompt: string | null;
     params: Record<string, unknown>;
     width: number | null;
     height: number | null;

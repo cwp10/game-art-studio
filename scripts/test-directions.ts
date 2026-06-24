@@ -45,17 +45,12 @@ check(
   ]),
 );
 check(
-  "directionLabels(8) = 시계방향 8개 정확",
-  eqArr(directionLabels(8), [
-    "DOWN (toward viewer)",
-    "DOWN-LEFT",
-    "LEFT",
-    "UP-LEFT",
-    "UP (away from viewer)",
-    "UP-RIGHT",
-    "RIGHT",
-    "DOWN-RIGHT",
-  ]),
+  "directionLabels(8) prefix = 시계방향 8개 정확",
+  // 8방향 라벨은 codex 프롬프트 품질용 verbose 서술형(em-dash 뒤 설명) — 방향 순서는 불변이므로 prefix 토큰만 검증.
+  eqArr(
+    directionLabels(8).map(l => l.split(/ [—(]/)[0].trim()),
+    ["DOWN", "DOWN-LEFT", "LEFT", "UP-LEFT", "UP", "UP-RIGHT", "RIGHT", "DOWN-RIGHT"],
+  ),
 );
 // 길이 단언(행 수 = 방향 수)
 check("len(2)=2 / len(4)=4 / len(8)=8", directionLabels(2).length === 2 && directionLabels(4).length === 4 && directionLabels(8).length === 8);

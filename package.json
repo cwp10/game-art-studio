@@ -12,6 +12,8 @@
     "cleanup": "tsx scripts/cleanup.ts",
     "gen:poses": "tsx scripts/gen-pose-guides.ts",
     "probe": "node scripts/probe-codex-imagegen.mjs",
+    "test": "tsx scripts/test-classify.ts && tsx scripts/test-directions.ts && tsx scripts/test-sprite-marker.ts",
+    "test:post": "tsx scripts/test-spritesheet.ts && tsx scripts/smoke-composite-transform.mts",
     "postinstall": "cp -f node_modules/gif.js/dist/gif.worker.js public/gif.worker.js && /usr/libexec/PlistBuddy -c 'Set :CFBundleName Game Art Studio' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; /usr/libexec/PlistBuddy -c 'Set :CFBundleDisplayName Game Art Studio' node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null; true"
   },
   "dependencies": {

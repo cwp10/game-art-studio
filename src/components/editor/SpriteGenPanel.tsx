@@ -4,6 +4,7 @@ import { ArrowLeft, Lightbulb, Loader2, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
+import { jsonFetch } from "@/lib/api/client";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
 
 
@@ -290,17 +291,13 @@ export function SpriteGenPanel({
     setAiSuggestions(null);
     const question = actionPrompt.trim() || "동작을 추천해주세요";
     try {
-      const res = await fetch("/api/sprite-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question,
-          subjectType,
-          referencePrompt: subjectType === "effect" ? referencePrompt : undefined,
-          direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
-          frames,
-          seamlessLoop,
-        }),
+      const res = await jsonFetch("/api/sprite-suggest", "POST", {
+        question,
+        subjectType,
+        referencePrompt: subjectType === "effect" ? referencePrompt : undefined,
+        direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
+        frames,
+        seamlessLoop,
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[]; error?: string };
       if (!res.ok || !data.suggestions?.length) {

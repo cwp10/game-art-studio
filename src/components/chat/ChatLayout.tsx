@@ -21,6 +21,7 @@ import {
   deleteSession,
   galleryInsert,
   getGeneration,
+  jsonFetch,
   listMessages,
   listPresets,
   listSessions,
@@ -147,11 +148,7 @@ export function ChatLayout() {
     const next: "claude" | "codex" = orchestrator === "claude" ? "codex" : "claude";
     setOrchestrator(next);
     try {
-      await fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orchestrator: next }),
-      });
+      await jsonFetch("/api/config", "PATCH", { orchestrator: next });
     } catch {
       setOrchestrator(orchestrator);
     }
@@ -167,8 +164,10 @@ export function ChatLayout() {
     return () => clearTimeout(t);
   }, [sessionSearch]);
 
-  // activeSessionIdRef 항상 최신 동기화
-  activeSessionIdRef.current = state.activeSessionId;
+  // activeSessionIdRef 항상 최신 동기화 — 비동기 스트림 콜백(371·445)이 읽는 용도라 effect 커밋 후 동기화로 충분.
+  useEffect(() => {
+    activeSessionIdRef.current = state.activeSessionId;
+  }, [state.activeSessionId]);
 
   // 활성 세션 변경 시 메시지 로드
   useEffect(() => {
@@ -1131,11 +1130,27 @@ export function ChatLayout() {
           sessionId={state.activeSessionId}
           busy={state.generating}
           onClose={closeCanvas}
-          onComposited={res => {
+          onComposited={async res => {
+            // 활성 세션이 없으면 새 세션을 만들어 활성화 — handleGalleryInsert 와 동일.
+            // set_active 가 유발하는 listMessages reload 가 합성 카드를 덮지 않도록 1회 skip.
+            let sid = state.activeSessionId;
+            if (!sid) {
+              const newSession = await createSession("캔버스 합성");
+              sid = newSession.id;
+              const next = await listSessions();
+              dispatch({ type: "set_sessions", sessions: next });
+              skipNextLoadRef.current = true;
+              dispatch({ type: "set_active", sessionId: sid });
+            }
+            // 재실행 후 복원을 위해 메시지 쌍을 DB 에 저장 (fire-and-forget).
+            galleryInsert(sid, res.generationId).catch(e => console.error("[gallery-insert]", e));
+            // 라이브 카드 라벨을 gallery-insert 가 영속화하는 gen.prompt 와 일치시킴.
+            const gen = await getGeneration(res.generationId);
+            const userText = gen?.prompt?.slice(0, 80) || "🎨 캔버스 합성";
             dispatch({
               type: "add_result_card",
               tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
-              userText: "🎨 캔버스 합성",
+              userText,
               generationId: res.generationId,
               width: res.width,
               height: res.height,
@@ -1271,6 +1286,8 @@ function EmptyState({
   // 서버/첫 렌더는 결정적(각 카테고리 첫 항목)으로 두고, 마운트 후 랜덤 교체 — hydration mismatch 방지.
   const [picks, setPicks] = useState<string[]>(() => SEED_POOLS.map(pool => pool[0]));
   useEffect(() => {
+    // 마운트 후 1회 랜덤 교체 — 서버/첫 렌더는 결정적이어야 hydration mismatch 가 안 나므로 의도적 setState.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPicks(SEED_POOLS.map(pool => pool[Math.floor(Math.random() * pool.length)]));
   }, []);
   return (

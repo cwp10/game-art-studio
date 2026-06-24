@@ -3,6 +3,8 @@
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { jsonFetch } from "@/lib/api/client";
+
 /**
  * NineSliceEditor — 단일 이미지를 9-slice 영역으로 분할하는 편집기.
  *
@@ -122,11 +124,7 @@ export function NineSliceEditor({ generationId, sessionId, hideHeader, onClose, 
         body.targetWidth = Number(outWidth);
         body.targetHeight = Number(outHeight);
       }
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await jsonFetch(endpoint, "POST", body);
       if (!res.ok) throw new Error(`${res.status}`);
       const data = (await res.json()) as ApiResult;
       onResult?.({ generationId: data.generationId, width: data.width, height: data.height, kind });
