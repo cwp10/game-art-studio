@@ -4,23 +4,158 @@
 
 > EtherAI 튜토리얼의 워크플로(이미지 생성 / 편집 / 스프라이트 / 오케스트레이션)를 참고해 1인 로컬 도구로 재구성한 프로젝트.
 
-## 특징
+---
 
-- **API 키 미사용** — Claude·Codex **구독 한도 안에서만** 동작
+## 구현된 기능
+
+### 이미지 생성 (MCP 도구 13종)
+
+Claude CLI 가 채팅 한 줄을 받아 MCP 도구를 선택·라우팅하고, Codex CLI → gpt-image(imagegen 2.0) 체인으로 이미지를 생성한다.
+
+| 도구 | 설명 |
+|------|------|
+| `generate_image` | 자연어 프롬프트 → 단일 이미지 생성 |
+| `make_spritesheet` | 캐릭터/오브젝트 스프라이트시트 생성 (방향 수·프레임 수 지정, seamless loop) |
+| `make_emote_sheet` | 감정 표현 이모트 시트 생성 |
+| `make_tileset` | 타일셋 생성 |
+| `generate_normal_map` | 이미지에서 노멀맵 자동 생성 |
+| `edit_image` | 이미지 편집 (프롬프트 기반) |
+| `upscale_image` | 이미지 업스케일 |
+| `resize_image` | 이미지 리사이즈 |
+| `remove_background` | 배경 제거 (chroma-key + AI) |
+| `inpaint_image` | 마스크 영역 인페인트 |
+| `reskin_image` | 색·재질 리스킨 (팔레트 스왑 / 화풍 변환) |
+| `composite_scene` | 다층 합성 (레이어 transform + 필터 포함) |
+| `apply_sprite_effect` | 스프라이트시트 이펙트 적용 (드롭섀도우·아웃라인·글로우) |
+
+---
+
+### 캔버스 에디터 (`CanvasEditor`)
+
+채팅창 우측 패널을 전환해 열리는 통합 이미지 편집기. `fixed inset-0 z-40` 전체화면.
+
+- **다층 레이어 합성** — 레이어 추가·삭제·재정렬·가시성 토글·불투명도 조절
+- **자유변형** — 드래그 이동·핸들 리사이즈·회전·좌우 뒤집기
+- **실시간 필터** — 밝기·대비·채도·색조(hue)·블러 (레이어별 독립 적용)
+- **배경 제거** — 선택 레이어에 chroma-key + AI 배경 제거
+- **크롭(Trim)** — 투명 여백 자동 제거
+- **업스케일** — 선택 레이어 고해상도 업스케일 후 레이어 교체
+- **영역 편집(인페인트)** — 브러시로 마스크 칠 → 프롬프트 입력 → 해당 영역만 재생성
+- **레이어 분리(Extract)** — 마스크 브러시로 부위 선택 → 새 레이어로 추출 (AI 부위 이름 제안 포함)
+- **합성(Flatten)** — 전체 레이어를 `/api/composite` 로 한 장으로 굽기 (서버사이드 sharp)
+- **Undo/Redo** — 캔버스 스냅샷 기반 실행취소·재실행
+- **Zoom/Pan** — 16:10 viewbox, 마우스 휠 줌 + 드래그 패닝
+
+---
+
+### 스프라이트시트 뷰어/에디터 (`SpriteCanvas`)
+
+스프라이트시트 결과 카드에서 열리는 전용 에디터.
+
+- **애니메이션 재생** — FPS 조절(1~30), 재생/정지, 방향별 행 선택 재생
+- **방향 시트** — 2/4/8 방향 라벨 자동 인식 (Down·Left·Right·Up 등 게임 관례)
+- **Onion Skin** — 앞뒤 프레임 반투명 오버레이
+- **앵커 포인트** — 드래그로 기준점 설정 (셀 내 픽셀 좌표로 내보내기)
+- **프레임 재정렬** — 드래그 앤 드롭으로 재생 순서 변경
+- **프레임 제외** — 특정 프레임 재생·내보내기에서 제외
+- **프레임 재생성** — 선택 셀만 `/api/sprite-frame/regenerate` 로 단독 재생성 후 시트에 교체
+- **GIF 내보내기** — 선택 프레임 → 애니메이션 GIF (브라우저 캔버스 합성)
+- **ZIP 내보내기** — 개별 프레임 PNG 묶음 다운로드
+- **Atlas 내보내기** — TexturePacker·Unity·Phaser·Custom 포맷 메타데이터 JSON 생성
+- **이펙트 적용** — 드롭섀도우·아웃라인·글로우 (색·불투명도·크기·블러 조절)
+- **셀 정규화 후처리** — 서버사이드: 녹색 배경 검출 → chroma-key, 앵커 기준 셀 정렬
+
+---
+
+### 리스킨 패널 (`ReskinPanel`)
+
+선택 이미지의 색·재질을 일괄 교체.
+
+- **팔레트 스왑** — 원본 색→대상 색 매핑 (최대 6쌍)
+- **화풍 변환** — 스타일 프롬프트로 전면 reskin (픽셀아트·수채화 등)
+- **AI 색 제안** — `/api/reskin-suggest` 로 팔레트 자동 추출 + 대체 색 제안
+- **레이어 분리** — 시트 전체 또는 첨부 레이어 기반 리스킨
+
+---
+
+### 9-Slice 에디터 (`NineSliceEditor`)
+
+UI 버튼·패널용 9-슬라이스 처리.
+
+- **인셋 조절** — 상·하·좌·우 inset 픽셀 독립 설정
+- **9-Slice 그리드 생성** — `/api/nine-slice` → 3×3 분할 이미지 PNG 생성
+- **스케일 미리보기** — `/api/nine-slice-scale` → 목표 해상도로 코너 보존 스케일링
+- **Trim** — `/api/nine-slice-trim` → 투명 여백 제거 후 인셋 재계산
+
+---
+
+### 버튼 상태 에디터 (`ButtonStateEditor`)
+
+UI 버튼의 상태별 변형 자동 생성.
+
+- **3개 상태 자동 생성** — Normal·Hover·Pressed (밝기·채도·색조 조합)
+- **파라미터 미세 조정** — 각 상태별 밝기·채도·색조 수치 직접 편집
+- **추가 생성** — 기존 세트에 새 Normal 이미지를 더해 세트 확장
+
+---
+
+### 노멀맵 패널 (`NormalMapPanel`)
+
+픽셀아트 스프라이트용 노멀맵 생성.
+
+- **자동 생성** — `/api/normal-map` → 원본 이미지에서 노멀맵 PNG 생성
+- **강도 조절** — strength 파라미터로 법선 강도 조절
+
+---
+
+### 합성 에디터 (AI 레이어 제안)
+
+`/api/composite-ai` 와 `/api/layer-suggest` 를 통한 AI 보조 합성.
+
+- **레이어 분리 AI 제안** — 선택 영역에서 부위 이름 자동 추출 제안
+- **AI 배치 제안** — 여러 에셋을 합성할 때 레이어 순서·위치 AI 추천
+
+---
+
+### 채팅 UI
+
+- **SSE 스트림** — `claude -p --output-format stream-json` 실시간 스트리밍
+- **도구 호출 블록 (`ToolCallBlock`)** — MCP 도구 호출 과정을 채팅 안에 인라인 표시
+- **이미지 결과 카드 (`ImageResultCard`)** — 생성된 이미지에서 즉시 편집·다운로드·첨부·갤러리 삽입
+- **파일 첨부** — 로컬 이미지 첨부 → `/api/upload` 업로드 → 대화에 참조 이미지로 활용
+- **세션 관리** — 세션 생성·이름변경·삭제, 좌측 사이드바 목록
+
+---
+
+### 라이브러리
+
+- **갤러리 (`GallerySheet`)** — 전체 생성 이미지 그리드, 프롬프트 검색 + kind 필터(스프라이트/타일셋 등), 첨부·PNG 다운로드
+- **비교 시트 (`CompareSheet`)** — 두 이미지 나란히 비교
+- **프롬프트 라이브러리 (`PromptLibrarySheet`)** — 재사용 프롬프트 저장·불러오기
+- **스타일 프리셋 (`StylePresetPicker`)** — 픽셀아트·수채화 등 스타일 프리셋 선택 → 프롬프트에 자동 삽입
+- **로그 패널 (`LogsPanel`)** — Claude/Codex/MCP 실시간 로그 열람
+
+---
+
+### 저장 & 데이터
+
+- **이미지** — `./data/images/{generation_id}.png`
+- **썸네일** — `./data/thumbnails/{generation_id}.webp` (on-demand 생성, 갤러리용)
+- **메타데이터** — SQLite (`./data/app.db`, WAL 모드) — sessions, generations, prompts, presets, jobs 테이블
+- **정리** — 세션 삭제 시 해당 세션 이미지 자동 정리, `pnpm cleanup` 으로 고아 파일·오래된 로그 일괄 정리
+
+---
+
+### 인프라
+
+- **API 키 미사용** — Claude·Codex 구독 한도 안에서만 동작
 - **이미지 엔진** — `codex exec` spawn → imagegen 스킬 자동 발동 → gpt-image (imagegen 2.0)
-- **오케스트레이션** — `claude -p --output-format stream-json` + MCP stdio 서버. 채팅 한 줄이
-  Claude CLI → MCP 도구 → Codex CLI 체인을 타고 이미지를 만든다.
-- **도구 13종** — generate / spritesheet / emote_sheet / tileset / normal_map / edit / upscale /
-  resize / remove_bg / inpaint / reskin / composite / sprite_effect (MCP 도구로 노출, Claude 가 라우팅)
-- **에디터** — 통합 캔버스(합성 · 자유변형 · 크롭 · 실시간 필터 · 배경제거 · 영역편집(인페인트) ·
-  레이어 분리 · 업스케일) · 스프라이트시트(방향/onion/anchor/atlas/이펙트) · 리스킨 · 9-slice · 노멀맵,
-  16:10 viewbox + zoom/pan 캔버스
-- **라이브러리** — 스타일 프리셋, 프롬프트 라이브러리, 갤러리(검색·필터), 비교 시트
-- **저장** — 이미지는 `./data/images/`, 썸네일은 `./data/thumbnails/`(on-demand), 메타는
-  SQLite (`./data/app.db`, WAL 모드). 세션 삭제 시 그 세션 이미지 정리, `pnpm cleanup` 으로 누적 정리.
-- **UI** — 다크 테마 3-column, 한국어, ChatGPT 스타일 단일 채팅창
-- **Electron 셸** — `Game Art Studio.app` 더블클릭으로 실행. Next.js 프로덕션 서버를 자식 프로세스로 spawn, 포트가 열리면 BrowserWindow 로드. `pnpm app` 으로도 실행 가능.
+- **오케스트레이션** — `claude -p --output-format stream-json` + MCP stdio 서버
+- **Electron 셸** — `Game Art Studio.app` 더블클릭 실행. Next.js 프로덕션 서버를 자식 프로세스로 spawn
 - **로컬 전용** — `127.0.0.1` 바인딩 + `proxy.ts` host 가드, 인증 없음, 외부 트래커 없음
+- **UI** — 다크 테마 3-column, 한국어
+
+---
 
 ## 사전 조건
 
