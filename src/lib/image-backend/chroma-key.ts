@@ -76,7 +76,7 @@ export async function chromaKeyFile(
     const [thMin, thMax] = keyColor === "magenta" ? [120, 200] : [30, 50];
     hardThresh = Math.max(thMin, Math.min(thMax, Math.round(median * 0.5)));
   }
-  const fringeFloor = 2;
+  const fringeFloor = keyColor === "green" ? 5 : 2;
   const fringeSpan = Math.max(8, Math.round((hardThresh - fringeFloor) * 0.6));
 
   // 2. hard-key 후보 마스크.
@@ -153,7 +153,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = 8; // 5→8: 실루엣 경계 6px+ 떨어진 fringe 녹색 잔재까지 흡수
+  const DESPILL_RADIUS = keyColor === "green" ? 14 : 8; // green: 실루엣 경계에서 더 먼 fringe 녹색 잔재까지 흡수
   const bgDist = new Uint8Array(N).fill(255);
   {
     const bfs: number[] = [];
@@ -200,8 +200,11 @@ export async function chromaKeyFile(
     // magenta despill: G 채널이 높으면 진짜 자주색/보라색 캐릭터 픽셀이므로 스킵.
     // 마젠타 스필은 G≈0-20, 자주색 캐릭터는 G≈30-80 으로 구분 가능.
     if (keyColor === "green") {
-      data[i + 1] = Math.max(data[i], data[i + 2]);
-      if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 2);
+      // 배경 거리에 따라 despill 강도 조절: 가까울수록 더 강하게
+      const spillStrength = 1 - bgDist[p] / (DESPILL_RADIUS + 1);
+      const targetG = Math.max(data[i], data[i + 2]);
+      data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * Math.max(0.5, spillStrength));
+      if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
     } else {
       if (data[i + 1] > 40) continue; // G 높음 → 자주색 캐릭터, despill 스킵
       data[i] = data[i + 1];
