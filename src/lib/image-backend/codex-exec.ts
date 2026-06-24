@@ -16,7 +16,7 @@ import type {
   ImageResult,
   ProgressCallback,
 } from "./index";
-import { chromaKeyFile } from "./chroma-key";
+import { chromaKeyFile, GREEN_SUBJECT_RE, type ChromaKeyColor } from "./chroma-key";
 
 /**
  * CodexExecBackend — `codex exec` 를 spawn 해서 imagegen 스킬을 자동 발동.
@@ -98,8 +98,20 @@ function buildInpaintPrompt(job: ImageJob): string {
   );
 }
 
+/**
+ * 프롬프트에서 chroma-key 색을 결정. 녹색 피사체/이펙트면 magenta, 아니면 green.
+ * remove_bg/layer_extract 의 생성 프롬프트(배경색 지시)와 후처리(키아웃 색)가
+ * 반드시 동일 색을 쓰도록 단일 소스로 둔다 — 두 곳이 어긋나면 배경이 안 날아간다.
+ */
+function detectKeyColor(prompt: string): ChromaKeyColor {
+  return GREEN_SUBJECT_RE.test(prompt) ? "magenta" : "green";
+}
+
 function buildLayerExtractPrompt(job: ImageJob): string {
   // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
+  // 추출 대상이 녹색이면 magenta 배경으로 그리게 지시(후처리도 같은 색으로 키아웃).
+  const key = detectKeyColor(job.prompt);
+  const hex = key === "magenta" ? "#ff00ff" : "#00ff00";
   const hasMask = (job.inputImagePaths?.length ?? 0) >= 2;
   if (hasMask) {
     // job.prompt 에서 " 레이어 추출" 접미사·adjustPrompt 부가어를 제거하고 부위명만 추출.
@@ -111,12 +123,12 @@ function buildLayerExtractPrompt(job: ImageJob): string {
       PROMPT_HEADER +
       `OBJECT EXTRACTION. I am attaching TWO images: ` +
       `(1) the original image, and (2) a mask where the RED region marks the object to extract.\n\n` +
-      `Extract the red-marked object and place it on a flat solid #00ff00 chroma-key background.${partHint} ` +
+      `Extract the red-marked object and place it on a flat solid ${hex} chroma-key background.${partHint} ` +
       `Show ONLY the extracted object — infer its complete and accurate boundary ` +
       `(the brush stroke is approximate; use visual context to find the true edges). ` +
       `Preserve the object's original colors, shading, and art style exactly. ` +
-      `Everything outside the extracted object must be solid #00ff00 green with no gradients or shadows. ` +
-      `After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+      `Everything outside the extracted object must be solid ${hex} ${key} with no gradients or shadows. ` +
+      `After Codex saves it as ./output.png, the post-processing pipeline will key out the ${key}.`
     );
   }
   // 마스크 없음: job.prompt 가 부위명 (예: "머리띠", "눈", "몸통")
@@ -127,12 +139,12 @@ function buildLayerExtractPrompt(job: ImageJob): string {
   return (
     PROMPT_HEADER +
     `OBJECT EXTRACTION. From the attached image, extract "${job.prompt}"` +
-    ` and place it on a flat solid #00ff00 chroma-key background.\n\n` +
+    ` and place it on a flat solid ${hex} chroma-key background.\n\n` +
     `Find and extract ONLY the "${job.prompt}" — identify its exact location and boundaries in the image.` +
     restoreSentence +
     ` Preserve the original art style, colors, shading, and details exactly.` +
-    ` Everything outside the extracted "${job.prompt}" must be solid #00ff00 green with no gradients or shadows.` +
-    ` After Codex saves it as ./output.png, the post-processing pipeline will key out the green.`
+    ` Everything outside the extracted "${job.prompt}" must be solid ${hex} ${key} with no gradients or shadows.` +
+    ` After Codex saves it as ./output.png, the post-processing pipeline will key out the ${key}.`
   );
 }
 
@@ -328,11 +340,17 @@ const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
   img2img: (job) => PROMPT_HEADER + `Use the attached image as a reference. Generate a new image: ${job.prompt}`,
   inpaint: buildInpaintPrompt,
   upscale: (job) => PROMPT_HEADER + `Upscale the attached image to higher resolution while preserving all detail. ${job.prompt}`,
-  remove_bg: (job) =>
-    PROMPT_HEADER +
-    `Regenerate the attached subject on a flat solid #00ff00 chroma-key background ` +
-    `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
-    `the post-processing pipeline will key out the green. ${job.prompt}`,
+  remove_bg: (job) => {
+    // 피사체가 녹색이면 magenta 배경으로 그리게 지시(후처리도 같은 색으로 키아웃).
+    const key = detectKeyColor(job.prompt);
+    const hex = key === "magenta" ? "#ff00ff" : "#00ff00";
+    return (
+      PROMPT_HEADER +
+      `Regenerate the attached subject on a flat solid ${hex} chroma-key background ` +
+      `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
+      `the post-processing pipeline will key out the ${key}. ${job.prompt}`
+    );
+  },
   layer_extract: buildLayerExtractPrompt,
   spritesheet: buildSpritesheetPrompt,
   reskin: buildReskinPrompt,
@@ -364,19 +382,20 @@ function inferStage(
 }
 
 /**
- * #00ff00 chroma-key 처리 (in-place, green 전용 얇은 래퍼).
+ * chroma-key 처리 (in-place). prompt 에서 키색 자동 감지 — 녹색 피사체면 magenta, 아니면 green.
+ * 생성 프롬프트(detectKeyColor 로 배경색 지시)와 동일 색을 키아웃해야 배경이 제대로 날아간다.
  *
  * 공유 적응형 구현(chroma-key.ts 의 chromaKeyFile)에 위임한다. 과거에는 codex-exec 가
  * 단순 greenness-feather 별도 구현을, spritesheet-postprocess 가 적응형(테두리-connected
  * 배경만 키아웃·flood-fill 본체 보호·despill) 구현을 따로 갖고 있었다. 두 경로가 동일
  * 알고리즘을 쓰도록 통합했다.
  *
- * 단일 이미지 경로(remove_bg/layer_extract/inpaint)이므로 cellArea 는 미지정(=전체 N) 으로
+ * 단일 이미지 경로(remove_bg/layer_extract)이므로 cellArea 는 미지정(=전체 N) 으로
  * 둔다 — enclosed 배경 포켓 흡수 임계가 단일 이미지 기준으로 올바르게 잡힌다. 반환 keyedOut
  * 카운트는 이 경로에서 쓰지 않으므로 버린다.
  */
-async function chromaKeyGreen(filePath: string): Promise<void> {
-  await chromaKeyFile(filePath, "green");
+async function chromaKeyAuto(filePath: string, prompt: string): Promise<void> {
+  await chromaKeyFile(filePath, detectKeyColor(prompt));
 }
 
 /**
@@ -587,21 +606,22 @@ export class CodexExecBackend implements ImageBackend {
     await fs.mkdir(IMAGES_DIR, { recursive: true });
     await fs.rename(pickedPath, destPath);
 
-    // remove_bg/layer_extract 후처리: prompt 에서 #00ff00 chroma-key 위에 다시 그리도록
-    // 지시했으므로 그 픽셀들을 투명화. anti-aliased fringe 까지 잡으려고 넉넉한 threshold 사용.
+    // remove_bg/layer_extract 후처리: prompt 에서 chroma-key(#00ff00 또는 #ff00ff) 위에
+    // 다시 그리도록 지시했으므로 그 색을 투명화. 키색은 생성 프롬프트와 동일하게 prompt 에서 감지.
     if (job.kind === "remove_bg" || job.kind === "layer_extract") {
       onProgress("recovering", "chroma key post-process");
-      await chromaKeyGreen(destPath);
+      await chromaKeyAuto(destPath, job.prompt);
     }
 
     // inpaint 후처리: 원본이 투명 배경이면 Codex 가 결과를 #00ff00 위에 그려버리므로
-    // (remove_bg 와 동일한 이유) 같은 chroma-key 로 배경을 다시 투명화한다.
+    // (remove_bg 와 동일한 이유) green chroma-key 로 배경을 다시 투명화한다.
+    // 이 녹색은 모델이 자발적으로 그리는 것(프롬프트 지시 아님)이라 항상 green 으로 고정.
     // 원본이 불투명이면 inpaint 결과도 불투명이라 키아웃하지 않는다.
     if (job.kind === "inpaint" && job.inputImagePaths?.[0]) {
       const parentHasAlpha = await hasTransparentBackground(job.inputImagePaths[0]);
       if (parentHasAlpha) {
         onProgress("recovering", "chroma key post-process (transparent parent)");
-        await chromaKeyGreen(destPath);
+        await chromaKeyFile(destPath, "green");
       }
     }
 

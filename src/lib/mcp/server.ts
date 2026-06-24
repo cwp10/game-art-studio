@@ -44,6 +44,7 @@ import {
 import {
   type Directions,
 } from "./spritesheet-classify.js";
+import { GREEN_SUBJECT_RE } from "../image-backend/chroma-key.js";
 import { createGeneration, getGeneration, setGenerationDimensions } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -117,7 +118,16 @@ const INPUT_GEN_PROP = {
 const SCHEMAS = {
   generate_image: {
     type: "object" as const,
-    properties: { ...PROMPT_PROP, ...SESSION_PROP },
+    properties: {
+      ...PROMPT_PROP,
+      ...SESSION_PROP,
+      chromaKey: {
+        type: "string",
+        enum: ["auto", "green", "magenta"],
+        description:
+          "(선택) 배경 키잉 색상 override. auto=자동감지(기본). 에셋에 초록 이펙트/효과가 있으면 magenta 지정.",
+      },
+    },
     required: ["prompt"],
   },
   make_spritesheet: {
@@ -173,6 +183,12 @@ const SCHEMAS = {
         description:
           "(선택) 캐릭터가 바라보는 방향. directions=1(단일 방향) 시트에서 [spritesheet: facing=X] 디렉티브가 있을 때 전달. " +
           "NL 프롬프트 방향 감지보다 우선 적용됨.",
+      },
+      chromaKey: {
+        type: "string",
+        enum: ["auto", "green", "magenta"],
+        description:
+          "(선택) 배경 키잉 색상 override. auto=자동감지(기본). 초록 발광 이펙트/녹색 본체면 magenta 지정.",
       },
       ...SESSION_PROP,
     },
@@ -478,6 +494,7 @@ type CallArgs = {
   anchorStrategy?: AnchorStrategy;
   directions?: Directions;
   viewpoint?: string;
+  chromaKey?: "auto" | "green" | "magenta";
   sessionId?: string;
   // composite_scene
   layers?: Array<{ id: string; opacity?: number }>;
@@ -516,10 +533,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           ((/transparent|투명/i.test(rawPrompt)) || !(/배경|background/i.test(rawPrompt)));
 
         // 녹색 피사체 감지 → magenta key, 아니면 green key.
-        const genGreenSubject = /녹색|초록|연두|green|슬라임|slime|leaf|이끼|moss/.test(
-          rawPrompt.toLowerCase(),
-        );
-        const genChromaKey: ChromaKeyColor = genGreenSubject ? "magenta" : "green";
+        // 명시적 chromaKey override(green/magenta)가 오면 자동감지를 건너뛴다.
+        const genGreenSubject = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase());
+        const argsChromaKey = args.chromaKey;
+        const genChromaKey: ChromaKeyColor =
+          argsChromaKey === "green" || argsChromaKey === "magenta"
+            ? argsChromaKey
+            : genGreenSubject
+              ? "magenta"
+              : "green";
 
         // 투명 배경이면 chroma-key 배경 주입 (모델이 직접 알파를 그리면 edge fringe가 남음).
         const genBgInstruction = wantsTransparentGen

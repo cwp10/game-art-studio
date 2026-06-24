@@ -16,6 +16,7 @@ import {
   type ChromaKeyColor,
   type SubjectType,
 } from "../../image-backend/spritesheet-postprocess.js";
+import { GREEN_SUBJECT_RE } from "../../image-backend/chroma-key.js";
 import { inferSubjectType, type Directions } from "../spritesheet-classify.js";
 import {
   analyzeRefFacing,
@@ -149,11 +150,9 @@ export async function handleMakeSpritesheet(
   }
 
   // ⑥ 녹색 캐릭터 키워드 감지 → 마젠타 키 폴백.
-  // 명시적 녹색 색상 키워드만(고블린 등 모호어 제외) — 녹색 옷/슬라임이 chroma-key 에
-  // 먹히는 회귀 방지. 키워드 없으면 기존 green 경로.
-  const greenSubject = /녹색|초록|연두|green|슬라임|slime|잎|leaf|이끼|moss/.test(
-    userPrompt.toLowerCase(),
-  );
+  // 명시적 녹색 색상 키워드만(고블린 등 모호어 제외) — 녹색 옷/슬라임/초록 이펙트가 chroma-key 에
+  // 먹히는 회귀 방지. 키워드 없으면 기존 green 경로. (server.ts·codex-exec 와 동일 기준)
+  const greenSubject = GREEN_SUBJECT_RE.test(userPrompt.toLowerCase());
   // 참조 이미지가 있으면 그 본체 색을 분석 — 사용자가 "green" 이라 안 써도 참조
   // 캐릭터가 녹색 우세면 자동으로 마젠타 키로 폴백(녹색 본체 보존). 키워드 OR 결합.
   let refIsGreen = false;
@@ -168,7 +167,14 @@ export async function handleMakeSpritesheet(
       if (refIsGreen) log(`make_spritesheet: ref ${refId} green-dominant → magenta key`);
     }
   }
-  const chromaKeyColor: ChromaKeyColor = greenSubject || refIsGreen ? "magenta" : "green";
+  // 명시적 chromaKey override(green/magenta)가 오면 자동감지(키워드·참조분석)를 건너뛴다.
+  const chromaKeyOverride = (args as { chromaKey?: string }).chromaKey;
+  const chromaKeyColor: ChromaKeyColor =
+    chromaKeyOverride === "green" || chromaKeyOverride === "magenta"
+      ? chromaKeyOverride
+      : greenSubject || refIsGreen
+        ? "magenta"
+        : "green";
 
   // 피사체 종류·앵커 전략 해석 — 명시 param 우선, 없으면 키워드 추론 폴백.
   // subjectType 은 normalize 정렬·이펙트 가드의 결정적 입력 신호.

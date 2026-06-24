@@ -13,6 +13,21 @@ import sharp from "sharp";
 
 export type ChromaKeyColor = "green" | "magenta";
 
+/**
+ * 녹색 피사체/이펙트 감지 정규식 — green 대신 magenta(#ff00ff) chroma-key 로 전환할지 결정.
+ *
+ * 초록 발광 이펙트(독·산성·자연마법 등)나 녹색 본체(슬라임·이끼)는 green screen 위에 그리면
+ * chroma-key 후처리에서 본체가 함께 날아간다. 이 패턴에 걸리면 magenta 배경으로 생성·키잉한다.
+ *
+ * 주의: magic·glow·enchanted 같은 범용어는 넣지 않는다 — 파란/빨간 마법까지 magenta 로 가버린다.
+ * 명시적으로 초록 계열을 가리키는 색·소재·이펙트 어휘만 포함한다.
+ *
+ * server.ts(generate_image), spritesheet-handler.ts(make_spritesheet),
+ * codex-exec.ts(remove_bg/layer_extract) 세 경로가 같은 기준을 쓰도록 단일 소스로 둔다.
+ */
+export const GREEN_SUBJECT_RE =
+  /녹색|초록|연두|green|슬라임|slime|잎|leaf|이끼|moss|독성|독액|독|산성|자연\s*마법|풀숲|풀|초원|포이즌|에메랄드|poison|toxic|acid|venom|nature\s*magic|emerald|jade|lime|herb|algae/i;
+
 type Logger = (line: string) => void;
 const noop: Logger = () => {};
 
