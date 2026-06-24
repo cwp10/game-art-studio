@@ -8,7 +8,7 @@ import type { Generation, Message, PromptLibraryItem, Session, StylePreset } fro
 // ─── 내부 헬퍼 ───────────────────────────────────────────────────────────────
 
 /** POST/PATCH/DELETE + JSON body init 보일러플레이트 축약. */
-function jsonFetch(
+export function jsonFetch(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
   body?: unknown,

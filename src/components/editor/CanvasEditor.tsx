@@ -33,6 +33,7 @@ import {
   compositeSceneAI,
   filterImage,
   getCanvasEdit,
+  jsonFetch,
   listGenerations,
   saveCanvasEdit,
   uploadImage,
@@ -558,10 +559,8 @@ export function CanvasEditor({
     if (extractAiLoading) return;
     setExtractAiLoading(true);
     try {
-      const res = await fetch("/api/layer-suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요" }),
+      const res = await jsonFetch("/api/layer-suggest", "POST", {
+        question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요",
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[] };
       setExtractAiSuggestions(data.suggestions ?? []);
