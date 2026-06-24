@@ -63,6 +63,77 @@ pnpm test                  # 순수 단위 (분류/방향/마커) — DB·이미
 pnpm test:post             # 후처리 결정적 검증 (스프라이트시트/합성) — 로컬 전용
 ```
 
+## 배포 빌드 (Electron 패키징)
+
+`electron-builder`로 패키징하면 Next.js 서버를 내장한 단독 실행 앱을 만든다.  
+빌드 결과는 `dist/` 하위에 생성되며 `.gitignore` 처리되어 있다.
+
+### 사전 조건 (빌드 머신 공통)
+
+| 항목 | 최소 버전 | 비고 |
+|------|-----------|------|
+| Node.js | 20+ | `node -v` |
+| pnpm | 10+ | `pnpm -v` |
+| `@openai/codex` 전역 설치 | 최신 | `npm i -g @openai/codex` |
+| `claude` CLI | 2.1.150+ | Anthropic Claude Code CLI |
+
+> Codex · Claude 각각의 계정 로그인(`codex login`, `claude login`)이 먼저 되어 있어야 한다.
+
+---
+
+### macOS 빌드
+
+```bash
+pnpm dist:mac
+# 내부 흐름: pnpm build → electron-builder --mac
+```
+
+출력: `dist/mac/Game Art Studio.app`
+
+```bash
+# 실행
+open "dist/mac/Game Art Studio.app"
+# 또는 Finder에서 더블클릭
+```
+
+> **주의** — `icon-assets/AppIcon.icns` 가 없으면 기본 Electron 아이콘으로 패키징된다.  
+> `pnpm run gen-icon` (또는 `scripts/gen-app-icon-foreground.mjs`) 로 아이콘을 먼저 생성하거나 수동 배치 후 빌드할 것.
+
+---
+
+### Windows 빌드
+
+```bash
+pnpm dist:win
+# 내부 흐름: pnpm build → electron-builder --win --x64
+```
+
+출력: `dist\win-unpacked\Game Art Studio.exe`
+
+```bash
+# 실행 (PowerShell)
+& "dist\win-unpacked\Game Art Studio.exe"
+```
+
+**Windows 특이사항:**
+
+- Electron 앱 구동 시 `%APPDATA%\npm` 과 `%LOCALAPPDATA%\pnpm` 이 `PATH` 에 자동 추가된다 (`electron/main.js`).
+- `codex exec` 는 `shell: false` 로 `node.exe`를 직접 spawn해 cmd.exe 경유 프롬프트 파싱 문제를 우회한다.  
+  `@openai/codex` 가 **전역(`npm i -g`)으로** 설치되어 있어야 앱이 해당 경로를 찾을 수 있다.
+- `pnpm` 으로 전역 설치한 경우 `%LOCALAPPDATA%\pnpm` 에서 탐색한다.
+
+---
+
+### 빌드 스크립트 요약
+
+| 명령 | 동작 |
+|------|------|
+| `pnpm build` | Next.js 프로덕션 빌드 + MCP 서버 번들 |
+| `pnpm dist:mac` | 빌드 → macOS 앱 번들 생성 |
+| `pnpm dist:win` | 빌드 → Windows EXE 디렉토리 생성 |
+| `pnpm pack:mac` | 빌드 없이 electron-builder macOS 패키징만 |
+| `pnpm pack:win` | 빌드 없이 electron-builder Windows 패키징만 |
+
 ## 디렉토리
 
 ```
