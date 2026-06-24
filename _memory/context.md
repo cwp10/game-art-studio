@@ -1,4 +1,4 @@
-마지막 업데이트: 2026-06-24 (전반 검토 + 위생 정비: lint 게이트·죽은 코드·문서/CI·단위테스트 버그)
+마지막 업데이트: 2026-06-24 (위생 정비 + 후속 점진 리팩터링: fetch 통합·useStreamChat 추출)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
@@ -28,7 +28,13 @@ game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이
 - `package.json`: `test`(순수단위 3개 — DB·이미지 부수효과 0, CI안전) + `test:post`(spritesheet/smoke — 로컬 결정적) 추가.
 - `.github/workflows/ci.yml` 신규: install(electron skip)→db:init→lint→test→build. codex 생성·시각회귀는 CI 범위 밖(로컬 probe/test:post).
 
-**미완(다음 단계 후보):** 거대 파일 리팩터링 — CanvasEditor 2217 / SpriteCanvas 2131 / ChatLayout 1347 / mcp server.ts 1203·handlers/shared.ts 1154줄. 위험·검증특성(브러시/변형 헤드리스 검증 불가)상 보류. fetchJson 래퍼 통합 → useStreamChat 추출처럼 저위험부터 점진 권장. **제품 신호:** DB 143건 중 normal_map 실사용 0건(숨김/제거 후보), 편집·합성이 절반(주력).
+**후속 점진 리팩터링(2026-06-24, PR #31·#32 main 머지, 전부 CI 통과):**
+- ① fetch 통합: 컴포넌트 직접 fetch의 POST+JSON 보일러플레이트 9곳을 `client.ts`의 `jsonFetch`(export)로 일관화. suggest 3곳은 응답 shape이 제각각이라 단일 함수로 묶지 않고 보일러플레이트만 제거(시맨틱 보존). GET 2곳·DELETE 1곳은 보일러플레이트 없어 제외.
+- ② `useStreamChat` 추출(`src/components/chat/useStreamChat.ts` 신규): ChatLayout 1348→1117줄. SSE 전송(handleSend/handleBatch/handleCancel) + 전용 ref(presetCache/abortRef) 캡슐화. 공유 ref 4개(streamSeqRef·generatingSessionsRef·activeSessionIdRef·skipNextLoadRef)는 skipNextLoadRef가 8곳에 얽혀 인자 전달. friendlyError는 chat-state로 이동. 검증: lint/build/단위테스트 + **헤드리스 마운트 스모크 PASS**(playwright, HTTP200·textarea·uncaught0). 실 SSE 동작(세션전환 누수차단·배치·취소·복귀)은 codex 필요라 수동 QA 미실행.
+
+**보류 결정(2026-06-24, 사용자 결정):**
+- `normal_map`(DB 실사용 0건): **유지**(게임 노멀맵은 잠재 유용, 제거 비가역).
+- SpriteCanvas/CanvasEditor 훅 분할: **보류**. 상태 의존 깊어 추출해도 인자 8~10개(캡슐화 약함) + 다운로드/브러시/변형 헤드리스 검증 불가 → ROI/위험비가 fetch·useStreamChat보다 나쁨. 향후 해당 기능 작업 시 자연스럽게 분할 권장. 저위험·고ROI 정리는 이 세션에 소진.
 
 ### 통합 캔버스 에디터 1단계 — 2026-06-20
 편집·이미지 도구·씬에 추가·레이어 분리를 하나의 "포토샵식 전체전환 레이어 캔버스"로 통합하는 작업의 1단계(결정적/비-AI 부분만).

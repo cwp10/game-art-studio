@@ -56,6 +56,11 @@ pnpm tsx scripts/gen.ts "a red apple, simple illustration"
 pnpm cleanup --dry-run     # 무엇이 지워질지 미리보기
 pnpm cleanup               # 실제 정리
 pnpm cleanup --days=30     # 보존 기간 조절
+
+# 결정적 게이트 (codex 불필요) — GitHub Actions CI 가 PR 마다 자동 실행 (.github/workflows/ci.yml)
+pnpm lint
+pnpm test                  # 순수 단위 (분류/방향/마커) — DB·이미지 부수효과 없음
+pnpm test:post             # 후처리 결정적 검증 (스프라이트시트/합성) — 로컬 전용
 ```
 
 ## 디렉토리
@@ -72,7 +77,7 @@ src/
 │   └── globals.css       # 다크 팔레트
 ├── proxy.ts              # 로컬 전용 host 가드 (/api/*)
 ├── components/
-│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList / StatusButton / chat-state
+│   ├── chat/             # ChatLayout / MessageList / Composer / ToolCallBlock / ImageResultCard / SessionList / StatusButton / chat-state / useStreamChat
 │   ├── editor/           # CanvasEditor / SpriteCanvas / SpriteGenPanel / ReskinPanel / NineSliceEditor / ButtonStateEditor / NormalMapPanel / ImageToolsPanel / useZoomPan
 │   └── library/          # GallerySheet / CompareSheet / PromptLibrarySheet / StylePresetPicker / LogsPanel
 ├── lib/
