@@ -8,21 +8,25 @@ export const runtime = "nodejs";
 
 /**
  * POST /api/normal-map
- * Body: { generationId: string, strength?: number }  (strength 0.5–2.0, 기본 1.0)
- * Response: { newGenerationId, imageUrl, width, height, elapsedMs }
+ * Body: { generationId: string, strength?: number, previewOnly?: boolean }
+ *   strength: 0.5–2.0 (기본 1.0)
+ *   previewOnly: true → DB 저장 없이 base64 dataURL 반환 (미리보기 캐시용)
+ * Response:
+ *   previewOnly=false(기본): { newGenerationId, imageUrl, width, height, elapsedMs }
+ *   previewOnly=true:        { previewDataUrl, width, height, elapsedMs }
  *
  * MCP generate_normal_map 과 동일한 Sobel 합성 로직을 직접 실행한다 (codex/Claude 불필요).
  * 투명 영역을 중간 회색으로 flatten → greyscale → X/Y Sobel → RGB 조합.
  */
 export async function POST(req: NextRequest) {
-  let body: { generationId?: string; strength?: number };
+  let body: { generationId?: string; strength?: number; previewOnly?: boolean };
   try {
-    body = (await req.json()) as { generationId?: string; strength?: number };
+    body = (await req.json()) as { generationId?: string; strength?: number; previewOnly?: boolean };
   } catch {
     return Response.json({ error: "invalid json" }, { status: 400 });
   }
 
-  const { generationId, strength: rawStrength = 1.0 } = body;
+  const { generationId, strength: rawStrength = 1.0, previewOnly = false } = body;
   if (!generationId) return Response.json({ error: "generationId required" }, { status: 400 });
 
   const strength = Math.max(0.5, Math.min(2.0, rawStrength));
@@ -30,10 +34,10 @@ export async function POST(req: NextRequest) {
   const source = getGeneration(generationId);
   if (!source) return Response.json({ error: "generation not found" }, { status: 404 });
 
-  ensureDataDirs();
+  if (!previewOnly) ensureDataDirs();
   const inputPath = resolveImagePath(source.image_path);
   const newGenId = newGenerationId();
-  const outPath = imagePathFor(newGenId);
+  const outPath = previewOnly ? null : imagePathFor(newGenId);
   const startedAt = performance.now();
 
   const meta = await sharp(inputPath).metadata();
@@ -77,9 +81,16 @@ export async function POST(req: NextRequest) {
     if (channels === 4) out[i * channels + 3] = alpha;
   }
 
-  await sharp(out, { raw: { width, height, channels } }).png().toFile(outPath);
-
   const elapsedMs = Math.round(performance.now() - startedAt);
+
+  if (previewOnly) {
+    // DB 저장 없이 base64 dataURL 반환 (캐시 미리보기용)
+    const pngBuf = await sharp(out, { raw: { width, height, channels } }).png().toBuffer();
+    const previewDataUrl = `data:image/png;base64,${pngBuf.toString("base64")}`;
+    return Response.json({ previewDataUrl, width, height, elapsedMs });
+  }
+
+  await sharp(out, { raw: { width, height, channels } }).png().toFile(outPath!);
 
   const gen = createGeneration({
     id: newGenId,
@@ -88,7 +99,7 @@ export async function POST(req: NextRequest) {
     kind: "normal_map",
     prompt: `Normal map from ${generationId} (strength=${strength})`,
     input_image_ids: [generationId],
-    image_path: toRelative(outPath),
+    image_path: toRelative(outPath!),
     width,
     height,
     backend: "direct",

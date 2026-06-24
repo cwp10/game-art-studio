@@ -830,7 +830,11 @@ export function ChatLayout() {
             kind={imageToolsOpen.kind}
             sessionId={state.activeSessionId}
             onClose={closeImageTools}
-            onNormalMapResult={res => {
+            onNormalMapResult={async res => {
+              const sid = state.activeSessionId;
+              if (sid) {
+                galleryInsert(sid, res.generationId).catch(e => console.error("[normal-map gallery-insert]", e));
+              }
               dispatch({
                 type: "add_result_card",
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
