@@ -507,7 +507,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
 
         // 투명 배경 여부 판단: 흰/컬러 배경 명시가 없으면 transparent.
         // 장면·환경 묘사가 있으면 오케스트레이터가 transparent 를 추가했더라도 무시.
-        const hasSceneDesc = /도시|city|거리|street|숲|forest|하늘|sky|해변|beach|던전|dungeon|실내|indoor|야외|outdoor|네온|neon|사이버|cyber|빗|비\s*내리|눈\s*내리|우천|landscape|배경/.test(
+        const hasSceneDesc = /도시|city|거리|street|숲|forest|하늘|sky|해변|beach|던전|dungeon|실내|indoor|야외|outdoor|네온|neon|사이버|cyber|빗|비\s*내리|눈\s*내리|우천|landscape|배경|정원|garden|공원|park|들판|field|meadow|바다|ocean|sea|산|mountain|마을|village|town|성|castle|환경|environment|scene|setting|배경화면|wallpaper|tileset|타일/.test(
           rawPrompt.toLowerCase(),
         );
         const wantsTransparentGen =
