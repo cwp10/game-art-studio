@@ -3,6 +3,8 @@
 import { ArrowLeft, Gamepad2, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 
+import { jsonFetch } from "@/lib/api/client";
+
 /**
  * ButtonStateEditor — 단일 이미지를 UI 버튼의 3가지 상태(normal/hover/pressed)로 변환하는 편집기.
  *
@@ -57,18 +59,14 @@ export function ButtonStateEditor({ generationId, sessionId, hideHeader, onClose
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/button-states", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          generationId,
-          sessionId: sessionId ?? undefined,
-          hoverBrightness,
-          hoverSaturation,
-          pressedBrightness,
-          pressedSaturation,
-          pressedScale,
-        }),
+      const res = await jsonFetch("/api/button-states", "POST", {
+        generationId,
+        sessionId: sessionId ?? undefined,
+        hoverBrightness,
+        hoverSaturation,
+        pressedBrightness,
+        pressedSaturation,
+        pressedScale,
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data = (await res.json()) as ApiResult;

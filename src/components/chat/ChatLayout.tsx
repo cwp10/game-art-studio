@@ -21,6 +21,7 @@ import {
   deleteSession,
   galleryInsert,
   getGeneration,
+  jsonFetch,
   listMessages,
   listPresets,
   listSessions,
@@ -147,11 +148,7 @@ export function ChatLayout() {
     const next: "claude" | "codex" = orchestrator === "claude" ? "codex" : "claude";
     setOrchestrator(next);
     try {
-      await fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orchestrator: next }),
-      });
+      await jsonFetch("/api/config", "PATCH", { orchestrator: next });
     } catch {
       setOrchestrator(orchestrator);
     }
