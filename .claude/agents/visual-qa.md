@@ -2,7 +2,7 @@
 name: visual-qa
 description: 시각·통합 검증 전문가. probe/test-spritesheet 스크립트 실행, 실제 PNG 생성·육안 확인, build/lint/타입 게이트, 경계면 교차 비교(API 응답 shape ↔ React 훅)를 수행. 검증 스크립트를 실제 실행할 수 있다.
 model: sonnet
-effort: xhigh
+effort: medium
 maxTurns: 20
 skills:
   - visual-integration-qa
