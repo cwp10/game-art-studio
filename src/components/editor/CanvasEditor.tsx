@@ -8,6 +8,7 @@ import {
   EyeOff,
   GripVertical,
   Image as ImageIcon,
+  Lasso,
   Loader2,
   Palette,
   Plus,
@@ -215,6 +216,22 @@ function cssFilter(f: LayerFilters): string {
   return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) hue-rotate(${f.hue}deg) blur(${f.blur}px)`;
 }
 
+/** Sobel 엣지 강도 맵 — 자석 올가미가 스냅할 경계선(휘도 gradient magnitude). 원본 픽셀 1:1. */
+function sobelGradient(imageData: ImageData): Float32Array {
+  const { data, width, height } = imageData;
+  const grad = new Float32Array(width * height);
+  const luma = (i: number) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const px = (dx: number, dy: number) => luma(((y + dy) * width + (x + dx)) * 4);
+      const gx = -px(-1, -1) + px(1, -1) - 2 * px(-1, 0) + 2 * px(1, 0) - px(-1, 1) + px(1, 1);
+      const gy = -px(-1, -1) - 2 * px(0, -1) - px(1, -1) + px(-1, 1) + 2 * px(0, 1) + px(1, 1);
+      grad[y * width + x] = Math.sqrt(gx * gx + gy * gy);
+    }
+  }
+  return grad;
+}
+
 /** 오브젝트 지우기 고정 프롬프트 — 칠한 영역을 주변 배경으로 메워 오브젝트를 없앤다(은퇴한 MaskCanvas 와 동일 문구). */
 const OBJECT_REMOVE_PROMPT =
   "seamless background matching the surrounding area — same colors, textures, and lighting, as if the object was never there";
@@ -259,8 +276,20 @@ export function CanvasEditor({
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
   const [extractInput, setExtractInput] = useState("");
   const [extracting, setExtracting] = useState(false);
-  // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반). brush 는 인페인트 브러시 인프라 재사용.
-  const [extractMode, setExtractMode] = useState<"text" | "brush">("text");
+  // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반) / lasso(올가미 폴리곤).
+  // brush·lasso 모두 brushCanvasRef(원본 해상도·레이어 transform 공유)에 빨강으로 칠해 handleExtractBrush 로 마스크화.
+  const [extractMode, setExtractMode] = useState<"text" | "brush" | "lasso">("text");
+  // 올가미 타입 — free(자유 드래그)/poly(클릭 다각형)/magnetic(엣지 스냅). 포토샵식 3종.
+  const [lassoType, setLassoType] = useState<"free" | "poly" | "magnetic">("free");
+  // 올가미 — 화면 클라이언트 좌표(cx/cy)를 단일 SSOT 로 누적. 오버레이 그리기·마스크 커밋 모두 여기서 파생.
+  const lassoDrawingRef = useRef(false);
+  const lassoOverlayRef = useRef<HTMLCanvasElement>(null); // 화면 공간 경로 시각화
+  const lassoClientPtsRef = useRef<{ cx: number; cy: number }[]>([]); // 클라이언트 좌표 정점
+  const lassoRubberBandRef = useRef<{ cx: number; cy: number } | null>(null); // poly/magnetic 고무줄 끝점
+  const lassoEdgeGradRef = useRef<Float32Array | null>(null); // magnetic: Sobel gradient
+  const lassoEdgeSizeRef = useRef<{ w: number; h: number } | null>(null); // magnetic: edge 이미지 크기
+  // poly/magnetic "완료" 버튼 가드 — ref 는 렌더를 안 깨우므로 정점 수를 state 로 미러(brushUndoCount 패턴).
+  const [lassoPtCount, setLassoPtCount] = useState(0);
   // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
   const [extractAutoRestore, setExtractAutoRestore] = useState(true);
   const isCodex = useIsCodex();
@@ -559,8 +588,10 @@ export function CanvasEditor({
     if (extractAiLoading) return;
     setExtractAiLoading(true);
     try {
+      const layer = layers.find(l => l.id === selectedLayerId);
       const res = await jsonFetch("/api/layer-suggest", "POST", {
         question: "게임 캐릭터/오브젝트 스프라이트의 분리할 부위를 제안해주세요",
+        generationId: layer?.generationId,
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[] };
       setExtractAiSuggestions(data.suggestions ?? []);
@@ -569,7 +600,18 @@ export function CanvasEditor({
     } finally {
       setExtractAiLoading(false);
     }
-  }, [extractAiLoading]);
+  }, [extractAiLoading, layers, selectedLayerId]);
+
+  // 올가미 상태 초기화(취소) — 오버레이 클리어 + 정점/고무줄 비우기. closeTool/clearBrush 가 호출하므로
+  // TDZ 회피를 위해 이른 위치에 둔다(refs·setLassoPtCount 외 의존 없음).
+  const clearLassoState = useCallback(() => {
+    lassoClientPtsRef.current = [];
+    lassoRubberBandRef.current = null;
+    lassoDrawingRef.current = false;
+    setLassoPtCount(0);
+    const overlay = lassoOverlayRef.current;
+    overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
+  }, []);
 
   // ── 영역 편집(generative fill) — 선택 레이어 위에 마스크를 칠하고 프롬프트로 재생성 ──────────
   // 소스 해상도 캔버스에 #ff0000 으로 칠하고, export 시 검정 배경 + 빨강 = 인페인트 영역(MaskCanvas 포맷).
@@ -579,6 +621,7 @@ export function CanvasEditor({
     setInpaintNat(null);
     setExtractInput("");
     setExtractMode("text");
+    setLassoType("free");
     setExtractAiSuggestions(null);
     setBrushTool("brush");
     setBrushPainted(false);
@@ -586,9 +629,10 @@ export function CanvasEditor({
     setRefOpen(false);
     brushUndoRef.current = [];
     setBrushUndoCount(0);
+    clearLassoState();
     const c = brushCanvasRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
-  }, []);
+  }, [clearLassoState]);
   // 상단 메뉴 클릭 → 즉시 실행하지 않고 하단 바를 띄운다. inpaint·extract 는 마스크 브러시용 원본 크기 로드.
   const openTool = useCallback(
     (kind: "inpaint" | "extract" | "bg" | "upscale" | "trim", layer: Layer) => {
@@ -674,7 +718,8 @@ export function CanvasEditor({
     brushUndoRef.current = [];
     setBrushUndoCount(0);
     setBrushPainted(false);
-  }, []);
+    clearLassoState();
+  }, [clearLassoState]);
   // 스트로크 단위 되돌리기 — 마지막 스냅샷 복원(없으면 빈 캔버스).
   const undoBrushStroke = useCallback(() => {
     const c = brushCanvasRef.current;
@@ -768,6 +813,298 @@ export function CanvasEditor({
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {}
   }, []);
+
+  // ── 올가미(lasso) — 포토샵식 자유/다각형/자석 3종 ───────────────────────────────
+  // 화면 클라이언트 좌표(cx/cy)를 SSOT 로 누적해 별도 오버레이 캔버스(화면 공간)에 흰선+검정 점선으로
+  // 시각화하고, 닫을 때 brushCanvasRef(원본 해상도)에 screenToSource 로 역투영해 빨강 폴리곤을 채운다 →
+  // brushPainted=true → handleExtractBrush(검정 배경 + 빨강 마스크)가 그대로 동작한다.
+
+  // clientXY → 오버레이 캔버스 좌표(artboard 로컬, 줌·팬은 getBoundingClientRect 가 흡수).
+  const clientToOverlay = useCallback((cx: number, cy: number): { x: number; y: number } => {
+    const canvas = lassoOverlayRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (cx - rect.left) * (canvas.width / rect.width),
+      y: (cy - rect.top) * (canvas.height / rect.height),
+    };
+  }, []);
+
+  // image pixel → clientXY — screenToSource 의 정확한 역변환(자석 스냅 결과를 화면에 다시 그릴 때).
+  // 중심(ccx/ccy)·배율(f*scale*stretch*zoom)·회전(+t)·flip 을 screenToSource 와 거울처럼 맞춘다.
+  const imageToClient = useCallback(
+    (imgX: number, imgY: number, layer: Layer): { cx: number; cy: number } => {
+      const canvas = brushCanvasRef.current;
+      if (!canvas) return { cx: 0, cy: 0 };
+      const rect = canvas.getBoundingClientRect();
+      const ccx = (rect.left + rect.right) / 2;
+      const ccy = (rect.top + rect.bottom) / 2;
+      const f = canvas.offsetWidth / (canvas.width || 1);
+      const sxScreen = f * layer.scale * layer.stretchW * zp.zoom || 1;
+      const syScreen = f * layer.scale * layer.stretchH * zp.zoom || 1;
+      const ux = (imgX - canvas.width / 2) * sxScreen;
+      const uy = (imgY - canvas.height / 2) * syScreen;
+      const t = (layer.rotation * Math.PI) / 180;
+      const cos = Math.cos(t), sin = Math.sin(t);
+      let dx = ux * cos - uy * sin;
+      const dy = ux * sin + uy * cos;
+      if (layer.flipH) dx = -dx;
+      return { cx: dx + ccx, cy: dy + ccy };
+    },
+    [zp.zoom],
+  );
+
+  // 오버레이 경로 그리기 — 흰선 base + 검정 점선(포토샵 marching-ants 느낌). extraPt=고무줄/포인터 끝.
+  const redrawLassoOverlay = useCallback(
+    (extraPt?: { cx: number; cy: number }, closedFill?: boolean) => {
+      const canvas = lassoOverlayRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const pts = lassoClientPtsRef.current;
+      if (pts.length === 0) return;
+
+      const all = pts.map(p => clientToOverlay(p.cx, p.cy));
+      if (extraPt) all.push(clientToOverlay(extraPt.cx, extraPt.cy));
+
+      if (closedFill && all.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(all[0].x, all[0].y);
+        all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fillStyle = "rgba(100, 160, 255, 0.15)";
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(all[0].x, all[0].y);
+      all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      if (closedFill) ctx.closePath();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.stroke();
+      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // 시작점 마커 — poly/magnetic 에서 "여기 클릭해 닫기" 스냅 목표 표시.
+      if (pts.length >= 3) {
+        const s = clientToOverlay(pts[0].cx, pts[0].cy);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    },
+    [clientToOverlay],
+  );
+
+  // 마스크 커밋(공통) — 누적 정점을 닫고 brushCanvasRef 에 빨강 폴리곤 채움 → handleExtractBrush 활성.
+  const commitLassoPoints = useCallback(() => {
+    const pts = lassoClientPtsRef.current;
+    const layer = layers.find(l => l.id === selectedLayerId);
+    const canvas = brushCanvasRef.current;
+    if (!layer || !canvas || pts.length < 3) {
+      clearLassoState();
+      return;
+    }
+    const imagePts = pts.map(p => screenToSource(canvas, p.cx, p.cy, layer));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#ff0000";
+    ctx.beginPath();
+    ctx.moveTo(imagePts[0].x, imagePts[0].y);
+    imagePts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.closePath();
+    ctx.fill();
+
+    const overlay = lassoOverlayRef.current;
+    overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
+    lassoClientPtsRef.current = [];
+    lassoRubberBandRef.current = null;
+    lassoDrawingRef.current = false;
+    setLassoPtCount(0);
+    setBrushPainted(true);
+  }, [layers, selectedLayerId, screenToSource, clearLassoState]);
+
+  // 자석 스냅 — 화면점 주변 원본 픽셀(반경≈화면 20px)에서 Sobel gradient 최대점을 찾아 그 위치를 화면좌표로.
+  const snapToEdge = useCallback(
+    (clientX: number, clientY: number): { cx: number; cy: number } | null => {
+      const grad = lassoEdgeGradRef.current;
+      const size = lassoEdgeSizeRef.current;
+      const canvas = brushCanvasRef.current;
+      const layer = layers.find(l => l.id === selectedLayerId);
+      if (!grad || !size || !canvas || !layer) return null;
+
+      const center = screenToSource(canvas, clientX, clientY, layer);
+      const rect = canvas.getBoundingClientRect();
+      const imgRadiusPx = 20 * (canvas.width / (rect.width || 1)); // 화면 20px → 원본 픽셀
+      const r = Math.ceil(imgRadiusPx);
+
+      let best = -1, bx = center.x, by = center.y;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue;
+          const px = Math.round(center.x + dx), py = Math.round(center.y + dy);
+          if (px < 0 || py < 0 || px >= size.w || py >= size.h) continue;
+          const g = grad[py * size.w + px];
+          if (g > best) { best = g; bx = center.x + dx; by = center.y + dy; }
+        }
+      }
+      return imageToClient(bx, by, layer);
+    },
+    [layers, selectedLayerId, screenToSource, imageToClient],
+  );
+
+  // 자유 올가미 — brushCanvasRef pointer 이벤트(이미 layerTransform 공유). 경로는 오버레이에 그린다.
+  const onLassoDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      e.stopPropagation(); // 아래 레이어의 onLayerBodyDown(이동 드래그) 차단
+      lassoDrawingRef.current = true;
+      lassoClientPtsRef.current = [{ cx: e.clientX, cy: e.clientY }];
+      setLassoPtCount(1);
+      redrawLassoOverlay();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {}
+    },
+    [redrawLassoOverlay],
+  );
+  const onLassoMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!lassoDrawingRef.current) return;
+      lassoClientPtsRef.current.push({ cx: e.clientX, cy: e.clientY });
+      setLassoPtCount(lassoClientPtsRef.current.length);
+      redrawLassoOverlay({ cx: e.clientX, cy: e.clientY });
+    },
+    [redrawLassoOverlay],
+  );
+  const onLassoUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!lassoDrawingRef.current) return;
+      lassoDrawingRef.current = false;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+      commitLassoPoints(); // 떼면 시작점과 직선 연결(자동 닫기). <3 점이면 clearLassoState.
+    },
+    [commitLassoPoints],
+  );
+
+  // 다각형/자석 올가미 — 오버레이 캔버스의 click/move/dblclick.
+  const onLassoOverlayClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (lassoType !== "poly" && lassoType !== "magnetic") return;
+      e.preventDefault();
+      const pts = lassoClientPtsRef.current;
+      // 시작점 근처(≥3점 & 12px 이내) 클릭 → 닫기.
+      if (pts.length >= 3) {
+        const dx = e.clientX - pts[0].cx, dy = e.clientY - pts[0].cy;
+        if (Math.sqrt(dx * dx + dy * dy) < 12) {
+          commitLassoPoints();
+          return;
+        }
+      }
+      if (lassoType === "magnetic") {
+        const snapped = snapToEdge(e.clientX, e.clientY);
+        pts.push(snapped ?? { cx: e.clientX, cy: e.clientY });
+      } else {
+        pts.push({ cx: e.clientX, cy: e.clientY });
+      }
+      setLassoPtCount(pts.length);
+      redrawLassoOverlay(lassoRubberBandRef.current ?? undefined);
+    },
+    [lassoType, commitLassoPoints, redrawLassoOverlay, snapToEdge],
+  );
+  const onLassoOverlayMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (lassoType === "free") return; // free 는 brushCanvas 이벤트 사용
+      if (lassoClientPtsRef.current.length === 0) return;
+      const pt =
+        lassoType === "magnetic"
+          ? snapToEdge(e.clientX, e.clientY) ?? { cx: e.clientX, cy: e.clientY }
+          : { cx: e.clientX, cy: e.clientY };
+      lassoRubberBandRef.current = pt;
+      redrawLassoOverlay(pt); // 마지막 앵커 → 현재(스냅된) 점 고무줄 미리보기
+    },
+    [lassoType, redrawLassoOverlay, snapToEdge],
+  );
+  const onLassoOverlayDblClick = useCallback(() => {
+    if (lassoClientPtsRef.current.length >= 3) commitLassoPoints();
+  }, [commitLassoPoints]);
+
+  // 오버레이 캔버스 크기 동기화 — data-canvas-frame(부모) 크기에 맞춤(ResizeObserver).
+  useLayoutEffect(() => {
+    if (tool !== "extract" || extractMode !== "lasso") return;
+    const canvas = lassoOverlayRef.current;
+    if (!canvas) return;
+    const frame = canvas.parentElement;
+    if (!frame) return;
+    const sync = () => {
+      canvas.width = frame.offsetWidth;
+      canvas.height = frame.offsetHeight;
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(frame);
+    return () => ro.disconnect();
+  }, [tool, extractMode]);
+
+  // poly/magnetic 키보드 — Backspace(마지막 점)/Esc(전체 취소)/Enter(완료). 입력 포커스 시 무시.
+  useEffect(() => {
+    if (tool !== "extract" || extractMode !== "lasso" || lassoType === "free") return;
+    const handler = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      if (e.key === "Backspace" || e.key === "Delete") {
+        lassoClientPtsRef.current.pop();
+        setLassoPtCount(lassoClientPtsRef.current.length);
+        redrawLassoOverlay(lassoRubberBandRef.current ?? undefined);
+        e.preventDefault();
+      } else if (e.key === "Escape") {
+        clearLassoState();
+        e.preventDefault();
+      } else if (e.key === "Enter") {
+        commitLassoPoints();
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [tool, extractMode, lassoType, redrawLassoOverlay, clearLassoState, commitLassoPoints]);
+
+  // 자석 올가미 엣지 맵 초기화 — magnetic 전환·레이어 변경 시 Sobel gradient 1회 계산.
+  useEffect(() => {
+    if (tool !== "extract" || extractMode !== "lasso" || lassoType !== "magnetic") return;
+    const layer = layers.find(l => l.id === selectedLayerId);
+    if (!layer) return;
+    lassoEdgeGradRef.current = null;
+    lassoEdgeSizeRef.current = null;
+    const img = new window.Image();
+    img.src = `/api/images/${layer.generationId}`;
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, c.width, c.height);
+      lassoEdgeGradRef.current = sobelGradient(data);
+      lassoEdgeSizeRef.current = { w: c.width, h: c.height };
+    };
+  }, [tool, extractMode, lassoType, selectedLayerId, layers]);
 
   // 칠한 마스크 + 프롬프트로 인페인트 실행 — 채우기(사용자 프롬프트+참조)와 오브젝트 지우기(고정 프롬프트)가 공유.
   const runInpaint = useCallback(
@@ -1570,24 +1907,68 @@ export function CanvasEditor({
                           }
                         }}
                       />
-                      {/* 인라인 마스크 브러시 — 영역 편집(inpaint) + 브러시 기반 분리(extract)가 공유.
-                          레이어와 같은 transform 을 CSS 가 적용(표시), 포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀). */}
-                      {(tool === "inpaint" || (tool === "extract" && extractMode === "brush")) &&
+                      {/* 인라인 마스크 캔버스 — 영역 편집(inpaint) + 분리(extract: brush·lasso)가 공유.
+                          레이어와 같은 transform 을 CSS 가 적용(표시), 포인터는 점-좌표 역변환으로 원본 픽셀에 칠한다(정밀).
+                          자유 올가미(free)는 이 캔버스의 pointer 이벤트로 드래그 경로를 받고(경로는 오버레이),
+                          poly/magnetic 은 위 오버레이 캔버스가 클릭을 받는다. lasso 라도 mask commit 에 필요해 mount 유지.
+                          마스크 commit 빨강 fill 은 보여선 안 되므로 lasso 일 때는 캔버스를 숨긴다(opacity-0). */}
+                      {(tool === "inpaint" ||
+                        (tool === "extract" && (extractMode === "brush" || extractMode === "lasso"))) &&
                         selectedLayerId === layer.id &&
                         inpaintNat && (
                         <canvas
                           ref={brushCanvasRef}
                           width={inpaintNat.w}
                           height={inpaintNat.h}
-                          className="absolute inset-0 h-full w-full cursor-crosshair opacity-50"
-                          style={{ touchAction: "none" }}
-                          onPointerDown={e => onBrushDown(e, layer)}
-                          onPointerMove={e => onBrushMove(e, layer)}
-                          onPointerUp={onBrushUp}
+                          className={`absolute inset-0 h-full w-full cursor-crosshair ${
+                            tool === "extract" && extractMode === "lasso" ? "opacity-0" : "opacity-50"
+                          }`}
+                          style={{
+                            touchAction: "none",
+                            // poly/magnetic 은 오버레이가 클릭을 받아야 하므로 brushCanvas 는 포인터 무시.
+                            pointerEvents:
+                              tool === "extract" && extractMode === "lasso" && lassoType !== "free"
+                                ? "none"
+                                : "auto",
+                          }}
+                          onPointerDown={e =>
+                            tool === "extract" && extractMode === "lasso"
+                              ? onLassoDown(e)
+                              : onBrushDown(e, layer)
+                          }
+                          onPointerMove={e =>
+                            tool === "extract" && extractMode === "lasso"
+                              ? onLassoMove(e)
+                              : onBrushMove(e, layer)
+                          }
+                          onPointerUp={e =>
+                            tool === "extract" && extractMode === "lasso"
+                              ? onLassoUp(e)
+                              : onBrushUp(e)
+                          }
                         />
                       )}
                     </div>
                   ))}
+                  {/* 올가미 경로 시각화 오버레이 — 화면 공간(artboard 좌표계). 흰선+검정 점선으로 경로를 그린다.
+                      free 는 pointer 를 흘려보내 아래 brushCanvas 가 드래그를 받고, poly/magnetic 은 여기서
+                      클릭/이동/더블클릭을 직접 처리한다. */}
+                  {tool === "extract" && extractMode === "lasso" && (
+                    <canvas
+                      ref={lassoOverlayRef}
+                      className="absolute inset-0 z-10"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        pointerEvents: lassoType === "free" ? "none" : "auto",
+                        cursor: "crosshair",
+                        touchAction: "none",
+                      }}
+                      onClick={lassoType !== "free" ? onLassoOverlayClick : undefined}
+                      onPointerMove={onLassoOverlayMove}
+                      onDoubleClick={onLassoOverlayDblClick}
+                    />
+                  )}
                 </div>
 
                 {/* 선택 레이어 자유변형 핸들 — 클립 밖 오버레이라 캔버스 경계를 넘은 핸들도 잡힌다.
@@ -2088,10 +2469,10 @@ export function CanvasEditor({
               <>
                 <Scissors size={14} className="text-[color:var(--accent)]" />
                 <span className="text-[11px] font-medium text-text-primary">레이어 분리</span>
-                {/* 입력(부위명)/브러시(칠한 영역) 서브모드 토글 */}
+                {/* 입력(부위명)/브러시(칠한 영역)/올가미(폴리곤) 서브모드 토글. 전환 시 칠한 마스크 초기화. */}
                 <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
                   <button
-                    onClick={() => setExtractMode("text")}
+                    onClick={() => { if (extractMode !== "text") { setExtractMode("text"); clearBrush(); } }}
                     className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
                       extractMode === "text"
                         ? "bg-[color:var(--accent)]/20 text-text-primary"
@@ -2102,7 +2483,7 @@ export function CanvasEditor({
                     <Tags size={12} /> 입력
                   </button>
                   <button
-                    onClick={() => setExtractMode("brush")}
+                    onClick={() => { if (extractMode !== "brush") { setExtractMode("brush"); clearBrush(); } }}
                     className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
                       extractMode === "brush"
                         ? "bg-[color:var(--accent)]/20 text-text-primary"
@@ -2112,17 +2493,71 @@ export function CanvasEditor({
                   >
                     <Brush size={12} /> 브러시
                   </button>
+                  <button
+                    onClick={() => { if (extractMode !== "lasso") { setExtractMode("lasso"); clearBrush(); } }}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      extractMode === "lasso"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="올가미 — 영역을 자유 폴리곤으로 둘러 분리"
+                  >
+                    <Lasso size={12} /> 올가미
+                  </button>
                 </div>
                 {extractMode === "brush" && brushControls}
+                {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. 타입 전환 시 진행 중 경로 리셋. */}
+                {extractMode === "lasso" && (
+                  <>
+                    <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                      {(["free", "poly", "magnetic"] as const).map(t => (
+                        <button
+                          key={t}
+                          onClick={() => { setLassoType(t); clearLassoState(); }}
+                          className={`flex h-6 items-center rounded px-2 text-[11px] ${
+                            lassoType === t
+                              ? "bg-[color:var(--accent)]/20 text-text-primary"
+                              : "text-text-muted hover:text-text-primary"
+                          }`}
+                          title={
+                            t === "free"
+                              ? "자유 — 드래그로 그리고 떼면 자동으로 닫힘"
+                              : t === "poly"
+                                ? "다각형 — 클릭으로 꼭짓점, 더블클릭/시작점 클릭으로 닫기 (Backspace 취소·Esc 전체취소)"
+                                : "자석 — 이미지 경계선에 자동 스냅, 클릭으로 앵커 고정, 더블클릭으로 닫기"
+                          }
+                        >
+                          {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      onClick={clearBrush}
+                      className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                      title="그린 올가미 영역 지우기"
+                    >
+                      전체지우기
+                    </button>
+                    {lassoType !== "free" && lassoPtCount >= 3 && (
+                      <button
+                        onClick={commitLassoPoints}
+                        className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary"
+                        title="현재 경로를 닫아 마스크로 확정 (Enter)"
+                      >
+                        완료 (Enter)
+                      </button>
+                    )}
+                  </>
+                )}
                 <input
                   value={extractInput}
                   onChange={e => setExtractInput(e.target.value)}
                   onKeyDown={e => {
                     if (e.key !== "Enter") return;
-                    if (extractMode === "brush") handleExtractBrush();
-                    else handleExtract();
+                    if (extractMode === "text") handleExtract();
+                    else handleExtractBrush();
                   }}
-                  placeholder={extractMode === "brush" ? "이 영역의 이름 (예: 머리)" : "예: 머리, 무기"}
+                  placeholder={extractMode === "text" ? "예: 머리, 무기" : "이 영역의 이름 (예: 머리)"}
                   disabled={extracting}
                   className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
                 />
@@ -2158,8 +2593,8 @@ export function CanvasEditor({
                   </>
                 )}
                 <button
-                  onClick={extractMode === "brush" ? handleExtractBrush : handleExtract}
-                  disabled={extracting || !extractInput.trim() || (extractMode === "brush" && !brushPainted)}
+                  onClick={extractMode === "text" ? handleExtract : handleExtractBrush}
+                  disabled={extracting || !extractInput.trim() || (extractMode !== "text" && !brushPainted)}
                   className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
                 >
                   {extracting ? (

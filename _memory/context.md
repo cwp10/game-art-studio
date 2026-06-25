@@ -1,9 +1,24 @@
-마지막 업데이트: 2026-06-24 (Electron 패키징 완전 동작 + Playwright E2E 테스트)
+마지막 업데이트: 2026-06-25 (CanvasEditor 올가미 툴 추가)
 
 ## 프로젝트 개요
 game-art-studio — Codex CLI imagegen 백엔드 + Claude CLI 오케스트레이션의 로컬 게임 에셋 이미지 생성기 (Next.js + Electron).
 
 ## 완료된 작업
+
+### CanvasEditor 올가미 툴(lasso tool) 추가 — 2026-06-25
+레이어 분리 도구에 자유형 올가미 서브모드 추가. 순수 프론트엔드, 백엔드 변경 없음.
+
+- `extractMode: "text" | "brush" | "lasso"` 타입 확장 (기존 `"text" | "brush"` → 3-way)
+- `lassoPointsRef`, `lassoDrawingRef` ref 추가
+- `drawLassoPath`, `onLassoDown`, `onLassoMove`, `onLassoUp` 핸들러 신규 (기존 `onBrush*` 직후)
+- 좌표 변환: 기존 `screenToSource()`(회전/반전/비균일 늘이기/zoom 역적용, line ~700) 재사용 — 정점마다 호출해 원본 픽셀 좌표 수집
+- 마스크 방식: 폴리곤 정점을 `brushCanvasRef`(원본 해상도·레이어 CSS transform 공유)에 빨강으로 fill → 기존 `handleExtractBrush` 경로 그대로 재사용 → `onExtractBrush(generationId, maskDataUrl, prompt)` 계약 무변경
+- UI: 레이어 분리 하단 바에 "올가미"(Lasso 아이콘) 버튼 추가, 모드 전환 시 `clearBrush()` 자동 호출, 올가미 중엔 "전체지우기"만 노출(브러시 크기/지우개 숨김)
+- `closeTool`·`clearBrush`에 lasso ref 리셋 추가 (모드 전환 잔상 제거)
+- 정점 <3: 폐기 + canvas clear, "분리 ▸" 비활성 유지
+- **검증**: tsc 0 / eslint clean / pnpm build 성공 (에러·경고 없음)
+- 변경 파일: `src/components/editor/CanvasEditor.tsx` 단일 파일
+- 알려진 한계: 자기교차 폴리곤(8자)은 nonzero fill 규칙 따름(드문 케이스, 브러시로 대체 가능)
 
 ### Windows 크로스 플랫폼 포팅 + Electron 앱 패키징 — 2026-06-24
 
