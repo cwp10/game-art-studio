@@ -15,6 +15,7 @@ export const maxDuration = 120;
 
 const SYSTEM_PROMPTS: Record<"a" | "b" | "c", string> = {
   a: `당신은 게임 스프라이트 리스킨 전문가입니다.
+이미지가 제공된 경우 Read 도구로 이미지를 직접 분석해 스킨을 제안하세요.
 
 [외형 교체 동작 방식]
 - 원본의 포즈·실루엣·구도를 유지하면서 색·재질·테마를 교체
@@ -32,6 +33,7 @@ const SYSTEM_PROMPTS: Record<"a" | "b" | "c", string> = {
 - 반드시 유효한 JSON 배열 5개 항목만 출력`,
 
   b: `당신은 게임 스프라이트 색 교체 전문가입니다.
+이미지가 제공된 경우 Read 도구로 이미지를 직접 분석해 스킨을 제안하세요.
 
 [색만 변경 동작 방식]
 - AI 변경: img2img로 색 팔레트만 교체, 형태는 최대한 유지
@@ -50,6 +52,7 @@ const SYSTEM_PROMPTS: Record<"a" | "b" | "c", string> = {
 - 반드시 유효한 JSON 배열 4개 항목만 출력`,
 
   c: `당신은 게임 스프라이트 스타일 전이 전문가입니다.
+이미지가 제공된 경우 Read 도구로 이미지를 직접 분석해 스킨을 제안하세요.
 
 [참조 전이 동작 방식]
 - 일반 참조 전이: 원본에 참조 이미지의 화풍·색감·분위기를 입힘
@@ -74,6 +77,7 @@ type Body = {
   question?: string;
   isSheet?: boolean;
   isOverlay?: boolean;
+  generationId?: string;
 };
 
 export type SkinSuggestion = { title: string; body: string };
@@ -106,6 +110,7 @@ export async function POST(req: NextRequest) {
     const { array: parsed, raw: suggestion } = await callClaudeSuggest(systemPrompt, userMessage, {
       signal: req.signal,
       maxInputLength: Infinity,
+      imageGenerationId: body.generationId,
     });
     if (!suggestion) {
       return Response.json({ error: "empty suggestion" }, { status: 502 });

@@ -466,7 +466,7 @@ export function ChatLayout() {
   // active session 없으면 신규 생성. dispatch suggestions_requested → API 호출 →
   // suggestions_received. 카드 클릭은 onPickSuggestion 으로 Composer prefill.
   const handleAskSuggestions = useCallback(
-    async (text: string) => {
+    async (text: string, attachedGenerationId?: string) => {
       try {
         let sid = state.activeSessionId;
         if (!sid) {
@@ -481,7 +481,7 @@ export function ChatLayout() {
         const suggestId = "sug-" + Math.random().toString(36).slice(2, 8);
         dispatch({ type: "suggestions_requested", userTempId, suggestId, text });
         try {
-          const items = await suggestPrompts(text);
+          const items = await suggestPrompts(text, attachedGenerationId);
           dispatch({ type: "suggestions_received", suggestId, items });
         } catch (e) {
           dispatch({ type: "suggestions_failed", suggestId, error: (e as Error).message });

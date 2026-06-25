@@ -12,6 +12,7 @@ export const maxDuration = 120;
  */
 
 const SYSTEM_PROMPT = `당신은 게임 스프라이트 애니메이션 전문가입니다.
+참조 이미지가 있으면 Read 도구로 이미지를 직접 분석해 캐릭터/오브젝트에 맞는 동작을 제안하세요.
 사용자가 요청하는 동작을 이미지 생성 AI(GPT-image)에 전달할 동작 묘사 텍스트로 작성해주세요.
 
 [프로젝트 시트 구조 — 반드시 고려]
@@ -51,6 +52,8 @@ type Body = {
   contextType?: string;
   /** 참조 이미지의 생성 프롬프트 — 이펙트 탭에서 캐릭터/오브젝트 특성 추론에 사용. */
   referencePrompt?: string;
+  /** 참조 이미지 generationId — Read 도구로 직접 비전 분석에 사용. */
+  referenceGenerationId?: string;
   direction?: string;
   frames?: number;
   seamlessLoop?: boolean;
@@ -111,6 +114,7 @@ export async function POST(req: NextRequest) {
     const { array: parsed, raw: text } = await callClaudeSuggest(SYSTEM_PROMPT, userMessage, {
       signal: req.signal,
       maxInputLength: Infinity,
+      imageGenerationId: body.referenceGenerationId,
     });
     if (!text) return Response.json({ error: "empty suggestion" }, { status: 502 });
 

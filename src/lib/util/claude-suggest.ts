@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import { claudeRunSimple } from "@/lib/cli/claude-cli";
 import { extractJsonArray } from "@/lib/util/json-parse";
+import { imagePath } from "@/lib/util/paths";
 
 /**
  * suggest 계열 라우트(suggest / sprite-suggest / reskin-suggest / layer-suggest)의
@@ -18,14 +20,25 @@ import { extractJsonArray } from "@/lib/util/json-parse";
 export async function callClaudeSuggest(
   systemPrompt: string,
   userMessage: string,
-  opts: { signal?: AbortSignal; maxInputLength?: number } = {},
+  opts: { signal?: AbortSignal; maxInputLength?: number; imageGenerationId?: string } = {},
 ): Promise<{ array: unknown[] | null; raw: string }> {
   const maxInputLength = opts.maxInputLength ?? 500;
-  const sliced = userMessage.slice(0, maxInputLength);
+  let sliced = userMessage.slice(0, maxInputLength);
+  let allowedTools: string[] | undefined;
+  // 이미지가 지정되고 파일이 실제로 존재하면 Read 도구로 비전 분석을 수행하도록
+  // 지시문을 앞에 붙인다. 파일이 없으면 기존 텍스트 전용 동작을 그대로 유지.
+  if (opts.imageGenerationId) {
+    const imageFilePath = imagePath(opts.imageGenerationId);
+    if (fs.existsSync(imageFilePath)) {
+      allowedTools = ["Read"];
+      sliced = `먼저 Read 도구로 다음 이미지를 분석하세요: ${imageFilePath}\n\n${sliced}`;
+    }
+  }
   const raw = (await claudeRunSimple({
     systemPrompt,
     userMessage: sliced,
     signal: opts.signal,
+    allowedTools,
   })).trim();
   const array = extractJsonArray(raw);
   return { array, raw };

@@ -35,8 +35,9 @@ type Props = {
    *  seq 카운터로 같은 generationId 도 새 요청처럼 trigger.
    *  업로드 entry 는 EmptyState 카드 + drag-drop 으로만 제공 — Composer 의 [📎] 제거. */
   attachment?: ComposerAttachment | null;
-  /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시. */
-  onAskSuggestions?: (text: string) => void;
+  /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시.
+   *  첨부 이미지가 있으면 generationId 도 함께 위임 → 비전 분석 반영. */
+  onAskSuggestions?: (text: string, attachedGenerationId?: string) => void;
   /** 입력창에 이미지 파일을 드롭하면 업로드 → 다음 메시지의 reference 로 자동 첨부. */
   onUploadImage?: (file: File) => void;
 };
@@ -106,7 +107,7 @@ export function Composer({
   function askSuggestions() {
     const t = text.trim();
     if (!t || !onAskSuggestions) return;
-    onAskSuggestions(t);
+    onAskSuggestions(t, attached?.id ?? undefined);
     setText("");
   }
 

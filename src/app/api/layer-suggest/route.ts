@@ -4,7 +4,8 @@ import { callClaudeSuggest } from "@/lib/util/claude-suggest";
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const SYSTEM_PROMPT = `당신은 게임 스프라이트 레이어 분리 전문가입니다.
+const SYSTEM_PROMPT = `이미지가 제공된 경우 Read 도구로 이미지를 직접 분석해 실제 캐릭터에 맞는 부위를 제안하세요.
+당신은 게임 스프라이트 레이어 분리 전문가입니다.
 이미지에서 분리할 부위 세트 아이디어 4가지를 제안하세요.
 
 출력 형식: 아래 JSON 배열만 출력. 다른 텍스트·마크다운·설명 절대 없이.
@@ -21,9 +22,11 @@ type Suggestion = { title: string; body: string };
 
 export async function POST(req: NextRequest) {
   let question = "게임 캐릭터 스프라이트의 부위를 제안해주세요";
+  let generationId: string | undefined;
   try {
-    const body = (await req.json()) as { question?: string };
+    const body = (await req.json()) as { question?: string; generationId?: string };
     if (body.question?.trim()) question = body.question.trim().slice(0, 300);
+    generationId = body.generationId;
   } catch { /* 빈 body 허용 */ }
 
   try {
@@ -32,6 +35,7 @@ export async function POST(req: NextRequest) {
     const { array: parsed, raw: text } = await callClaudeSuggest(SYSTEM_PROMPT, `요청: ${question}`, {
       signal: req.signal,
       maxInputLength: Infinity,
+      imageGenerationId: generationId,
     });
     if (!text) return Response.json({ error: "empty suggestion" }, { status: 502 });
 

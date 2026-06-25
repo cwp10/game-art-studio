@@ -209,7 +209,7 @@ export function ReskinPanel({
     const apiMode: "a" | "b" | "c" =
       uiMode === "color" ? "b" : skinInput === "image" ? "c" : "a";
     try {
-      const res = await jsonFetch("/api/reskin-suggest", "POST", { mode: apiMode, question, isSheet, isOverlay: overlay });
+      const res = await jsonFetch("/api/reskin-suggest", "POST", { mode: apiMode, question, isSheet, isOverlay: overlay, generationId });
       const data = (await res.json()) as {
         suggestion?: string;
         suggestions?: { title: string; body: string }[];

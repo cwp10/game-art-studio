@@ -295,6 +295,7 @@ export function SpriteGenPanel({
         question,
         subjectType,
         referencePrompt: subjectType === "effect" ? referencePrompt : undefined,
+        referenceGenerationId: referenceId,
         direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
         frames,
         seamlessLoop,
