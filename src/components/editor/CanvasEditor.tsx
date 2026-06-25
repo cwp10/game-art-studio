@@ -280,16 +280,18 @@ export function CanvasEditor({
   const [extracting, setExtracting] = useState(false);
   // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반) / lasso(올가미 폴리곤).
   // brush·lasso 모두 brushCanvasRef(원본 해상도·레이어 transform 공유)에 빨강으로 칠해 handleExtractBrush 로 마스크화.
-  const [extractMode, setExtractMode] = useState<"text" | "brush" | "lasso">("text");
+  const [extractMode, setExtractMode] = useState<"text" | "lasso">("text");
   // 올가미 타입 — free(자유 드래그)/poly(클릭 다각형)/magnetic(엣지 스냅). 포토샵식 3종.
   const [lassoType, setLassoType] = useState<"free" | "poly" | "magnetic">("free");
-  // 올가미 — 화면 클라이언트 좌표(cx/cy)를 단일 SSOT 로 누적. 오버레이 그리기·마스크 커밋 모두 여기서 파생.
+  // 올가미 — LOCAL 좌표(프리줌 CSS 픽셀, lx/ly: data-canvas-frame 기준)를 단일 SSOT 로 누적.
+  // 줌에 무관하게 이미지 위치를 보존(client 좌표는 zoom·rect 변동에 어긋남). 오버레이 그리기·마스크 커밋 모두 여기서 파생.
   const lassoDrawingRef = useRef(false);
   const lassoOverlayRef = useRef<HTMLCanvasElement>(null); // 화면 공간 경로 시각화
-  const lassoClientPtsRef = useRef<{ cx: number; cy: number }[]>([]); // 클라이언트 좌표 정점
-  const lassoRubberBandRef = useRef<{ cx: number; cy: number } | null>(null); // poly/magnetic 고무줄 끝점
+  const lassoClientPtsRef = useRef<{ lx: number; ly: number }[]>([]); // LOCAL 좌표 정점
+  const lassoRubberBandRef = useRef<{ lx: number; ly: number } | null>(null); // poly/magnetic 고무줄 끝점
   const lassoEdgeGradRef = useRef<Float32Array | null>(null); // magnetic: Sobel gradient
   const lassoEdgeSizeRef = useRef<{ w: number; h: number } | null>(null); // magnetic: edge 이미지 크기
+  const lassoCommittedRef = useRef(false); // 마스크 커밋 완료 — 파란 선택 영역 오버레이 유지 플래그
   // poly/magnetic "완료" 버튼 가드 — ref 는 렌더를 안 깨우므로 정점 수를 state 로 미러(brushUndoCount 패턴).
   const [lassoPtCount, setLassoPtCount] = useState(0);
   // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
@@ -400,11 +402,20 @@ export function CanvasEditor({
         e.preventDefault();
         if (e.shiftKey) redo();
         else undo();
+        return;
       }
+      // 텍스트 입력 포커스 중에는 화살표/WASD 를 패스스루한다.
+      const tag = (document.activeElement as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const STEP = 20;
+      if (e.key === "ArrowLeft"  || e.key === "a" || e.key === "A") { e.preventDefault(); zp.movePan( STEP, 0); }
+      if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") { e.preventDefault(); zp.movePan(-STEP, 0); }
+      if (e.key === "ArrowUp"    || e.key === "w" || e.key === "W") { e.preventDefault(); zp.movePan(0,  STEP); }
+      if (e.key === "ArrowDown"  || e.key === "s" || e.key === "S") { e.preventDefault(); zp.movePan(0, -STEP); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  }, [undo, redo, zp.movePan]);
 
   // ── 레이어 조작 ──────────────────────────────────────────────────────────────
   const patchLayer = useCallback((id: string, patch: Partial<Layer>) => {
@@ -610,6 +621,7 @@ export function CanvasEditor({
     lassoClientPtsRef.current = [];
     lassoRubberBandRef.current = null;
     lassoDrawingRef.current = false;
+    lassoCommittedRef.current = false;
     setLassoPtCount(0);
     const overlay = lassoOverlayRef.current;
     overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
@@ -821,16 +833,28 @@ export function CanvasEditor({
   // 시각화하고, 닫을 때 brushCanvasRef(원본 해상도)에 screenToSource 로 역투영해 빨강 폴리곤을 채운다 →
   // brushPainted=true → handleExtractBrush(검정 배경 + 빨강 마스크)가 그대로 동작한다.
 
-  // clientXY → 오버레이 캔버스 좌표(artboard 로컬, 줌·팬은 getBoundingClientRect 가 흡수).
-  const clientToOverlay = useCallback((cx: number, cy: number): { x: number; y: number } => {
-    const canvas = lassoOverlayRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: (cx - rect.left) * (canvas.width / rect.width),
-      y: (cy - rect.top) * (canvas.height / rect.height),
-    };
-  }, []);
+  // clientXY → LOCAL 좌표(프리줌 CSS 픽셀, lx/ly). overlay rect 기준이라 줌이 바뀌어도 같은 이미지 위치를 가리킨다.
+  const clientToLocal = useCallback(
+    (clientX: number, clientY: number): { lx: number; ly: number } => {
+      const canvas = lassoOverlayRef.current;
+      if (!canvas) return { lx: 0, ly: 0 };
+      const rect = canvas.getBoundingClientRect();
+      return {
+        lx: (clientX - rect.left) / zp.zoom,
+        ly: (clientY - rect.top) / zp.zoom,
+      };
+    },
+    [zp.zoom],
+  );
+
+  // LOCAL 좌표(lx/ly) → 오버레이 캔버스 픽셀. canvas.width = frame.offsetWidth * zoom 이므로 local * zoom.
+  const clientToOverlay = useCallback(
+    (lx: number, ly: number): { x: number; y: number } => ({
+      x: lx * zp.zoom,
+      y: ly * zp.zoom,
+    }),
+    [zp.zoom],
+  );
 
   // image pixel → clientXY — screenToSource 의 정확한 역변환(자석 스냅 결과를 화면에 다시 그릴 때).
   // 중심(ccx/ccy)·배율(f*scale*stretch*zoom)·회전(+t)·flip 을 screenToSource 와 거울처럼 맞춘다.
@@ -858,67 +882,120 @@ export function CanvasEditor({
 
   // 오버레이 경로 그리기 — 흰선 base + 검정 점선(포토샵 marching-ants 느낌). extraPt=고무줄/포인터 끝.
   const redrawLassoOverlay = useCallback(
-    (extraPt?: { cx: number; cy: number }, closedFill?: boolean) => {
+    (extraPt?: { lx: number; ly: number }, closedFill?: boolean) => {
       const canvas = lassoOverlayRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const pts = lassoClientPtsRef.current;
-      if (pts.length === 0) return;
+      // canvas.width 는 frame.offsetWidth * zoom 으로 설정돼 있어 lineWidth=1.5 = 1.5 화면 픽셀.
+      // getBoundingClientRect 로 잔여 오차를 흡수한다.
+      const rect = canvas.getBoundingClientRect();
+      const ls = rect.width > 0 ? canvas.width / rect.width : 1;
 
-      const all = pts.map(p => clientToOverlay(p.cx, p.cy));
-      if (extraPt) all.push(clientToOverlay(extraPt.cx, extraPt.cy));
+      const pts = lassoClientPtsRef.current;
+
+      // ── 커밋 완료 상태: 파란 fill 영구 표시 ──────────────────────────────────
+      if (lassoCommittedRef.current && pts.length >= 3) {
+        const all = pts.map(p => clientToOverlay(p.lx, p.ly));
+        ctx.beginPath();
+        ctx.moveTo(all[0].x, all[0].y);
+        all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fillStyle = "rgba(100, 160, 255, 0.35)";
+        ctx.fill();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1.5 * ls;
+        ctx.strokeStyle = "rgba(255,255,255,0.7)";
+        ctx.stroke();
+        ctx.setLineDash([5 * ls, 4 * ls]);
+        ctx.lineWidth = ls;
+        ctx.strokeStyle = "rgba(0,0,0,0.5)";
+        ctx.stroke();
+        ctx.setLineDash([]);
+        return;
+      }
+
+      // pts 없어도 자석 스냅 커서는 표시(magnetic 첫 점 전 미리보기).
+      if (pts.length === 0 && !extraPt) return;
+
+      const all = pts.map(p => clientToOverlay(p.lx, p.ly));
+      if (extraPt) all.push(clientToOverlay(extraPt.lx, extraPt.ly));
 
       if (closedFill && all.length >= 3) {
         ctx.beginPath();
         ctx.moveTo(all[0].x, all[0].y);
         all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
         ctx.closePath();
-        ctx.fillStyle = "rgba(100, 160, 255, 0.15)";
+        ctx.fillStyle = "rgba(100, 160, 255, 0.35)";
         ctx.fill();
       }
 
-      ctx.beginPath();
-      ctx.moveTo(all[0].x, all[0].y);
-      all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-      if (closedFill) ctx.closePath();
-      ctx.setLineDash([]);
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.stroke();
-      ctx.setLineDash([5, 4]);
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(0,0,0,0.8)";
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (all.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(all[0].x, all[0].y);
+        all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        if (closedFill) ctx.closePath();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 1.5 * ls;
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.stroke();
+        ctx.setLineDash([5 * ls, 4 * ls]);
+        ctx.lineWidth = ls;
+        ctx.strokeStyle = "rgba(0,0,0,0.8)";
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
       // 시작점 마커 — poly/magnetic 에서 "여기 클릭해 닫기" 스냅 목표 표시.
       if (pts.length >= 3) {
-        const s = clientToOverlay(pts[0].cx, pts[0].cy);
+        const s = clientToOverlay(pts[0].lx, pts[0].ly);
         ctx.beginPath();
-        ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+        ctx.arc(s.x, s.y, 5 * ls, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255,255,255,0.85)";
         ctx.fill();
         ctx.strokeStyle = "rgba(0,0,0,0.8)";
-        ctx.lineWidth = 1;
+        ctx.lineWidth = ls;
         ctx.stroke();
       }
+
+      // 자석 스냅 위치 표시 — magnetic 모드일 때만 노란 점으로 스냅 위치를 표시.
+      if (lassoType === "magnetic" && extraPt) {
+        const sp = clientToOverlay(extraPt.lx, extraPt.ly);
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, 4 * ls, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255, 220, 0, 0.9)";
+        ctx.fill();
+      }
     },
-    [clientToOverlay],
+    [clientToOverlay, lassoType, zp.zoom],
   );
 
   // 마스크 커밋(공통) — 누적 정점을 닫고 brushCanvasRef 에 빨강 폴리곤 채움 → handleExtractBrush 활성.
   const commitLassoPoints = useCallback(() => {
     const pts = lassoClientPtsRef.current;
     const layer = layers.find(l => l.id === selectedLayerId);
-    const canvas = brushCanvasRef.current;
-    if (!layer || !canvas || pts.length < 3) {
+    if (!layer || pts.length < 3) {
       clearLassoState();
       return;
     }
-    const imagePts = pts.map(p => screenToSource(canvas, p.cx, p.cy, layer));
+    const canvas = brushCanvasRef.current;
+    if (!canvas) {
+      // inpaintNat 아직 로드 중 — 경로는 유지하고 대기. 이미지 로드 완료 후 Enter/완료 재시도.
+      return;
+    }
+    // LOCAL(lx/ly) → 현재 줌의 client 좌표 복원(overlay rect 기준) → screenToSource. 줌 변경 후에도 정합.
+    const overlayRect = lassoOverlayRef.current?.getBoundingClientRect();
+    if (!overlayRect) return;
+    const imagePts = pts.map(p =>
+      screenToSource(
+        canvas,
+        p.lx * zp.zoom + overlayRect.left,
+        p.ly * zp.zoom + overlayRect.top,
+        layer,
+      ),
+    );
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -930,14 +1007,15 @@ export function CanvasEditor({
     ctx.closePath();
     ctx.fill();
 
-    const overlay = lassoOverlayRef.current;
-    overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
-    lassoClientPtsRef.current = [];
+    // 선택 완료 — 파란 폴리곤을 오버레이에 영구 표시(전체지우기/분리 전까지).
+    // pts 는 줌 변경 시 재그리기에 사용하므로 유지한다.
+    lassoCommittedRef.current = true;
     lassoRubberBandRef.current = null;
     lassoDrawingRef.current = false;
-    setLassoPtCount(0);
+    setLassoPtCount(pts.length);
+    redrawLassoOverlay(undefined, true);
     setBrushPainted(true);
-  }, [layers, selectedLayerId, screenToSource, clearLassoState]);
+  }, [layers, selectedLayerId, screenToSource, clearLassoState, redrawLassoOverlay, zp.zoom]);
 
   // 자석 스냅 — 화면점 주변 원본 픽셀(반경≈화면 20px)에서 Sobel gradient 최대점을 찾아 그 위치를 화면좌표로.
   const snapToEdge = useCallback(
@@ -973,24 +1051,31 @@ export function CanvasEditor({
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.preventDefault();
       e.stopPropagation(); // 아래 레이어의 onLayerBodyDown(이동 드래그) 차단
+      // 커밋 상태에서 새 드래그 시작 시 초기화
+      if (lassoCommittedRef.current) {
+        lassoCommittedRef.current = false;
+        setBrushPainted(false);
+      }
       lassoDrawingRef.current = true;
-      lassoClientPtsRef.current = [{ cx: e.clientX, cy: e.clientY }];
+      const lp = clientToLocal(e.clientX, e.clientY);
+      lassoClientPtsRef.current = [lp];
       setLassoPtCount(1);
       redrawLassoOverlay();
       try {
         e.currentTarget.setPointerCapture(e.pointerId);
       } catch {}
     },
-    [redrawLassoOverlay],
+    [redrawLassoOverlay, clientToLocal],
   );
   const onLassoMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (!lassoDrawingRef.current) return;
-      lassoClientPtsRef.current.push({ cx: e.clientX, cy: e.clientY });
+      const lp = clientToLocal(e.clientX, e.clientY);
+      lassoClientPtsRef.current.push(lp);
       setLassoPtCount(lassoClientPtsRef.current.length);
-      redrawLassoOverlay({ cx: e.clientX, cy: e.clientY });
+      redrawLassoOverlay(lp);
     },
-    [redrawLassoOverlay],
+    [redrawLassoOverlay, clientToLocal],
   );
   const onLassoUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -1009,38 +1094,51 @@ export function CanvasEditor({
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (lassoType !== "poly" && lassoType !== "magnetic") return;
       e.preventDefault();
+      // 커밋 상태에서 새 점 추가 시 이전 선택 초기화 후 새 드로잉 시작.
+      if (lassoCommittedRef.current) {
+        lassoCommittedRef.current = false;
+        lassoClientPtsRef.current = [];
+        setBrushPainted(false);
+      }
       const pts = lassoClientPtsRef.current;
-      // 시작점 근처(≥3점 & 12px 이내) 클릭 → 닫기.
+      const el = clientToLocal(e.clientX, e.clientY);
+      // 시작점 근처(≥3점 & 12px client 이내) 클릭 → 닫기. local 거리 기준이라 임계값도 12/zoom.
       if (pts.length >= 3) {
-        const dx = e.clientX - pts[0].cx, dy = e.clientY - pts[0].cy;
-        if (Math.sqrt(dx * dx + dy * dy) < 12) {
+        const dx = el.lx - pts[0].lx, dy = el.ly - pts[0].ly;
+        if (Math.sqrt(dx * dx + dy * dy) < 12 / zp.zoom) {
           commitLassoPoints();
           return;
         }
       }
       if (lassoType === "magnetic") {
+        // snapToEdge 는 client 좌표 반환 → local 로 변환해 저장.
         const snapped = snapToEdge(e.clientX, e.clientY);
-        pts.push(snapped ?? { cx: e.clientX, cy: e.clientY });
+        pts.push(snapped ? clientToLocal(snapped.cx, snapped.cy) : el);
       } else {
-        pts.push({ cx: e.clientX, cy: e.clientY });
+        pts.push(el);
       }
       setLassoPtCount(pts.length);
       redrawLassoOverlay(lassoRubberBandRef.current ?? undefined);
     },
-    [lassoType, commitLassoPoints, redrawLassoOverlay, snapToEdge],
+    [lassoType, commitLassoPoints, redrawLassoOverlay, snapToEdge, clientToLocal, zp.zoom],
   );
   const onLassoOverlayMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (lassoType === "free") return; // free 는 brushCanvas 이벤트 사용
-      if (lassoClientPtsRef.current.length === 0) return;
-      const pt =
-        lassoType === "magnetic"
-          ? snapToEdge(e.clientX, e.clientY) ?? { cx: e.clientX, cy: e.clientY }
-          : { cx: e.clientX, cy: e.clientY };
+      // magnetic: 첫 점 전에도 스냅 커서 미리보기. poly: 첫 점 전엔 고무줄 불필요.
+      if (lassoType !== "magnetic" && lassoClientPtsRef.current.length === 0) return;
+      let pt: { lx: number; ly: number };
+      if (lassoType === "magnetic") {
+        // snapToEdge 는 client 좌표 반환 → local 로 변환.
+        const snapped = snapToEdge(e.clientX, e.clientY);
+        pt = snapped ? clientToLocal(snapped.cx, snapped.cy) : clientToLocal(e.clientX, e.clientY);
+      } else {
+        pt = clientToLocal(e.clientX, e.clientY);
+      }
       lassoRubberBandRef.current = pt;
       redrawLassoOverlay(pt); // 마지막 앵커 → 현재(스냅된) 점 고무줄 미리보기
     },
-    [lassoType, redrawLassoOverlay, snapToEdge],
+    [lassoType, redrawLassoOverlay, snapToEdge, clientToLocal],
   );
   const onLassoOverlayDblClick = useCallback(() => {
     if (lassoClientPtsRef.current.length >= 3) commitLassoPoints();
@@ -1054,14 +1152,17 @@ export function CanvasEditor({
     const frame = canvas.parentElement;
     if (!frame) return;
     const sync = () => {
-      canvas.width = frame.offsetWidth;
-      canvas.height = frame.offsetHeight;
+      // zoom 배율로 캔버스 해상도를 높여 줌인 시 선 굵기·품질 일정 유지.
+      canvas.width = Math.round(frame.offsetWidth * zp.zoom);
+      canvas.height = Math.round(frame.offsetHeight * zp.zoom);
+      // 크기 변경(→ clearRect) 후 기존 경로/커밋 영역 복원.
+      redrawLassoOverlay(lassoRubberBandRef.current ?? undefined);
     };
     sync();
     const ro = new ResizeObserver(sync);
     ro.observe(frame);
     return () => ro.disconnect();
-  }, [tool, extractMode]);
+  }, [tool, extractMode, zp.zoom, redrawLassoOverlay]);
 
   // poly/magnetic 키보드 — Backspace(마지막 점)/Esc(전체 취소)/Enter(완료). 입력 포커스 시 무시.
   useEffect(() => {
@@ -1904,6 +2005,10 @@ export function CanvasEditor({
                 <div
                   data-canvas-frame
                   className="checkerboard absolute inset-0 overflow-hidden outline outline-2 outline-white/80"
+                  style={{
+                    backgroundSize: `${16 / zp.zoom}px ${16 / zp.zoom}px`,
+                    backgroundPosition: `0 0, 0 ${8 / zp.zoom}px, ${8 / zp.zoom}px ${-8 / zp.zoom}px, ${-8 / zp.zoom}px 0`,
+                  }}
                   onPointerDown={() => setSelectedLayerId(null)}
                 >
                   {layers.map(layer => (
@@ -1940,7 +2045,7 @@ export function CanvasEditor({
                           poly/magnetic 은 위 오버레이 캔버스가 클릭을 받는다. lasso 라도 mask commit 에 필요해 mount 유지.
                           마스크 commit 빨강 fill 은 보여선 안 되므로 lasso 일 때는 캔버스를 숨긴다(opacity-0). */}
                       {(tool === "inpaint" ||
-                        (tool === "extract" && (extractMode === "brush" || extractMode === "lasso"))) &&
+                        (tool === "extract" && extractMode === "lasso")) &&
                         selectedLayerId === layer.id &&
                         inpaintNat && (
                         <canvas
@@ -2035,15 +2140,34 @@ export function CanvasEditor({
                               transform: `translate(-50%, -50%) translate(${selected.x}px, ${selected.y}px) rotate(${selected.rotation}deg)`,
                             }}
                           >
-                            <div className="pointer-events-none absolute inset-0 outline outline-[1.5px] [outline-style:dashed] outline-[color:var(--accent)]" />
+                            {/* 점선 외곽선 — SVG 속성값을 zoom 으로 나눠 CSS scale 보정 */}
+                            <svg
+                              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "visible", pointerEvents: "none" }}
+                            >
+                              <rect
+                                x="0" y="0" width="100%" height="100%"
+                                fill="none"
+                                stroke="var(--accent)"
+                                strokeWidth={1.5 / zp.zoom}
+                                strokeDasharray={`${5 / zp.zoom} ${4 / zp.zoom}`}
+                              />
+                            </svg>
+                            {/* 핸들 — 자연 크기(12px) + scale(1/zoom) 역변환으로 래스터링 후 합성 */}
                             {(["tl", "tr", "bl", "br"] as const).map(c => (
                               <div
                                 key={c}
                                 onPointerDown={e => onHandleDown(e, "corner", selected)}
-                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
                                 style={{
+                                  position: "absolute",
                                   left: c.includes("l") ? 0 : "100%",
                                   top: c.includes("t") ? 0 : "100%",
+                                  width: 12, height: 12,
+                                  marginLeft: -6, marginTop: -6,
+                                  transform: `scale(${1 / zp.zoom})`,
+                                  transformOrigin: "center center",
+                                  border: "1.5px solid var(--accent)",
+                                  background: "white",
+                                  borderRadius: 2,
                                   cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
                                 }}
                               />
@@ -2052,22 +2176,54 @@ export function CanvasEditor({
                               <div
                                 key={v}
                                 onPointerDown={e => onHandleDown(e, v, selected)}
-                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                                style={{ left: "50%", top: v === "t" ? 0 : "100%", cursor: "ns-resize" }}
+                                style={{
+                                  position: "absolute",
+                                  left: "50%", top: v === "t" ? 0 : "100%",
+                                  width: 12, height: 12,
+                                  marginLeft: -6, marginTop: -6,
+                                  transform: `scale(${1 / zp.zoom})`,
+                                  transformOrigin: "center center",
+                                  border: "1.5px solid var(--accent)",
+                                  background: "white",
+                                  borderRadius: 2,
+                                  cursor: "ns-resize",
+                                }}
                               />
                             ))}
                             {(["l", "r"] as const).map(h => (
                               <div
                                 key={h}
                                 onPointerDown={e => onHandleDown(e, h, selected)}
-                                className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border-[1.5px] border-[color:var(--accent)] bg-white"
-                                style={{ left: h === "l" ? 0 : "100%", top: "50%", cursor: "ew-resize" }}
+                                style={{
+                                  position: "absolute",
+                                  left: h === "l" ? 0 : "100%", top: "50%",
+                                  width: 12, height: 12,
+                                  marginLeft: -6, marginTop: -6,
+                                  transform: `scale(${1 / zp.zoom})`,
+                                  transformOrigin: "center center",
+                                  border: "1.5px solid var(--accent)",
+                                  background: "white",
+                                  borderRadius: 2,
+                                  cursor: "ew-resize",
+                                }}
                               />
                             ))}
+                            {/* 회전 노브 — 중심이 박스 상단에서 30 screen-px 위 */}
                             <div
                               onPointerDown={e => onHandleDown(e, "rot", selected)}
-                              className="pointer-events-auto absolute h-[13px] w-[13px] -translate-x-1/2 cursor-grab rounded-full border-[1.5px] border-[color:var(--accent)] bg-white"
-                              style={{ left: "50%", top: -30 }}
+                              style={{
+                                position: "absolute",
+                                left: "50%", top: 0,
+                                width: 13, height: 13,
+                                marginLeft: -6.5,
+                                marginTop: -30 / zp.zoom - 6.5,
+                                transform: `scale(${1 / zp.zoom})`,
+                                transformOrigin: "center center",
+                                border: "1.5px solid var(--accent)",
+                                background: "white",
+                                borderRadius: "50%",
+                                cursor: "grab",
+                              }}
                             />
                           </div>
                         )}
@@ -2513,17 +2669,7 @@ export function CanvasEditor({
                   >
                     <Tags size={12} /> 입력
                   </button>
-                  <button
-                    onClick={() => { if (extractMode !== "brush") { setExtractMode("brush"); clearBrush(); } }}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      extractMode === "brush"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="칠한 영역으로 분리 (브러시 마스크)"
-                  >
-                    <Brush size={12} /> 브러시
-                  </button>
+
                   <button
                     onClick={() => { if (extractMode !== "lasso") { setExtractMode("lasso"); clearBrush(); } }}
                     className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
@@ -2536,7 +2682,7 @@ export function CanvasEditor({
                     <Lasso size={12} /> 올가미
                   </button>
                 </div>
-                {extractMode === "brush" && brushControls}
+
                 {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. 타입 전환 시 진행 중 경로 리셋. */}
                 {extractMode === "lasso" && (
                   <>

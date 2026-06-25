@@ -34,6 +34,8 @@ export type ZoomPan = {
   onPanPointerDown: (e: React.PointerEvent) => void;
   onPanPointerMove: (e: React.PointerEvent) => void;
   onPanPointerUp: (e: React.PointerEvent) => void;
+  /** pan 을 dx/dy 만큼 이동. 화살표·WASD 키 이동에 사용. */
+  movePan: (dx: number, dy: number) => void;
 };
 
 export function useZoomPan(): ZoomPan {
@@ -105,6 +107,11 @@ export function useZoomPan(): ZoomPan {
     } catch {}
   }, []);
 
+  const movePan = useCallback(
+    (dx: number, dy: number) => setView(v => ({ ...v, pan: { x: v.pan.x + dx, y: v.pan.y + dy } })),
+    [],
+  );
+
   return {
     zoom: view.zoom,
     pan: view.pan,
@@ -118,6 +125,7 @@ export function useZoomPan(): ZoomPan {
     onPanPointerDown,
     onPanPointerMove,
     onPanPointerUp,
+    movePan,
   };
 }
 
