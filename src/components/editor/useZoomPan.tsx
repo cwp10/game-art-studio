@@ -27,9 +27,9 @@ export type ZoomPan = {
   togglePanMode: () => void;
   /**
    * 마우스 커서 위치 기준 anchor 줌. containerEl 은 (transform 이 걸리지 않은) 뷰박스 div.
-   * direction +1=줌인 / -1=줌아웃. clamp 후 ratio 로 pan 을 재계산해 커서 아래 픽셀을 고정한다.
+   * delta 양수=줌인 / 음수=줌아웃, 크기가 실제 줌 변화량. clamp 후 ratio 로 pan 을 재계산해 커서 아래 픽셀을 고정한다.
    */
-  zoomAtPoint: (containerEl: HTMLElement, clientX: number, clientY: number, direction: 1 | -1) => void;
+  zoomAtPoint: (containerEl: HTMLElement, clientX: number, clientY: number, delta: number) => void;
   /** panMode 일 때만 캔버스 위 포인터 드래그를 팬으로 소비. 그리기 핸들러보다 먼저 호출. */
   onPanPointerDown: (e: React.PointerEvent) => void;
   onPanPointerMove: (e: React.PointerEvent) => void;
@@ -64,13 +64,13 @@ export function useZoomPan(): ZoomPan {
   const togglePanMode = useCallback(() => setPanMode(v => !v), []);
 
   const zoomAtPoint = useCallback(
-    (containerEl: HTMLElement, clientX: number, clientY: number, direction: 1 | -1) => {
+    (containerEl: HTMLElement, clientX: number, clientY: number, delta: number) => {
       const rect = containerEl.getBoundingClientRect();
       // transform-origin:center + 중앙 배치라 앵커는 "뷰박스 중심 기준 커서 오프셋"이다.
       const cx = clientX - rect.left - rect.width / 2;
       const cy = clientY - rect.top - rect.height / 2;
       setView(({ zoom: oldZoom, pan: oldPan }) => {
-        const newZoom = clampZoom(oldZoom + direction * ZOOM_STEP);
+        const newZoom = clampZoom(oldZoom + delta);
         const ratio = newZoom / oldZoom; // clamp 후 비율 — 경계에서 1 → pan 고정.
         return {
           zoom: newZoom,

@@ -1422,7 +1422,10 @@ export function CanvasEditor({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      zoomAtPoint(el, e.clientX, e.clientY, e.deltaY < 0 ? 1 : -1);
+      // deltaY 크기를 비례 반영 — 트랙패드(작은 delta)는 부드럽고, 마우스 휠(큰 delta)은 적당히 반응.
+      // 0.003 스케일로 deltaY≈83 → 0.25(기존 ZOOM_STEP 동치), 최대 0.2 캡.
+      const delta = Math.sign(-e.deltaY) * Math.min(Math.abs(e.deltaY) * 0.003, 0.2);
+      zoomAtPoint(el, e.clientX, e.clientY, delta);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
