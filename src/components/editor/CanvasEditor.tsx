@@ -3,6 +3,8 @@
 import {
   ArrowLeft,
   Brush,
+  ChevronDown,
+  ChevronUp,
   Eraser,
   Eye,
   EyeOff,
@@ -1714,21 +1716,43 @@ export function CanvasEditor({
         </select>
         {!preset.w && (
           <span className="flex items-center gap-1 text-text-muted">
-            <input
-              type="number"
-              min={1}
-              value={customSize.w}
-              onChange={e => setCustomSize(s => ({ ...s, w: Math.max(1, Number(e.target.value)) }))}
-              className="h-7 w-16 rounded-md border border-border bg-bg-panel px-1.5 text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
-            />
+            <div className="relative flex h-7 w-16 overflow-hidden rounded-md border border-border bg-bg-panel focus-within:border-[color:var(--accent)]/60">
+              <input
+                type="number"
+                min={1}
+                value={customSize.w}
+                onFocus={e => e.target.select()}
+                onChange={e => setCustomSize(s => ({ ...s, w: Math.max(1, Number(e.target.value)) }))}
+                className="h-full w-full bg-transparent pl-1.5 pr-5 text-text-primary focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <div className="absolute right-0 flex h-full w-4 flex-col border-l border-border">
+                <button type="button" tabIndex={-1} onClick={() => setCustomSize(s => ({ ...s, w: s.w + 1 }))} className="flex flex-1 items-center justify-center text-text-muted hover:bg-bg-card hover:text-text-primary">
+                  <ChevronUp className="h-2.5 w-2.5" />
+                </button>
+                <button type="button" tabIndex={-1} onClick={() => setCustomSize(s => ({ ...s, w: Math.max(1, s.w - 1) }))} className="flex flex-1 items-center justify-center border-t border-border text-text-muted hover:bg-bg-card hover:text-text-primary">
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            </div>
             ×
-            <input
-              type="number"
-              min={1}
-              value={customSize.h}
-              onChange={e => setCustomSize(s => ({ ...s, h: Math.max(1, Number(e.target.value)) }))}
-              className="h-7 w-16 rounded-md border border-border bg-bg-panel px-1.5 text-text-primary focus:border-[color:var(--accent)]/60 focus:outline-none"
-            />
+            <div className="relative flex h-7 w-16 overflow-hidden rounded-md border border-border bg-bg-panel focus-within:border-[color:var(--accent)]/60">
+              <input
+                type="number"
+                min={1}
+                value={customSize.h}
+                onFocus={e => e.target.select()}
+                onChange={e => setCustomSize(s => ({ ...s, h: Math.max(1, Number(e.target.value)) }))}
+                className="h-full w-full bg-transparent pl-1.5 pr-5 text-text-primary focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              />
+              <div className="absolute right-0 flex h-full w-4 flex-col border-l border-border">
+                <button type="button" tabIndex={-1} onClick={() => setCustomSize(s => ({ ...s, h: s.h + 1 }))} className="flex flex-1 items-center justify-center text-text-muted hover:bg-bg-card hover:text-text-primary">
+                  <ChevronUp className="h-2.5 w-2.5" />
+                </button>
+                <button type="button" tabIndex={-1} onClick={() => setCustomSize(s => ({ ...s, h: Math.max(1, s.h - 1) }))} className="flex flex-1 items-center justify-center border-t border-border text-text-muted hover:bg-bg-card hover:text-text-primary">
+                  <ChevronDown className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            </div>
           </span>
         )}
         <span className="text-text-muted/60">
@@ -1967,6 +1991,10 @@ export function CanvasEditor({
                         cursor: "crosshair",
                         touchAction: "none",
                       }}
+                      // poly/magnetic 의 첫 클릭이 부모 data-canvas-frame 의 onPointerDown(레이어 선택 해제)으로
+                      // 버블링되면 selectedLayerId=null → 하단 바·brushCanvas 가 사라지고 commit/snap 이 무력화된다.
+                      // free 가 onLassoDown 에서 stopPropagation 하는 것과 동일하게, 여기서 차단한다.
+                      onPointerDown={lassoType !== "free" ? e => e.stopPropagation() : undefined}
                       onClick={lassoType !== "free" ? onLassoOverlayClick : undefined}
                       onPointerMove={onLassoOverlayMove}
                       onDoubleClick={onLassoOverlayDblClick}
