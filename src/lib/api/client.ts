@@ -184,8 +184,8 @@ export type Suggestion = { label: string; body: string };
  *
  * 본문은 스타일/방향/첨부 미포함 — 사용자가 카드 선택 후 별도 picker 로 결합.
  */
-export async function suggestPrompts(input: string, generationId?: string, signal?: AbortSignal): Promise<Suggestion[]> {
-  const r = await jsonFetch("/api/suggest", "POST", { input, generationId }, signal);
+export async function suggestPrompts(input: string, generationIds?: string[], signal?: AbortSignal): Promise<Suggestion[]> {
+  const r = await jsonFetch("/api/suggest", "POST", { input, generationIds }, signal);
   if (!r.ok) throw new Error(await extractError(r));
   return ((await r.json()) as { suggestions: Suggestion[] }).suggestions;
 }

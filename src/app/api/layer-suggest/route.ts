@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     const { array: parsed, raw: text } = await callClaudeSuggest(SYSTEM_PROMPT, `요청: ${question}`, {
       signal: req.signal,
       maxInputLength: Infinity,
-      imageGenerationId: generationId,
+      imageGenerationIds: generationId ? [generationId] : undefined,
     });
     if (!text) return Response.json({ error: "empty suggestion" }, { status: 502 });
 

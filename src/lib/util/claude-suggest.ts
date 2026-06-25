@@ -20,19 +20,24 @@ import { imagePath } from "@/lib/util/paths";
 export async function callClaudeSuggest(
   systemPrompt: string,
   userMessage: string,
-  opts: { signal?: AbortSignal; maxInputLength?: number; imageGenerationId?: string } = {},
+  opts: { signal?: AbortSignal; maxInputLength?: number; imageGenerationIds?: string[] } = {},
 ): Promise<{ array: unknown[] | null; raw: string }> {
   const maxInputLength = opts.maxInputLength ?? 500;
   let sliced = userMessage.slice(0, maxInputLength);
   let allowedTools: string[] | undefined;
   // 이미지가 지정되고 파일이 실제로 존재하면 Read 도구로 비전 분석을 수행하도록
   // 지시문을 앞에 붙인다. 파일이 없으면 기존 텍스트 전용 동작을 그대로 유지.
-  if (opts.imageGenerationId) {
-    const imageFilePath = imagePath(opts.imageGenerationId);
-    if (fs.existsSync(imageFilePath)) {
-      allowedTools = ["Read"];
-      sliced = `먼저 Read 도구로 다음 이미지를 분석하세요: ${imageFilePath}\n\n${sliced}`;
-    }
+  // 다중 이미지면 순서대로 분석하도록 목록으로 나열한다.
+  const validPaths = (opts.imageGenerationIds ?? [])
+    .map(id => imagePath(id))
+    .filter(p => fs.existsSync(p));
+
+  if (validPaths.length > 0) {
+    allowedTools = ["Read"];
+    const imageList = validPaths.length === 1
+      ? `먼저 Read 도구로 다음 이미지를 분석하세요: ${validPaths[0]}`
+      : `먼저 Read 도구로 다음 이미지들을 순서대로 분석하세요:\n${validPaths.map(p => `- ${p}`).join("\n")}`;
+    sliced = `${imageList}\n\n${sliced}`;
   }
   const raw = (await claudeRunSimple({
     systemPrompt,

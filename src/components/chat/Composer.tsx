@@ -37,7 +37,7 @@ type Props = {
   attachment?: ComposerAttachment | null;
   /** [✨ 제안] 클릭 시 부모에게 현재 text 위임. 부모가 chat 에 카드 그리드 표시.
    *  첨부 이미지가 있으면 generationId 도 함께 위임 → 비전 분석 반영. */
-  onAskSuggestions?: (text: string, attachedGenerationId?: string) => void;
+  onAskSuggestions?: (text: string, attachedGenerationIds?: string[]) => void;
   /** 입력창에 이미지 파일을 드롭하면 업로드 → 다음 메시지의 reference 로 자동 첨부. */
   onUploadImage?: (file: File) => void;
 };
@@ -60,7 +60,7 @@ export function Composer({
   // 배치 생성 장수 (×1/×2/×4). attached/frames 사용 시엔 단일 생성만 — count 무시(강제 1).
   const [count, setCount] = useState<number>(1);
   // 내부 attachment state — 부모의 attachment seq 변경 시 sync. 사용자가 [X] 로 해제 가능.
-  const [attached, setAttached] = useState<{ id: string; label: string } | null>(null);
+  const [attached, setAttached] = useState<{ id: string; label: string }[]>([]);
   const ref = useRef<HTMLTextAreaElement>(null);
   // 입력창 드래그-드롭 업로드 — child(텍스트영역/버튼) 위 enter/leave 깜빡임 방지에 counter 사용.
   // 이벤트는 stopPropagation 으로 가둬, 중앙 컬럼 전역 드롭과 이중 업로드되지 않게 한다.
@@ -87,8 +87,12 @@ export function Composer({
   // 부모 attachment seq 변경 시 chip 갱신.
   useEffect(() => {
     if (attachment) {
+      // 같은 ID면 label 갱신, 없으면 추가(중복 방지).
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAttached({ id: attachment.generationId, label: attachment.label });
+      setAttached(prev => {
+        const without = prev.filter(a => a.id !== attachment.generationId);
+        return [...without, { id: attachment.generationId, label: attachment.label }];
+      });
     }
   }, [attachment]);
 
@@ -107,7 +111,8 @@ export function Composer({
   function askSuggestions() {
     const t = text.trim();
     if (!t || !onAskSuggestions) return;
-    onAskSuggestions(t, attached?.id ?? undefined);
+    const ids = attached.length ? attached.map(a => a.id) : undefined;
+    onAskSuggestions(t, ids);
     setText("");
   }
 
@@ -119,21 +124,21 @@ export function Composer({
     const withDir = direction === "auto" ? t : `${t}, ${direction}`;
     const opts: { presetId?: string; attachmentGenerationIds?: string[]; count?: number } = {};
     if (presetId) opts.presetId = presetId;
-    if (attached) opts.attachmentGenerationIds = [attached.id];
+    if (attached.length) opts.attachmentGenerationIds = attached.map(a => a.id);
     // attached 있고 frames 선택 시 sprite sheet suffix 결합.
     const withFrames = (() => {
-      if (!attached || frames === null) return withDir;
+      if (!attached.length || frames === null) return withDir;
       const side = Math.round(Math.sqrt(frames));
       const grid = `${side}×${side}`;
       return `${withDir}, ${frames}프레임 sprite sheet, ${grid} grid`;
     })();
     // 배치: 첨부/스프라이트가 아니고 count>1 일 때만. 그 외엔 단일 생성 흐름 유지.
-    if (!attached && frames === null && count > 1) opts.count = count;
+    if (!attached.length && frames === null && count > 1) opts.count = count;
     onSend(withFrames, Object.keys(opts).length ? opts : undefined);
     setText("");
     // attachment 는 일회용 — submit 후 자동 해제. 다시 reference 하고 싶으면 사용자가 카드의
     // [reference] 또는 새 업로드 필요.
-    setAttached(null);
+    setAttached([]);
     setFrames(null);
   }
 
@@ -147,7 +152,7 @@ export function Composer({
   return (
     <div className="border-t border-border bg-bg-panel/40 px-4 py-3">
       <div className="mx-auto max-w-[880px]">
-        {(presetId && presetName) || attached ? (
+        {(presetId && presetName) || attached.length > 0 ? (
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {presetId && presetName && (
               <span className="flex h-6 items-center gap-1 rounded-full border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/15 px-2 text-[11px] text-text-primary">
@@ -161,26 +166,26 @@ export function Composer({
                 </button>
               </span>
             )}
-            {attached && (
-              <span className="flex h-6 items-center gap-1 overflow-hidden rounded-full border border-[color:var(--accent)]/40 bg-bg-card pl-0.5 pr-2 text-[11px] text-text-primary">
+            {attached.map(a => (
+              <span key={a.id} className="flex h-6 items-center gap-1 overflow-hidden rounded-full border border-[color:var(--accent)]/40 bg-bg-card pl-0.5 pr-2 text-[11px] text-text-primary">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`/api/images/${attached.id}`}
+                  src={`/api/images/${a.id}`}
                   alt="reference"
                   className="size-5 rounded-full border border-border object-cover"
                 />
-                <span className="max-w-[160px] truncate">{attached.label}</span>
+                <span className="max-w-[160px] truncate">{a.label}</span>
                 <button
-                  onClick={() => setAttached(null)}
+                  onClick={() => setAttached(prev => prev.filter(x => x.id !== a.id))}
                   className="rounded p-0.5 text-text-muted hover:text-text-primary"
                   title="첨부 해제"
                 >
                   <X size={10} />
                 </button>
               </span>
-            )}
+            ))}
             <span className="text-[10px] text-text-muted/60">
-              {attached && "이 이미지를 reference 로 변형 · "}{presetId && "prompt suffix 자동 결합"}
+              {attached.length > 0 && "이 이미지를 reference 로 변형 · "}{presetId && "prompt suffix 자동 결합"}
             </span>
           </div>
         ) : null}
@@ -251,7 +256,7 @@ export function Composer({
                 ))}
               </select>
             </label>
-            {!attached && (
+            {!attached.length && (
               <div
                 className="flex h-7 items-center overflow-hidden rounded-md border border-border text-xs"
                 title="배치 생성 — 같은 프롬프트로 N장을 한 번에"
@@ -272,7 +277,7 @@ export function Composer({
                 ))}
               </div>
             )}
-            {attached && (
+            {attached.length > 0 && (
               <label className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-text-muted hover:text-text-primary" title="sprite sheet 프레임 수">
                 <LayoutGrid size={12} />
                 <select

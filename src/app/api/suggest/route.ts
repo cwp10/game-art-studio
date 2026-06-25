@@ -31,7 +31,7 @@ declare global {
 const cache = (globalThis.__suggest_cache ??= new Map());
 const TTL_MS = 24 * 60 * 60 * 1000;
 
-type Body = { input?: string; generationId?: string };
+type Body = { input?: string; generationIds?: string[] };
 
 export async function POST(req: NextRequest) {
   let body: Body;
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   // 기존 캐시에 배경 키워드가 남아있을 수 있으니 stripBg 로 보정.
   // 첨부 이미지가 있으면 캐시를 건너뛴다 — 같은 텍스트라도 이미지에 따라 제안이 달라져야 함.
   const cached = cache.get(input);
-  if (cached && !body.generationId && Date.now() - cached.ts < TTL_MS) {
+  if (cached && !body.generationIds?.length && Date.now() - cached.ts < TTL_MS) {
     const fixed = cached.suggestions.map((s: Suggestion) => ({ label: s.label, body: stripBg(s.body) }));
     return Response.json({ suggestions: fixed, cached: true });
   }
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
   try {
     const { array: parsed, raw } = await callClaudeSuggest(SYSTEM_PROMPT, input, {
       signal: req.signal,
-      imageGenerationId: body.generationId,
+      imageGenerationIds: body.generationIds,
     });
     if (!parsed) {
       return Response.json({ error: "claude returned non-array", raw: raw.slice(0, 400) }, { status: 502 });
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     }
     // 이미지 첨부 결과는 캐시에 쓰지 않는다 — bare input 키로 저장되면 이후 텍스트 전용
     // 요청이 이미지 맥락 제안을 잘못 받게 된다(캐시 오염 방지).
-    if (!body.generationId) cache.set(input, { ts: Date.now(), suggestions: cleaned });
+    if (!body.generationIds?.length) cache.set(input, { ts: Date.now(), suggestions: cleaned });
     return Response.json({ suggestions: cleaned });
   } catch (e) {
     return Response.json({ error: (e as Error).message }, { status: 502 });
