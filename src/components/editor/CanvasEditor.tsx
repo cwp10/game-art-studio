@@ -2173,6 +2173,7 @@ export function CanvasEditor({
                                   background: "white",
                                   borderRadius: 2,
                                   cursor: c === "tl" || c === "br" ? "nwse-resize" : "nesw-resize",
+                                  pointerEvents: "auto",
                                 }}
                               />
                             ))}
@@ -2191,6 +2192,7 @@ export function CanvasEditor({
                                   background: "white",
                                   borderRadius: 2,
                                   cursor: "ns-resize",
+                                  pointerEvents: "auto",
                                 }}
                               />
                             ))}
@@ -2209,6 +2211,7 @@ export function CanvasEditor({
                                   background: "white",
                                   borderRadius: 2,
                                   cursor: "ew-resize",
+                                  pointerEvents: "auto",
                                 }}
                               />
                             ))}
@@ -2227,6 +2230,7 @@ export function CanvasEditor({
                                 background: "white",
                                 borderRadius: "50%",
                                 cursor: "grab",
+                                pointerEvents: "auto",
                               }}
                             />
                           </div>
