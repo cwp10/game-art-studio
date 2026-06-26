@@ -225,9 +225,15 @@ export async function chromaKeyFile(
       data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * Math.max(0.5, spillStrength));
       if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
     } else {
-      if (data[i + 1] > 80) continue; // G 높음 → 자주색 캐릭터, despill 스킵
-      data[i] = data[i + 1];
-      data[i + 2] = data[i + 1];
+      // G에 비례해 despill 강도를 감쇠: G=0이면 100%, G=160이면 0%.
+      // G 높음(청록/자주 이펙트) → 색 보존, G 낮음(마젠타 스필) → 완전 despill.
+      // continue 제거로 fade는 항상 적용.
+      const gStrength = Math.max(0, 1 - data[i + 1] / 160);
+      if (gStrength > 0) {
+        const targetRB = data[i + 1];
+        data[i] = Math.round(data[i] - (data[i] - targetRB) * gStrength);
+        data[i + 2] = Math.round(data[i + 2] - (data[i + 2] - targetRB) * gStrength);
+      }
     }
     const fade = 1 - Math.min(1, (k - fringeFloor) / fringeSpan);
     data[i + 3] = Math.round(data[i + 3] * fade);
