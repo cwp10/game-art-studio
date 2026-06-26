@@ -17,7 +17,7 @@
     "test:e2e": "playwright test",
     "test:post": "tsx scripts/test-spritesheet.ts && tsx scripts/smoke-composite-transform.mts",
     "postinstall": "node scripts/postinstall.mjs",
-    "dist:mac": "pnpm build && electron-builder --mac",
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false pnpm build && electron-builder --mac",
     "dist:win": "pnpm build && electron-builder --win --x64",
     "pack:mac": "electron-builder --mac",
     "pack:win": "electron-builder --win --x64"
