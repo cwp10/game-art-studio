@@ -168,7 +168,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = keyColor === "green" ? 14 : 8; // green: 실루엣 경계에서 더 먼 fringe 녹색 잔재까지 흡수
+  const DESPILL_RADIUS = 14; // 경계에서 먼 fringe 잔재까지 흡수 (green/magenta 동일)
   const bgDist = new Uint8Array(N).fill(255);
   {
     const bfs: number[] = [];
@@ -221,12 +221,19 @@ export async function chromaKeyFile(
       data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * Math.max(0.5, spillStrength));
       if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
     } else {
-      if (data[i + 1] > 40) continue; // G 높음 → 자주색 캐릭터, despill 스킵
+      if (data[i + 1] > 80) continue; // G 높음 → 자주색 캐릭터, despill 스킵
       data[i] = data[i + 1];
       data[i + 2] = data[i + 1];
     }
     const fade = 1 - Math.min(1, (k - fringeFloor) / fringeSpan);
     data[i + 3] = Math.round(data[i + 3] * fade);
+  }
+
+  // Alpha erosion: 배경 경계 1px 이내 픽셀을 투명화해 despill 후 남은 fringe 잔재 제거.
+  // 이펙트·소프트 경계 이미지에서 haloing을 확실히 없앤다.
+  for (let p = 0; p < N; p++) {
+    if (data[p * ch + 3] === 0) continue;
+    if (bgDist[p] <= 1) data[p * ch + 3] = 0;
   }
 
   const tmpPath = filePath + ".chroma.tmp";
