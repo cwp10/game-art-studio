@@ -16,7 +16,7 @@ import type {
   ImageResult,
   ProgressCallback,
 } from "./index";
-import { chromaKeyFile, GREEN_SUBJECT_RE, type ChromaKeyColor } from "./chroma-key";
+import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, type ChromaKeyColor } from "./chroma-key";
 
 /**
  * CodexExecBackend — `codex exec` 를 spawn 해서 imagegen 스킬을 자동 발동.
@@ -105,6 +105,11 @@ function buildInpaintPrompt(job: ImageJob): string {
  */
 function detectKeyColor(prompt: string): ChromaKeyColor {
   return GREEN_SUBJECT_RE.test(prompt) ? "magenta" : "green";
+}
+
+/** 배경 방식 결정: VFX 이펙트 → 검은 배경 + 루미넌스 키, 그 외 → 크로마키. */
+function detectBgMode(prompt: string): "luma" | "chroma" {
+  return VFX_EFFECT_RE.test(prompt) ? "luma" : "chroma";
 }
 
 function buildLayerExtractPrompt(job: ImageJob): string {
@@ -348,7 +353,16 @@ const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
   inpaint: buildInpaintPrompt,
   upscale: (job) => PROMPT_HEADER + `Upscale the attached image to higher resolution while preserving all detail. ${job.prompt}`,
   remove_bg: (job) => {
-    // 피사체가 녹색이면 magenta 배경으로 그리게 지시(후처리도 같은 색으로 키아웃).
+    // VFX 이펙트(연기·불꽃·글로우 등): 검은 배경 → 루미넌스 키.
+    // 캐릭터·오브젝트: green/magenta 크로마키 배경 → 크로마키.
+    if (detectBgMode(job.prompt) === "luma") {
+      return (
+        PROMPT_HEADER +
+        `Regenerate the attached VFX effect on a flat solid #000000 pure black background ` +
+        `(no gradients, no glow bleed onto background). After Codex saves it as ./output.png, ` +
+        `the post-processing pipeline will apply luminance keying. ${job.prompt}`
+      );
+    }
     const key = detectKeyColor(job.prompt);
     const hex = key === "magenta" ? "#ff00ff" : "#00ff00";
     return (
@@ -613,9 +627,18 @@ export class CodexExecBackend implements ImageBackend {
     await fs.mkdir(IMAGES_DIR, { recursive: true });
     await fs.rename(pickedPath, destPath);
 
-    // remove_bg/layer_extract 후처리: prompt 에서 chroma-key(#00ff00 또는 #ff00ff) 위에
-    // 다시 그리도록 지시했으므로 그 색을 투명화. 키색은 생성 프롬프트와 동일하게 prompt 에서 감지.
-    if (job.kind === "remove_bg" || job.kind === "layer_extract") {
+    // remove_bg 후처리: VFX 이펙트 → 루미넌스 키, 캐릭터/오브젝트 → 크로마키.
+    // layer_extract 는 항상 크로마키(마스크 기반 추출이라 VFX 경우가 없음).
+    if (job.kind === "remove_bg") {
+      if (detectBgMode(job.prompt) === "luma") {
+        onProgress("recovering", "luma key post-process");
+        await lumaKeyFile(destPath);
+      } else {
+        onProgress("recovering", "chroma key post-process");
+        await chromaKeyAuto(destPath, job.prompt);
+      }
+    }
+    if (job.kind === "layer_extract") {
       onProgress("recovering", "chroma key post-process");
       await chromaKeyAuto(destPath, job.prompt);
     }

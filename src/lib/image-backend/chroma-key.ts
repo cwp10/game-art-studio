@@ -28,6 +28,16 @@ export type ChromaKeyColor = "green" | "magenta";
 export const GREEN_SUBJECT_RE =
   /녹색|초록|연두|green|슬라임|slime|잎|leaf|이끼|moss|독성|독액|독|산성|자연\s*마법|풀숲|풀|초원|포이즌|에메랄드|poison|toxic|acid|venom|nature\s*magic|emerald|jade|lime|herb|algae/i;
 
+/**
+ * VFX 이펙트 감지 정규식 — 검은 배경 + 루미넌스 키로 전환할지 결정.
+ *
+ * 연기·불꽃·글로우·폭발 등 "밝음=피사체, 어둠=배경" 구조인 이펙트에 해당.
+ * 루미넌스 키는 어두운 배경에서만 완벽히 동작하므로 캐릭터·오브젝트는 제외한다.
+ * GREEN_SUBJECT_RE 와 함께 codex-exec.ts detectBgMode() 에서 우선순위 결정에 쓴다.
+ */
+export const VFX_EFFECT_RE =
+  /\b(smoke|fire|flame|glow|explosion|explode|aura|lightning|fog|mist|spark|ember|blast|flare|beam|burst|particle|vfx|연기|불꽃|불길|글로우|폭발|오라|번개|안개|파티클|이펙트|빔|버스트)\b/i;
+
 type Logger = (line: string) => void;
 const noop: Logger = () => {};
 
@@ -171,7 +181,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = 14; // 경계에서 먼 fringe 잔재까지 흡수 (green/magenta 동일)
+  const DESPILL_RADIUS = 100; // 소프트 엣지(연기·글로우) fringe 흡수 — 내부 키색은 bgDist > 반경으로 보호
   const bgDist = new Uint8Array(N).fill(255); // 255 = 미방문 sentinel (> DESPILL_RADIUS)
   {
     const bfs: number[] = [];
@@ -212,8 +222,8 @@ export async function chromaKeyFile(
     if (data[i + 3] === 0) continue;
     const k = keyness(i);
     if (k <= fringeFloor) continue;
-    // fringe 는 배경(bgKey)에서 반경 이내일 때만 처리 — 내부 깊은 키색 보존.
-    if (bgDist[p] > DESPILL_RADIUS) continue;
+    // 배경 반경 이내: 전체 fringe 처리. 더 먼 깊은 내부: 아주 약한 spill(k≤15)만 처리 — 녹색 옷·슬라임 본체 보존.
+    if (bgDist[p] > DESPILL_RADIUS && k > 15) continue;
     const origKeyChannel = keyColor === "green" ? data[i + 1] : Math.min(data[i], data[i + 2]);
     const ratio = origKeyChannel > 0 ? Math.max(0, Math.min(1, k / origKeyChannel)) : 0;
     // alpha_f: 전경(피사체) 기여 비율. 최소 0.05 설정으로 극값 방지.
@@ -262,5 +272,49 @@ export async function chromaKeyFile(
     if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
   }
   log(`chromaKeyFile(${keyColor}): hardThresh=${hardThresh} keyedOut=${keyedOut}/${N}`);
+  return keyedOut;
+}
+
+/**
+ * 루미넌스 키 — 검은 배경 이펙트(연기·불꽃·글로우)를 알파 PNG로 변환.
+ *
+ * alpha = max(R, G, B). 프리멀티플라이된 픽셀을 스트레이트 알파로 언프리멀티플라이.
+ * 크로마키 불필요 — 배경이 검정(=0)이므로 잔재 없음. 가산 블렌드 전용.
+ */
+export async function lumaKeyFile(
+  filePath: string,
+  log: (msg: string) => void = () => {},
+): Promise<number> {
+  const raw = await sharp(filePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = raw;
+  const W = info.width, H = info.height, N = W * H;
+  let keyedOut = 0;
+
+  for (let p = 0; p < N; p++) {
+    const i = p * 4;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const luma = Math.max(r, g, b);
+    if (luma === 0) {
+      data[i + 3] = 0;
+      keyedOut++;
+    } else {
+      const a = luma / 255;
+      data[i]     = Math.min(255, Math.round(r / a));
+      data[i + 1] = Math.min(255, Math.round(g / a));
+      data[i + 2] = Math.min(255, Math.round(b / a));
+      data[i + 3] = luma;
+    }
+  }
+
+  const tmpPath = filePath + ".luma.tmp";
+  try {
+    await sharp(data, { raw: { width: W, height: H, channels: 4 } })
+      .png()
+      .toFile(tmpPath);
+    fs.renameSync(tmpPath, filePath);
+  } finally {
+    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+  }
+  log(`lumaKeyFile: keyedOut=${keyedOut}/${N}`);
   return keyedOut;
 }
