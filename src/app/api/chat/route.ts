@@ -20,6 +20,7 @@ import { tailProgress } from "@/lib/cli/progress-tail";
 import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
 import { DATA_DIR, IMAGES_DIR, imagePath, toRelative } from "@/lib/util/paths";
 import { parseIntent, type CodexIntent } from "@/lib/codex-orchestrator";
+import { chromaKeyFile, GREEN_SUBJECT_RE, type ChromaKeyColor } from "@/lib/image-backend/chroma-key";
 
 /**
  * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
@@ -696,7 +697,27 @@ async function runDirectBackendJob(opts: {
     params.autoRestore = false;
   }
 
-  const prompt = intent.args.prompt ?? "";
+  const rawPrompt = intent.args.prompt ?? "";
+
+  // text2img 전용: 투명 배경 여부 판별 + chroma-key 배경 지시 주입.
+  // MCP server.ts generate_image 와 동일 로직 — chat 경로에서도 동일하게 처리한다.
+  let prompt = rawPrompt;
+  let text2imgChromaKey: ChromaKeyColor | null = null;
+  if (kind === "text2img") {
+    const hasSceneDesc = /도시|city|거리|street|숲|forest|하늘|sky|해변|beach|던전|dungeon|실내|indoor|야외|outdoor|네온|neon|사이버|cyber|빗|비\s*내리|눈\s*내리|우천|landscape|배경|정원|garden|공원|park|들판|field|meadow|바다|ocean|sea|산|mountain|마을|village|town|성|castle|환경|environment|scene|setting|배경화면|wallpaper|tileset|타일/.test(rawPrompt.toLowerCase());
+    const wantsTransparent =
+      !hasSceneDesc &&
+      !/white\s*(bg|background)|흰\s*배경/.test(rawPrompt.toLowerCase()) &&
+      ((/transparent|투명/i.test(rawPrompt)) || !(/배경|background/i.test(rawPrompt)));
+    if (wantsTransparent) {
+      const chromaKey: ChromaKeyColor = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase()) ? "magenta" : "green";
+      text2imgChromaKey = chromaKey;
+      prompt = rawPrompt + (chromaKey === "magenta"
+        ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
+        : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency.");
+    }
+  }
+
   const innerJobId = newJobId();
   const generationId = newGenerationId();
 
@@ -727,6 +748,16 @@ async function runDirectBackendJob(opts: {
   } catch (err) {
     updateJob(innerJobId, { status: "failed", error: (err as Error).message, ended_at: Date.now() });
     throw err;
+  }
+
+  // text2img 투명 배경 후처리: chroma-key 제거.
+  // 실패해도 1차 생성 결과를 그대로 사용(graceful degradation).
+  if (text2imgChromaKey) {
+    try {
+      await chromaKeyFile(result.imagePath, text2imgChromaKey);
+    } catch {
+      // 후처리 실패 무시
+    }
   }
 
   const gen = createGeneration({
