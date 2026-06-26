@@ -549,7 +549,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
         // 투명 배경이면 배경 주입: VFX → 검은 배경, 그 외 → chroma-key 배경.
         const genBgInstruction = wantsTransparentGen
           ? genIsVfx
-            ? "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. Post-processing will apply luminance keying to produce true transparency."
+            ? "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. The post-processing pipeline will apply luminance keying — do NOT run remove_chroma_key.py or any chroma-key removal; save output.png as-is on the black background."
             : genChromaKey === "magenta"
               ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
               : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency."
