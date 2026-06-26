@@ -220,8 +220,9 @@ export async function chromaKeyFile(
     // G=0(순수 마젠타 스필) → 100% despill, G=160 이상 → 0%(완전 보존).
     // 자주색/보라색 캐릭터는 G가 높아 자동으로 보호됨.
     if (keyColor === "green") {
-      // 배경 거리에 비례해 선형 감쇠: 가까울수록 강하게, 멀수록 약하게
-      const spillStrength = 1 - bgDist[p] / (DESPILL_RADIUS + 1);
+      // 경계 4px 이내: 강제 100% despill (색 오염 최대 구간).
+      // 이후: 거리 선형 감쇠. bgDist=5→0.67, bgDist=14→0.07.
+      const spillStrength = bgDist[p] <= 4 ? 1.0 : 1 - bgDist[p] / (DESPILL_RADIUS + 1);
       const targetG = Math.max(data[i], data[i + 2]);
       data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * spillStrength);
       if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
