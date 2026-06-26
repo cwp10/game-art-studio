@@ -36,8 +36,12 @@ const KILL_DELAY_MS = 5_000;   // SIGTERM 후 SIGKILL 까지 대기 시간
 const CODEX_TIMEOUT_MS = 600_000; // Codex 실행 최대 대기 시간 (10분). 초과 시 SIGTERM → 에러.
 
 const PROMPT_HEADER =
-  "Use the imagegen skill. " +
-  "Save the result as a PNG file at the path ./output.png in your current working directory. " +
+  "You are a game art image generator. " +
+  "If the prompt is already detailed and specific, follow it exactly without adding extra elements. " +
+  "If the prompt is generic, add tasteful composition framing, lighting mood, and style clarity to improve quality. " +
+  "Generate a single high-quality game asset image using the built-in image_gen tool. " +
+  "Save the result as ./output.png in your current working directory. " +
+  "Do not run remove_chroma_key.py or any background-removal script — the host pipeline handles all post-processing. " +
   "Do not create any other files. Do not write code. Do not explain. Just produce ./output.png.\n\n";
 
 /**
@@ -407,8 +411,7 @@ function buildNaturalPrompt(job: ImageJob): string {
 /** stdout 한 줄을 보고 어떤 단계에 와 있는지 추정. */
 function inferStage(
   line: string,
-): "skill_loading" | "image_generating" | "recovering" | null {
-  if (line.includes("imagegen/SKILL.md")) return "skill_loading";
+): "image_generating" | "recovering" | null {
   if (line.includes("generated_images") && line.includes("find")) return "image_generating";
   if (line.includes("generated_images") && line.includes("cp ")) return "recovering";
   if (line.includes("Done.") && !line.includes("ok")) return null;

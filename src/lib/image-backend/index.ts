@@ -31,7 +31,6 @@ export type ImageJob = {
 
 export type ImageBackendStage =
   | "starting"
-  | "skill_loading"
   | "image_generating"
   | "recovering"
   | "done";

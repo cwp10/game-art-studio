@@ -7,7 +7,6 @@ import type { ToolCallState } from "./chat-state";
 /** 진행 단계의 사람이 읽기 좋은 라벨. */
 const STAGE_LABEL: Record<string, string> = {
   starting: "Codex 시작",
-  skill_loading: "imagegen 스킬 로드",
   image_generating: "이미지 생성 중",
   recovering: "결과 회수 중",
   done: "완료",
