@@ -19,6 +19,7 @@ type Props = {
   generationId: string; // 슬라이싱할 원본 이미지 id
   sessionId: string | null;
   hideHeader?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   onClose: () => void;
   onResult?: (result: {
     generationId: string;
@@ -32,7 +33,7 @@ type ApiResult = { generationId: string; imagePath: string; width: number; heigh
 
 type DragAxis = "top" | "bottom" | "left" | "right";
 
-export function NineSliceEditor({ generationId, sessionId, hideHeader, onClose, onResult }: Props) {
+export function NineSliceEditor({ generationId, sessionId, hideHeader, onBusyChange, onClose, onResult }: Props) {
   const [insetLeft, setInsetLeft] = useState(20);
   const [insetRight, setInsetRight] = useState(20);
   const [insetTop, setInsetTop] = useState(20);
@@ -110,6 +111,7 @@ export function NineSliceEditor({ generationId, sessionId, hideHeader, onClose, 
   ) => {
     if (busy || insetInvalid) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       const body: Record<string, unknown> = {
@@ -132,6 +134,7 @@ export function NineSliceEditor({ generationId, sessionId, hideHeader, onClose, 
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   };
 

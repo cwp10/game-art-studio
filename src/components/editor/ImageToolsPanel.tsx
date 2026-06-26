@@ -22,6 +22,7 @@ type Props = {
   kind?: string;
   sessionId: string | null;
   onClose: () => void;
+  onGeneratingChange?: (generating: boolean) => void;
   onNormalMapResult: (res: { generationId: string; imageUrl: string; width: number; height: number }) => void;
   onNineSliceResult: (res: { generationId: string; width: number; height: number; kind: string }) => void;
   onButtonStateResult: (res: {
@@ -34,7 +35,7 @@ type Props = {
 
 export function ImageToolsPanel({
   generationId, imageUrl, width, height, kind, sessionId,
-  onClose, onNormalMapResult, onNineSliceResult, onButtonStateResult, onButtonStateAddOne,
+  onClose, onGeneratingChange, onNormalMapResult, onNineSliceResult, onButtonStateResult, onButtonStateAddOne,
 }: Props) {
   const tabs = TAB_META.filter(t => !t.hideFor.includes(kind ?? ""));
   const [active, setActive] = useState<Tab>(tabs[0]?.id ?? "normal_map");
@@ -88,6 +89,7 @@ export function ImageToolsPanel({
             width={width}
             height={height}
             hideHeader
+            onBusyChange={onGeneratingChange}
             onResult={onNormalMapResult}
             onClose={onClose}
           />
@@ -97,6 +99,7 @@ export function ImageToolsPanel({
             generationId={generationId}
             sessionId={sessionId}
             hideHeader
+            onBusyChange={onGeneratingChange}
             onResult={onNineSliceResult}
             onClose={onClose}
           />
@@ -106,6 +109,7 @@ export function ImageToolsPanel({
             generationId={generationId}
             sessionId={sessionId}
             hideHeader
+            onBusyChange={onGeneratingChange}
             onResult={onButtonStateResult}
             onAddOne={onButtonStateAddOne}
             onClose={onClose}

@@ -11,11 +11,12 @@ type Props = {
   width: number;
   height: number;
   hideHeader?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   onResult: (result: { generationId: string; imageUrl: string; width: number; height: number }) => void;
   onClose: () => void;
 };
 
-export function NormalMapPanel({ generationId, imageUrl, width, height, hideHeader, onResult, onClose }: Props) {
+export function NormalMapPanel({ generationId, imageUrl, width, height, hideHeader, onBusyChange, onResult, onClose }: Props) {
   const [strength, setStrength] = useState(1.0);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [commitBusy, setCommitBusy] = useState(false);
@@ -27,6 +28,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, hideHead
   async function preview() {
     if (previewBusy || commitBusy) return;
     setPreviewBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       const res = await jsonFetch("/api/normal-map", "POST", { generationId, strength, previewOnly: true });
@@ -41,12 +43,14 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, hideHead
       setError((e as Error).message);
     } finally {
       setPreviewBusy(false);
+      onBusyChange?.(false);
     }
   }
 
   async function commit() {
     if (previewBusy || commitBusy) return;
     setCommitBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       const res = await jsonFetch("/api/normal-map", "POST", { generationId, strength });
@@ -60,6 +64,7 @@ export function NormalMapPanel({ generationId, imageUrl, width, height, hideHead
       setError((e as Error).message);
     } finally {
       setCommitBusy(false);
+      onBusyChange?.(false);
     }
   }
 

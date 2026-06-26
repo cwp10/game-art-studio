@@ -207,7 +207,7 @@ export function ChatLayout() {
     return () => loadAbort.abort();
   }, [state.activeSessionId]);
 
-  // 캔버스·스프라이트 등 chat 외 생성 경로에서 호출 — generatingSessions 동기화
+  // 캔버스·스프라이트 등 chat 외 생성 경로에서 호출 — generatingSessions + generating 동기화
   const markSessionGenerating = useCallback((generating: boolean) => {
     const sid = stateRef.current.activeSessionId;
     if (!sid) return;
@@ -218,6 +218,7 @@ export function ChatLayout() {
       generatingSessionsRef.current.delete(sid);
       dispatch({ type: "remove_generating_session", sessionId: sid });
     }
+    dispatch({ type: "set_generating", generating });
   }, []);
 
   // 새 세션 — 생성 중에는 차단 (UI 잠금 외 키보드 단축키 등 모든 경로 방어)
@@ -436,6 +437,7 @@ export function ChatLayout() {
       const isSheetBase = editing.kind === "spritesheet";
       if (payload.mode === "b-precise") {
         // 결정적 색교체 — codex/Claude 우회, 전용 API 직접 호출 후 합성 결과 카드 삽입.
+        markSessionGenerating(true);
         try {
           const recolorSessionId = stateRef.current.activeSessionId;
           const res = await recolorImage({
@@ -455,6 +457,8 @@ export function ChatLayout() {
           });
         } catch (e) {
           console.error("[reskin-precise]", e);
+        } finally {
+          markSessionGenerating(false);
         }
         setEditing(null);
         return;
@@ -870,6 +874,7 @@ export function ChatLayout() {
             kind={imageToolsOpen.kind}
             sessionId={state.activeSessionId}
             onClose={closeImageTools}
+            onGeneratingChange={markSessionGenerating}
             onNormalMapResult={async res => {
               const sid = stateRef.current.activeSessionId;
               if (sid) {

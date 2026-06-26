@@ -24,6 +24,7 @@ type Props = {
   generationId: string;
   sessionId: string | null;
   hideHeader?: boolean;
+  onBusyChange?: (busy: boolean) => void;
   onClose: () => void;
   /** 3종 생성 성공 시 1회 호출 — 부모가 chat 카드 3개를 일괄 삽입. */
   onResult?: (results: {
@@ -41,7 +42,7 @@ const LABELS: Record<StateKey, string> = {
   pressed: "Pressed",
 };
 
-export function ButtonStateEditor({ generationId, sessionId, hideHeader, onClose, onResult, onAddOne }: Props) {
+export function ButtonStateEditor({ generationId, sessionId, hideHeader, onBusyChange, onClose, onResult, onAddOne }: Props) {
   const [hoverBrightness, setHoverBrightness] = useState(1.25);
   const [hoverSaturation, setHoverSaturation] = useState(1.15);
   const [pressedBrightness, setPressedBrightness] = useState(0.75);
@@ -57,6 +58,7 @@ export function ButtonStateEditor({ generationId, sessionId, hideHeader, onClose
   const run = async () => {
     if (busy) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError(null);
     try {
       const res = await jsonFetch("/api/button-states", "POST", {
@@ -81,6 +83,7 @@ export function ButtonStateEditor({ generationId, sessionId, hideHeader, onClose
       setError((e as Error).message);
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   };
 
