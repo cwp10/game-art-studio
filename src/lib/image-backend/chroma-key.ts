@@ -36,10 +36,26 @@ export const GREEN_SUBJECT_RE =
  * GREEN_SUBJECT_RE 와 함께 codex-exec.ts detectBgMode() 에서 우선순위 결정에 쓴다.
  */
 export const VFX_EFFECT_RE =
-  /\b(smoke|fire|flame|glow|explosion|explode|aura|lightning|fog|mist|spark|ember|blast|flare|beam|burst|particle|vfx|연기|불꽃|불길|글로우|폭발|오라|번개|안개|파티클|이펙트|빔|버스트)\b/i;
+  /\b(smoke|fire|flame|glow|explosion|explode|aura|lightning|fog|mist|spark|ember|blast|flare|beam|burst|particle|vfx)\b|연기|불꽃|불길|글로우|폭발|오라|번개|안개|파티클|이펙트|빔|버스트/i;
 
 type Logger = (line: string) => void;
 const noop: Logger = () => {};
+
+/** PNG를 tmpSuffix 임시 파일에 쓴 뒤 원자적으로 filePath로 교체. */
+export async function atomicSavePng(
+  filePath: string,
+  tmpSuffix: string,
+  build: (tmp: string) => Promise<unknown>,
+): Promise<void> {
+  const tmpPath = filePath + tmpSuffix;
+  try {
+    await build(tmpPath);
+    fs.renameSync(tmpPath, filePath);
+  } finally {
+    // rename 성공 시 .tmp 는 이미 사라짐. write/rename 사이 크래시·예외로 남은 고아만 정리.
+    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+  }
+}
 
 /**
  * chroma-key 처리 (in-place). keyColor 에 따라 keyness 정의가 다름:
@@ -181,7 +197,7 @@ export async function chromaKeyFile(
   // 3.6. bgKey 까지의 거리장(BFS, 반경 DESPILL_RADIUS 까지만). despill 존을 배경 경계
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
-  const DESPILL_RADIUS = 100; // 소프트 엣지(연기·글로우) fringe 흡수 — 내부 키색은 bgDist > 반경으로 보호
+  const DESPILL_RADIUS = 14; // 배경 경계 fringe 흡수 — VFX 이펙트는 luma-key로 분기되므로 14 유지
   const bgDist = new Uint8Array(N).fill(255); // 255 = 미방문 sentinel (> DESPILL_RADIUS)
   {
     const bfs: number[] = [];
@@ -223,54 +239,41 @@ export async function chromaKeyFile(
     const k = keyness(i);
     if (k <= fringeFloor) continue;
     // 배경 반경 이내: 전체 fringe 처리. 더 먼 깊은 내부: 아주 약한 spill(k≤15)만 처리 — 녹색 옷·슬라임 본체 보존.
-    if (bgDist[p] > DESPILL_RADIUS && k > 15) continue;
+    if (bgDist[p] > DESPILL_RADIUS) continue;
     const origKeyChannel = keyColor === "green" ? data[i + 1] : Math.min(data[i], data[i + 2]);
     const ratio = origKeyChannel > 0 ? Math.max(0, Math.min(1, k / origKeyChannel)) : 0;
-    // alpha_f: 전경(피사체) 기여 비율. 최소 0.05 설정으로 극값 방지.
-    const alpha_f = Math.max(0.05, 1 - ratio);
-    // Un-premultiply: pixel = fg * alpha_f + bg * ratio 에서 fg 역산.
-    // 배경색 기여분을 제거하고 전경색을 복원 — R·B도 boost해 불꽃·이펙트 색상 보존.
-    if (keyColor === "green") {
-      // bg = (0, 255, 0)
-      data[i]     = Math.min(255, Math.round(data[i] / alpha_f));
-      data[i + 1] = Math.max(0, Math.min(255, Math.round((data[i + 1] - 255 * ratio) / alpha_f)));
-      data[i + 2] = Math.min(255, Math.round(data[i + 2] / alpha_f));
-    } else {
-      // bg = (255, 0, 255)
-      data[i]     = Math.max(0, Math.min(255, Math.round((data[i] - 255 * ratio) / alpha_f)));
-      data[i + 1] = Math.min(255, Math.round(data[i + 1] / alpha_f));
-      data[i + 2] = Math.max(0, Math.min(255, Math.round((data[i + 2] - 255 * ratio) / alpha_f)));
+    // G>80 픽셀(보라/바이올렛 캐릭터)은 마젠타 despill 전체 건너뜀.
+    if (keyColor === "magenta" && data[i + 1] > 80) continue;
+    // alpha_f < 0.1 이면 픽셀이 사실상 순수 배경색 — R/B 부스팅 금지(×10+ 증폭 방지).
+    const alpha_f = 1 - ratio;
+    if (alpha_f > 0.1) {
+      // Un-premultiply: pixel = fg * alpha_f + bg * ratio 에서 fg 역산.
+      if (keyColor === "green") {
+        // bg = (0, 255, 0)
+        data[i]     = Math.min(255, Math.round(data[i] / alpha_f));
+        data[i + 1] = Math.max(0, Math.min(255, Math.round((data[i + 1] - 255 * ratio) / alpha_f)));
+        data[i + 2] = Math.min(255, Math.round(data[i + 2] / alpha_f));
+      } else {
+        // bg = (255, 0, 255)
+        data[i]     = Math.max(0, Math.min(255, Math.round((data[i] - 255 * ratio) / alpha_f)));
+        data[i + 1] = Math.min(255, Math.round(data[i + 1] / alpha_f));
+        data[i + 2] = Math.max(0, Math.min(255, Math.round((data[i + 2] - 255 * ratio) / alpha_f)));
+      }
     }
     // AND합성: 크로마키 요구 알파와 기존 알파 중 더 투명한 쪽.
     const chromaAlpha = Math.round(alpha_f * 255);
     data[i + 3] = Math.min(data[i + 3], chromaAlpha);
   }
 
-  // Alpha erosion: 배경 경계 1px 이내 픽셀을 투명화해 despill 후 남은 fringe 잔재 제거.
-  // 이펙트·소프트 경계 이미지에서 haloing을 확실히 없앤다.
+  // Alpha erosion: 배경 경계 1px 이내 픽셀을 무조건 투명화해 despill 후 남은 fringe 잔재 제거.
   for (let p = 0; p < N; p++) {
-    if (data[p * ch + 3] === 0) continue;
     if (bgDist[p] > 1) continue;
-    const pi = p * ch;
-    const ek = keyness(pi);
-    if (ek <= fringeFloor) continue;
-    const eOrig = keyColor === "green" ? data[pi + 1] : Math.min(data[pi], data[pi + 2]);
-    const eRatio = eOrig > 0 ? Math.max(0, Math.min(1, ek / eOrig)) : 0;
-    data[pi + 3] = Math.min(data[pi + 3], Math.round((1 - eRatio) * 255));
+    data[p * ch + 3] = 0;
   }
 
-  const tmpPath = filePath + ".chroma.tmp";
-  try {
-    await sharp(data, {
-      raw: { width: W, height: H, channels: ch as 1 | 2 | 3 | 4 },
-    })
-      .png()
-      .toFile(tmpPath);
-    fs.renameSync(tmpPath, filePath);
-  } finally {
-    // rename 성공 시 .tmp 는 이미 사라짐. write/rename 사이 크래시·예외로 남은 고아만 정리.
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-  }
+  await atomicSavePng(filePath, ".chroma.tmp", (tmp) =>
+    sharp(data, { raw: { width: W, height: H, channels: ch as 1 | 2 | 3 | 4 } }).png().toFile(tmp),
+  );
   log(`chromaKeyFile(${keyColor}): hardThresh=${hardThresh} keyedOut=${keyedOut}/${N}`);
   return keyedOut;
 }
@@ -285,7 +288,7 @@ export async function lumaKeyFile(
   filePath: string,
   log: (msg: string) => void = () => {},
 ): Promise<number> {
-  const raw = await sharp(filePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const raw = await sharp(filePath).toColorspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const { data, info } = raw;
   const W = info.width, H = info.height, N = W * H;
   let keyedOut = 0;
@@ -306,15 +309,9 @@ export async function lumaKeyFile(
     }
   }
 
-  const tmpPath = filePath + ".luma.tmp";
-  try {
-    await sharp(data, { raw: { width: W, height: H, channels: 4 } })
-      .png()
-      .toFile(tmpPath);
-    fs.renameSync(tmpPath, filePath);
-  } finally {
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-  }
+  await atomicSavePng(filePath, ".luma.tmp", (tmp) =>
+    sharp(data, { raw: { width: W, height: H, channels: 4 } }).png().toFile(tmp),
+  );
   log(`lumaKeyFile: keyedOut=${keyedOut}/${N}`);
   return keyedOut;
 }

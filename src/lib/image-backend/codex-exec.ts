@@ -632,7 +632,8 @@ export class CodexExecBackend implements ImageBackend {
     if (job.kind === "remove_bg") {
       if (detectBgMode(job.prompt) === "luma") {
         onProgress("recovering", "luma key post-process");
-        await lumaKeyFile(destPath);
+        const lumaKeyedOut = await lumaKeyFile(destPath);
+        await fs.appendFile(logFile, `\n# lumaKeyFile: keyedOut=${lumaKeyedOut}`);
       } else {
         onProgress("recovering", "chroma key post-process");
         await chromaKeyAuto(destPath, job.prompt);

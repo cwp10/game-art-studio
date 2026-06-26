@@ -10,13 +10,13 @@
  *  - normalizeSpritesheetCells: 글로벌 컴포넌트 라벨링 → 시트-전역 단일 scale-to-fit
  *    → 앵커 전략별 정렬(feet/hip/center/top, footY 중앙값 robust 보정)
  */
-import fs from "node:fs";
 import sharp from "sharp";
+import { atomicSavePng } from "./chroma-key";
 
 // chromaKeyFile / ChromaKeyColor 는 공유 chroma-key.ts 로 이동. 기존 import 경로 유지를 위해
 // 여기서 re-export 한다(server.ts·shared.ts·spritesheet-handler.ts·sprite-frame-patch.ts 가
 // 이 모듈에서 가져온다).
-export { chromaKeyFile, type ChromaKeyColor } from "./chroma-key";
+export { chromaKeyFile, atomicSavePng, type ChromaKeyColor } from "./chroma-key";
 
 export type AnchorStrategy = "auto" | "feet" | "hip" | "center" | "top";
 export type SubjectType = "character" | "effect" | "object";
@@ -686,19 +686,12 @@ export async function normalizeSpritesheetCells(
   const bg = wantsTransparent
     ? { r: 0, g: 0, b: 0, alpha: 0 }
     : { r: 255, g: 255, b: 255, alpha: 1 };
-  const tmpPath = filePath + ".norm.tmp";
-  try {
-    await sharp({
-      create: { width: W, height: H, channels: 4, background: bg },
-    })
+  await atomicSavePng(filePath, ".norm.tmp", (tmp) =>
+    sharp({ create: { width: W, height: H, channels: 4, background: bg } })
       .composite(layers)
       .png()
-      .toFile(tmpPath);
-    fs.renameSync(tmpPath, filePath);
-  } finally {
-    // rename 성공 시 .tmp 는 이미 사라짐. write/rename 사이 크래시·예외로 남은 고아만 정리.
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-  }
+      .toFile(tmp),
+  );
   log(
     `normalizeSpritesheetCells: ${cols}x${rows} cells, anchor=${alignKind} scale=${scale.toFixed(3)} ` +
       `${layers.length} non-empty (maxBb=${maxBbW}x${maxBbH})`,
@@ -817,18 +810,9 @@ export async function fallbackBgRemove(
     return 0;
   }
 
-  const tmpPath = filePath + ".fallback.tmp";
-  try {
-    await sharp(data, {
-      raw: { width: W, height: H, channels: ch as 1 | 2 | 3 | 4 },
-    })
-      .png()
-      .toFile(tmpPath);
-    fs.renameSync(tmpPath, filePath);
-  } finally {
-    // rename 성공 시 .tmp 는 이미 사라짐. write/rename 사이 크래시·예외로 남은 고아만 정리.
-    if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
-  }
+  await atomicSavePng(filePath, ".fallback.tmp", (tmp) =>
+    sharp(data, { raw: { width: W, height: H, channels: ch as 1 | 2 | 3 | 4 } }).png().toFile(tmp),
+  );
   log(
     `fallbackBgRemove: bg=(${bgR},${bgG},${bgB}) tol=${FILL_TOL} removed=${removed}/${N}`,
   );
