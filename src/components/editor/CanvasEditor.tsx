@@ -110,6 +110,7 @@ type Props = {
   seedGenerationId: string;
   sessionId: string | null;
   busy?: boolean;
+  onGeneratingChange?: (generating: boolean) => void;
   onClose: () => void;
   onComposited: (r: { generationId: string; width: number; height: number }) => void;
   onRemoveBg: (
@@ -242,6 +243,7 @@ export function CanvasEditor({
   seedGenerationId,
   sessionId,
   busy,
+  onGeneratingChange,
   onClose,
   onComposited,
   onRemoveBg,
@@ -1658,6 +1660,7 @@ export function CanvasEditor({
   const handleAIComposite = useCallback(async () => {
     if (layers.length === 0 || composing || composingAI) return;
     setComposingAI(true);
+    onGeneratingChange?.(true);
     setError(null);
     try {
       const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
@@ -1703,8 +1706,9 @@ export function CanvasEditor({
       setError((e as Error).message);
     } finally {
       setComposingAI(false);
+      onGeneratingChange?.(false);
     }
-  }, [layers, composing, composingAI, sessionId, preset.w, preset.h, customSize, onComposited]);
+  }, [layers, composing, composingAI, sessionId, preset.w, preset.h, customSize, onComposited, onGeneratingChange]);
 
   // 스테이지에 표시할 프레임 크기 — 출력 종횡비를 고정 영역에 contain-fit.
   const aspect = canvasSize.w && canvasSize.h ? canvasSize.w / canvasSize.h : 4 / 3;

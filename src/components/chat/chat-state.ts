@@ -88,8 +88,10 @@ export type ChatAction =
     }
   | {
       /** 결정적 연산(정밀 색교체 등) 결과를 합성 assistant 카드로 chat 에 표시.
-       *  external_upload 과 동일하게 message_id 없는 generation 이라 재로드 시엔 라이브러리에만 남음. */
+       *  external_upload 과 동일하게 message_id 없는 generation 이라 재로드 시엔 라이브러리에만 남음.
+       *  sessionId 를 넘기면 현재 activeSessionId 와 다를 때 무시(세션 전환 중 결과 누수 방지). */
       type: "add_result_card";
+      sessionId?: string | null;
       tempId: string;
       userText: string;
       generationId: string;
@@ -455,6 +457,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
     }
     case "add_result_card": {
+      // 세션 전환 중 결과 누수 방지 — 생성 시작 시점의 세션과 현재 세션이 다르면 무시.
+      if (action.sessionId != null && state.activeSessionId !== action.sessionId) return state;
       // 결정적 연산 결과 → 합성 assistant turn (external_upload 과 동일 패턴).
       const fakeToolCallId = "res-" + action.generationId;
       return {

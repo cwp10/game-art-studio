@@ -204,6 +204,19 @@ export function ChatLayout() {
     return () => loadAbort.abort();
   }, [state.activeSessionId]);
 
+  // 캔버스·스프라이트 등 chat 외 생성 경로에서 호출 — generatingSessions 동기화
+  const markSessionGenerating = useCallback((generating: boolean) => {
+    const sid = stateRef.current.activeSessionId;
+    if (!sid) return;
+    if (generating) {
+      generatingSessionsRef.current.add(sid);
+      dispatch({ type: "add_generating_session", sessionId: sid });
+    } else {
+      generatingSessionsRef.current.delete(sid);
+      dispatch({ type: "remove_generating_session", sessionId: sid });
+    }
+  }, []);
+
   // 새 세션 — 생성 중에는 차단 (UI 잠금 외 키보드 단축키 등 모든 경로 방어)
   const handleNew = useCallback(() => {
     const s = stateRef.current;
@@ -421,6 +434,7 @@ export function ChatLayout() {
       if (payload.mode === "b-precise") {
         // 결정적 색교체 — codex/Claude 우회, 전용 API 직접 호출 후 합성 결과 카드 삽입.
         try {
+          const recolorSessionId = stateRef.current.activeSessionId;
           const res = await recolorImage({
             parentGenerationId: genId,
             mappings: payload.mappings,
@@ -428,6 +442,7 @@ export function ChatLayout() {
           });
           dispatch({
             type: "add_result_card",
+            sessionId: recolorSessionId,
             tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
             userText: "🎨 정밀 색교체",
             generationId: res.generationId,
@@ -599,6 +614,7 @@ export function ChatLayout() {
       galleryInsert(sid, payload.generationId).catch(e => console.error("[gallery-insert]", e));
       dispatch({
         type: "add_result_card",
+        sessionId: sid,
         tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
         // gallery-insert API(route.ts)의 영속화와 동일하게 80자 요약 — 라이브/리로드 일관.
         userText: payload.prompt?.slice(0, 80) || "🖼 갤러리에서 추가",
@@ -652,7 +668,7 @@ export function ChatLayout() {
               imageHeight={editing.height}
               sessionId={state.activeSessionId}
               sheetGenerationId={editing.generationId}
-              onRegenBusyChange={setSpriteRegenBusy}
+              onRegenBusyChange={busy => { setSpriteRegenBusy(busy); markSessionGenerating(busy); }}
               onOverlay={handleSpriteOverlay}
               onVfxOverlay={handleVfxOverlay}
               onSheetUpdated={res => {
@@ -661,6 +677,7 @@ export function ChatLayout() {
                 // tempId 는 영속된 assistant 메시지 id — reopen 시 user 버블 키가 안정적으로 일치.
                 dispatch({
                   type: "add_result_card",
+                  sessionId: state.activeSessionId,
                   tempId: res.messageId,
                   userText: "✏️ 프레임 재생성",
                   generationId: res.generationId,
@@ -681,6 +698,7 @@ export function ChatLayout() {
                 // 유지 — 사용자가 추가 방향 보정을 이어갈 수 있게.
                 dispatch({
                   type: "add_result_card",
+                  sessionId: state.activeSessionId,
                   tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
                   userText: "🎞️ 보정된 스프라이트시트",
                   generationId: res.generationId,
@@ -850,12 +868,13 @@ export function ChatLayout() {
             sessionId={state.activeSessionId}
             onClose={closeImageTools}
             onNormalMapResult={async res => {
-              const sid = state.activeSessionId;
+              const sid = stateRef.current.activeSessionId;
               if (sid) {
                 galleryInsert(sid, res.generationId).catch(e => console.error("[normal-map gallery-insert]", e));
               }
               dispatch({
                 type: "add_result_card",
+                sessionId: sid,
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
                 userText: "🗺️ 노멀맵",
                 generationId: res.generationId,
@@ -868,6 +887,7 @@ export function ChatLayout() {
             onNineSliceResult={res => {
               dispatch({
                 type: "add_result_card",
+                sessionId: state.activeSessionId,
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
                 userText:
                   res.kind === "nine_slice_scaled"
@@ -883,6 +903,7 @@ export function ChatLayout() {
               closeImageTools();
             }}
             onButtonStateResult={res => {
+              const bsSid = state.activeSessionId;
               const labels: Array<["normal" | "hover" | "pressed", string]> = [
                 ["normal", "🎮 버튼 Normal"],
                 ["hover", "🎮 버튼 Hover"],
@@ -891,6 +912,7 @@ export function ChatLayout() {
               for (const [k, userText] of labels) {
                 dispatch({
                   type: "add_result_card",
+                  sessionId: bsSid,
                   tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
                   userText,
                   generationId: res[k].generationId,
@@ -904,6 +926,7 @@ export function ChatLayout() {
               const labels = { normal: "🎮 버튼 Normal", hover: "🎮 버튼 Hover", pressed: "🎮 버튼 Pressed" };
               dispatch({
                 type: "add_result_card",
+                sessionId: state.activeSessionId,
                 tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
                 userText: labels[res.state],
                 generationId: res.generationId,
@@ -921,6 +944,7 @@ export function ChatLayout() {
           seedGenerationId={canvasOpen.seedGenerationId}
           sessionId={state.activeSessionId}
           busy={state.generating}
+          onGeneratingChange={markSessionGenerating}
           onClose={closeCanvas}
           onComposited={async res => {
             // 활성 세션이 없으면 새 세션을 만들어 활성화 — handleGalleryInsert 와 동일.
@@ -941,6 +965,7 @@ export function ChatLayout() {
             const userText = gen?.prompt?.slice(0, 80) || "🎨 캔버스 합성";
             dispatch({
               type: "add_result_card",
+              sessionId: sid,
               tempId: "tmp-" + Math.random().toString(36).slice(2, 8),
               userText,
               generationId: res.generationId,
