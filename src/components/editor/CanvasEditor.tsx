@@ -1457,6 +1457,7 @@ export function CanvasEditor({
 
   const onHandleDown = useCallback(
     (e: React.PointerEvent, type: "corner" | "l" | "r" | "t" | "b" | "rot", layer: Layer) => {
+      if (e.button === 2) return;
       e.preventDefault();
       e.stopPropagation();
       const frame = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]");
@@ -1606,6 +1607,7 @@ export function CanvasEditor({
   } | null>(null);
   const onLayerBodyDown = useCallback(
     (e: React.PointerEvent, layer: Layer) => {
+      if (e.button === 2) return; // 오른쪽 클릭 → 팬으로 버블업
       e.preventDefault();
       e.stopPropagation();
       setSelectedLayerId(layer.id);
@@ -2030,6 +2032,10 @@ export function CanvasEditor({
           <div
             ref={stageRef}
             className="relative m-4 flex flex-1 items-center justify-center overflow-hidden rounded-xl border border-border bg-[#0c0c0d]"
+            onPointerDown={zp.onRightPanDown}
+            onPointerMove={zp.onPanPointerMove}
+            onPointerUp={zp.onPanPointerUp}
+            onContextMenu={e => e.preventDefault()}
             onDragOver={e => {
               if (!e.dataTransfer.types.includes("Files")) return;
               e.preventDefault();

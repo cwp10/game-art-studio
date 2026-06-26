@@ -34,6 +34,8 @@ export type ZoomPan = {
   onPanPointerDown: (e: React.PointerEvent) => void;
   onPanPointerMove: (e: React.PointerEvent) => void;
   onPanPointerUp: (e: React.PointerEvent) => void;
+  /** 오른쪽 클릭 드래그로 팬. panMode 무관하게 항상 동작. */
+  onRightPanDown: (e: React.PointerEvent) => void;
   /** pan 을 dx/dy 만큼 이동. 화살표·WASD 키 이동에 사용. */
   movePan: (dx: number, dy: number) => void;
 };
@@ -94,6 +96,18 @@ export function useZoomPan(): ZoomPan {
     [panMode, view.pan.x, view.pan.y],
   );
 
+  const onRightPanDown = useCallback(
+    (e: React.PointerEvent) => {
+      if (e.button !== 2) return;
+      e.preventDefault();
+      try {
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      } catch {}
+      dragRef.current = { sx: e.clientX, sy: e.clientY, px: view.pan.x, py: view.pan.y };
+    },
+    [view.pan.x, view.pan.y],
+  );
+
   const onPanPointerMove = useCallback((e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
@@ -125,6 +139,7 @@ export function useZoomPan(): ZoomPan {
     onPanPointerDown,
     onPanPointerMove,
     onPanPointerUp,
+    onRightPanDown,
     movePan,
   };
 }
