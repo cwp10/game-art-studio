@@ -285,6 +285,8 @@ export function CanvasEditor({
   // 분리(오려내기) — 부위명 입력 + 진행 상태. 추출 결과는 새 레이어로 추가.
   const [extractInput, setExtractInput] = useState("");
   const [extracting, setExtracting] = useState(false);
+  // 영역 편집 서브모드 — brush(칠하기) / lasso(올가미).
+  const [inpaintMode, setInpaintMode] = useState<"brush" | "lasso">("brush");
   // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반) / lasso(올가미 폴리곤).
   // brush·lasso 모두 brushCanvasRef(원본 해상도·레이어 transform 공유)에 빨강으로 칠해 handleExtractBrush 로 마스크화.
   const [extractMode, setExtractMode] = useState<"text" | "brush" | "lasso">("text");
@@ -624,6 +626,9 @@ export function CanvasEditor({
       setExtractAiLoading(false);
     }
   }, [extractAiLoading, layers, selectedLayerId]);
+
+  // 올가미가 활성인 조건 — 영역 편집(inpaint) + 레이어 분리(extract) 양쪽에서 공유.
+  const isLassoActive = (tool === "inpaint" && inpaintMode === "lasso") || (tool === "extract" && extractMode === "lasso");
 
   // 올가미 상태 초기화(취소) — 오버레이 클리어 + 정점/고무줄 비우기. closeTool/clearBrush 가 호출하므로
   // TDZ 회피를 위해 이른 위치에 둔다(refs·setLassoPtCount 외 의존 없음).
@@ -1205,7 +1210,7 @@ export function CanvasEditor({
 
   // 오버레이 캔버스 크기 동기화 — data-canvas-frame(부모) 크기에 맞춤(ResizeObserver).
   useLayoutEffect(() => {
-    if (tool !== "extract" || extractMode !== "lasso") return;
+    if (!isLassoActive) return;
     const canvas = lassoOverlayRef.current;
     if (!canvas) return;
     const frame = canvas.parentElement;
@@ -1221,11 +1226,11 @@ export function CanvasEditor({
     const ro = new ResizeObserver(sync);
     ro.observe(frame);
     return () => ro.disconnect();
-  }, [tool, extractMode, zp.zoom, redrawLassoOverlay]);
+  }, [isLassoActive, zp.zoom, redrawLassoOverlay]);
 
   // poly/magnetic 키보드 — Backspace(마지막 점)/Esc(전체 취소)/Enter(완료). 입력 포커스 시 무시.
   useEffect(() => {
-    if (tool !== "extract" || extractMode !== "lasso" || lassoType === "free") return;
+    if (!isLassoActive || lassoType === "free") return;
     const handler = (e: KeyboardEvent) => {
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
@@ -1244,11 +1249,11 @@ export function CanvasEditor({
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [tool, extractMode, lassoType, redrawLassoOverlay, clearLassoState, commitLassoPoints]);
+  }, [isLassoActive, lassoType, redrawLassoOverlay, clearLassoState, commitLassoPoints]);
 
   // 자석 올가미 엣지 맵 초기화 — magnetic 전환·레이어 변경 시 Sobel gradient 1회 계산.
   useEffect(() => {
-    if (tool !== "extract" || extractMode !== "lasso" || lassoType !== "magnetic") return;
+    if (!isLassoActive || lassoType !== "magnetic") return;
     const layer = layers.find(l => l.id === selectedLayerId);
     if (!layer) return;
     lassoEdgeGradRef.current = null;
@@ -2114,30 +2119,24 @@ export function CanvasEditor({
                           width={inpaintNat.w}
                           height={inpaintNat.h}
                           className={`absolute inset-0 h-full w-full cursor-crosshair ${
-                            tool === "extract" && extractMode === "lasso" ? "opacity-0" : "opacity-50"
+                            isLassoActive ? "opacity-0" : "opacity-50"
                           }`}
                           style={{
                             touchAction: "none",
                             // poly/magnetic 은 오버레이가 클릭을 받아야 하므로 brushCanvas 는 포인터 무시.
                             pointerEvents:
-                              tool === "extract" && extractMode === "lasso" && lassoType !== "free"
+                              isLassoActive && lassoType !== "free"
                                 ? "none"
                                 : "auto",
                           }}
                           onPointerDown={e =>
-                            tool === "extract" && extractMode === "lasso"
-                              ? onLassoDown(e)
-                              : onBrushDown(e, layer)
+                            isLassoActive ? onLassoDown(e) : onBrushDown(e, layer)
                           }
                           onPointerMove={e =>
-                            tool === "extract" && extractMode === "lasso"
-                              ? onLassoMove(e)
-                              : onBrushMove(e, layer)
+                            isLassoActive ? onLassoMove(e) : onBrushMove(e, layer)
                           }
                           onPointerUp={e =>
-                            tool === "extract" && extractMode === "lasso"
-                              ? onLassoUp(e)
-                              : onBrushUp(e)
+                            isLassoActive ? onLassoUp(e) : onBrushUp(e)
                           }
                         />
                       )}
@@ -2146,7 +2145,7 @@ export function CanvasEditor({
                   {/* 올가미 경로 시각화 오버레이 — 화면 공간(artboard 좌표계). 흰선+검정 점선으로 경로를 그린다.
                       free 는 pointer 를 흘려보내 아래 brushCanvas 가 드래그를 받고, poly/magnetic 은 여기서
                       클릭/이동/더블클릭을 직접 처리한다. */}
-                  {tool === "extract" && extractMode === "lasso" && (
+                  {isLassoActive && (
                     <canvas
                       ref={lassoOverlayRef}
                       className="absolute inset-0 z-10"
@@ -2614,253 +2613,262 @@ export function CanvasEditor({
           <div className="pointer-events-auto flex max-w-[840px] flex-wrap items-center gap-2 rounded-xl border border-[color:var(--accent)]/50 bg-bg-card/95 px-3 py-2 shadow-2xl backdrop-blur">
             {tool === "inpaint" ? (
               <>
-                <Wand2 size={14} className="text-[color:var(--accent)]" />
-                <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
-                {brushControls}
-                {/* 참조 이미지 팝오버(선택) — 선택 시 인페인트의 둘째 첨부(참조)로 전달. */}
-                <div className="relative">
-                  <button
-                    onClick={() => setRefOpen(o => !o)}
-                    className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${
-                      refId
-                        ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary"
-                        : "border-border text-text-muted hover:text-text-primary"
-                    }`}
-                    title="참조 이미지 — 프롬프트와 함께 인페인트에 사용(선택)"
-                  >
-                    <ImageIcon size={12} /> 참조{refId ? " ✓" : ""}
-                  </button>
-                  {refOpen && (
-                    <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-lg border border-border bg-bg-panel p-2 shadow-xl">
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-[11px] text-text-muted">참조 이미지 (선택)</span>
-                        <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[10px]">
-                          {(["session", "gallery"] as const).map(scope => (
-                            <button
-                              key={scope}
-                              onClick={() => setRefScope(scope)}
-                              className={`rounded px-1.5 py-0.5 ${
-                                refScope === scope
-                                  ? "bg-[color:var(--accent)]/20 text-text-primary"
-                                  : "text-text-muted hover:text-text-primary"
-                              }`}
+                <div className="flex w-full flex-col gap-1.5">
+                  {/* 1행: 아이콘 + 레이블 + 서브모드 토글 + 도구 컨트롤 + × */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <Wand2 size={14} className="text-[color:var(--accent)]" />
+                    <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
+                    <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                      <button
+                        onClick={() => { if (inpaintMode !== "brush") { setInpaintMode("brush"); clearLassoState(); } }}
+                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${inpaintMode === "brush" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                      >
+                        <Brush size={12} /> 브러시
+                      </button>
+                      <button
+                        onClick={() => { if (inpaintMode !== "lasso") { setInpaintMode("lasso"); clearBrush(); } }}
+                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${inpaintMode === "lasso" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                      >
+                        <Lasso size={12} /> 올가미
+                      </button>
+                    </div>
+                    {inpaintMode === "brush" && brushControls}
+                    {inpaintMode === "lasso" && (
+                      <>
+                        <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                          {(["free", "poly", "magnetic"] as const).map(t => (
+                            <button key={t} onClick={() => { setLassoType(t); clearLassoState(); }}
+                              className={`flex h-6 items-center rounded px-2 text-[11px] ${lassoType === t ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                              title={t === "free" ? "자유 드래그" : t === "poly" ? "다각형" : "자석"}
                             >
-                              {scope === "session" ? "세션" : "갤러리"}
+                              {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
                             </button>
                           ))}
                         </div>
-                      </div>
-                      {(() => {
-                        const list = refScope === "session" ? sessionRefs : galleryRefs;
-                        if (list === null)
-                          return <p className="py-2 text-center text-[10px] text-text-muted/60">불러오는 중…</p>;
-                        if (list.length === 0)
-                          return <p className="py-2 text-center text-[10px] text-text-muted/60">이미지 없음</p>;
-                        return (
-                          <div className="grid max-h-40 grid-cols-4 gap-1 overflow-y-auto">
-                            {list.map(g => {
-                              const sel = refId === g.id;
-                              return (
-                                <button
-                                  key={g.id}
-                                  onClick={() => setRefId(sel ? null : g.id)}
-                                  className={`relative aspect-square overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/8px_8px] ${
-                                    sel
-                                      ? "border-[color:var(--accent)] ring-1 ring-[color:var(--accent)]"
-                                      : "border-border hover:border-[color:var(--accent)]/50"
-                                  }`}
-                                  title={g.prompt ?? g.id}
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={`/api/images/${g.id}`} alt="" className="h-full w-full object-contain" />
-                                  {sel && (
-                                    <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[8px] font-bold text-white">
-                                      ✓
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
+                        <button onClick={clearBrush} className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary">전체지우기</button>
+                        {lassoType !== "free" && lassoPtCount >= 3 && (
+                          <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary">완료 (Enter)</button>
+                        )}
+                      </>
+                    )}
                     </div>
-                  )}
+                    <button onClick={closeTool} className="flex-none rounded p-1 text-text-muted hover:text-text-primary"><X size={14} /></button>
+                  </div>
+                  {/* 2행: 참조 + 프롬프트 입력 + 실행 버튼들 */}
+                  <div className="flex items-center gap-2">
+                    {/* 참조 이미지 팝오버(선택) — 선택 시 인페인트의 둘째 첨부(참조)로 전달. */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setRefOpen(o => !o)}
+                        className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${
+                          refId
+                            ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary"
+                            : "border-border text-text-muted hover:text-text-primary"
+                        }`}
+                        title="참조 이미지 — 프롬프트와 함께 인페인트에 사용(선택)"
+                      >
+                        <ImageIcon size={12} /> 참조{refId ? " ✓" : ""}
+                      </button>
+                      {refOpen && (
+                        <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-lg border border-border bg-bg-panel p-2 shadow-xl">
+                          <div className="mb-1.5 flex items-center justify-between">
+                            <span className="text-[11px] text-text-muted">참조 이미지 (선택)</span>
+                            <div className="flex gap-0.5 rounded border border-border bg-bg-card p-0.5 text-[10px]">
+                              {(["session", "gallery"] as const).map(scope => (
+                                <button
+                                  key={scope}
+                                  onClick={() => setRefScope(scope)}
+                                  className={`rounded px-1.5 py-0.5 ${
+                                    refScope === scope
+                                      ? "bg-[color:var(--accent)]/20 text-text-primary"
+                                      : "text-text-muted hover:text-text-primary"
+                                  }`}
+                                >
+                                  {scope === "session" ? "세션" : "갤러리"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          {(() => {
+                            const list = refScope === "session" ? sessionRefs : galleryRefs;
+                            if (list === null)
+                              return <p className="py-2 text-center text-[10px] text-text-muted/60">불러오는 중…</p>;
+                            if (list.length === 0)
+                              return <p className="py-2 text-center text-[10px] text-text-muted/60">이미지 없음</p>;
+                            return (
+                              <div className="grid max-h-40 grid-cols-4 gap-1 overflow-y-auto">
+                                {list.map(g => {
+                                  const sel = refId === g.id;
+                                  return (
+                                    <button
+                                      key={g.id}
+                                      onClick={() => setRefId(sel ? null : g.id)}
+                                      className={`relative aspect-square overflow-hidden rounded border bg-[repeating-conic-gradient(#222_0%_25%,#333_0%_50%)_50%/8px_8px] ${
+                                        sel
+                                          ? "border-[color:var(--accent)] ring-1 ring-[color:var(--accent)]"
+                                          : "border-border hover:border-[color:var(--accent)]/50"
+                                      }`}
+                                      title={g.prompt ?? g.id}
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={`/api/images/${g.id}`} alt="" className="h-full w-full object-contain" />
+                                      {sel && (
+                                        <span className="absolute right-0.5 top-0.5 rounded-full bg-[color:var(--accent)] px-1 text-[8px] font-bold text-white">
+                                          ✓
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                    <input
+                      value={inpaintPrompt}
+                      onChange={e => setInpaintPrompt(e.target.value)}
+                      placeholder="무엇을 그릴까요? (예: 빛나는 룬 문양)"
+                      disabled={inpaintBusy}
+                      className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                    />
+                    <button
+                      onClick={handleInpaintSubmit}
+                      disabled={inpaintBusy || !inpaintPrompt.trim()}
+                      className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
+                    >
+                      {inpaintBusy ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" /> 생성 중…
+                        </>
+                      ) : (
+                        "채우기 ▸"
+                      )}
+                    </button>
+                    <button
+                      onClick={handleObjectRemove}
+                      disabled={inpaintBusy || !brushPainted}
+                      className="flex h-7 items-center gap-1 rounded-lg border border-[color:var(--danger)]/50 px-2.5 text-xs font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger)]/10 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="칠한 영역의 오브젝트를 지우고 주변 배경으로 채움"
+                    >
+                      <Trash2 size={13} /> 오브젝트 지우기
+                    </button>
+                  </div>
                 </div>
-                <input
-                  value={inpaintPrompt}
-                  onChange={e => setInpaintPrompt(e.target.value)}
-                  placeholder="무엇을 그릴까요? (예: 빛나는 룬 문양)"
-                  disabled={inpaintBusy}
-                  className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-                />
-                <button
-                  onClick={handleInpaintSubmit}
-                  disabled={inpaintBusy || !inpaintPrompt.trim()}
-                  className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
-                >
-                  {inpaintBusy ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" /> 생성 중…
-                    </>
-                  ) : (
-                    "채우기 ▸"
-                  )}
-                </button>
-                {/* 오브젝트 지우기 — 칠한 영역을 주변 배경으로 메워 제거(프롬프트 불필요, 칠해야 활성). */}
-                <button
-                  onClick={handleObjectRemove}
-                  disabled={inpaintBusy || !brushPainted}
-                  className="flex h-7 items-center gap-1 rounded-lg border border-[color:var(--danger)]/50 px-2.5 text-xs font-medium text-[color:var(--danger)] hover:bg-[color:var(--danger)]/10 disabled:cursor-not-allowed disabled:opacity-40"
-                  title="칠한 영역의 오브젝트를 지우고 주변 배경으로 채움"
-                >
-                  <Trash2 size={13} /> 오브젝트 지우기
-                </button>
               </>
             ) : tool === "extract" ? (
               <>
-                <Scissors size={14} className="text-[color:var(--accent)]" />
-                <span className="text-[11px] font-medium text-text-primary">레이어 분리</span>
-                {/* 입력(부위명)/브러시(칠한 영역)/올가미(폴리곤) 서브모드 토글. 전환 시 칠한 마스크 초기화. */}
-                <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                  <button
-                    onClick={() => { if (extractMode !== "text") { setExtractMode("text"); clearBrush(); } }}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      extractMode === "text"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="부위 이름으로 분리 (AI)"
-                  >
-                    <Tags size={12} /> 입력
-                  </button>
-
-                  <button
-                    onClick={() => { if (extractMode !== "brush") { setExtractMode("brush"); clearBrush(); } }}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      extractMode === "brush"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="브러시 — 칠한 영역을 분리"
-                  >
-                    <Brush size={12} /> 브러시
-                  </button>
-
-                  <button
-                    onClick={() => { if (extractMode !== "lasso") { setExtractMode("lasso"); clearBrush(); } }}
-                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
-                      extractMode === "lasso"
-                        ? "bg-[color:var(--accent)]/20 text-text-primary"
-                        : "text-text-muted hover:text-text-primary"
-                    }`}
-                    title="올가미 — 영역을 자유 폴리곤으로 둘러 분리"
-                  >
-                    <Lasso size={12} /> 올가미
-                  </button>
-                </div>
-
-                {extractMode === "brush" && brushControls}
-
-                {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. 타입 전환 시 진행 중 경로 리셋. */}
-                {extractMode === "lasso" && (
-                  <>
+                <div className="flex w-full flex-col gap-1.5">
+                  {/* 1행: 아이콘 + 레이블 + 서브모드 토글 + 도구 컨트롤 + × */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <Scissors size={14} className="text-[color:var(--accent)]" />
+                    <span className="text-[11px] font-medium text-text-primary">레이어 분리</span>
+                    {/* 입력(부위명)/브러시(칠한 영역)/올가미(폴리곤) 서브모드 토글. 전환 시 칠한 마스크 초기화. */}
                     <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                      {(["free", "poly", "magnetic"] as const).map(t => (
-                        <button
-                          key={t}
-                          onClick={() => { setLassoType(t); clearLassoState(); }}
-                          className={`flex h-6 items-center rounded px-2 text-[11px] ${
-                            lassoType === t
-                              ? "bg-[color:var(--accent)]/20 text-text-primary"
-                              : "text-text-muted hover:text-text-primary"
-                          }`}
-                          title={
-                            t === "free"
-                              ? "자유 — 드래그로 그리고 떼면 자동으로 닫힘"
-                              : t === "poly"
-                                ? "다각형 — 클릭으로 꼭짓점, 더블클릭/시작점 클릭으로 닫기 (Backspace 취소·Esc 전체취소)"
-                                : "자석 — 이미지 경계선에 자동 스냅, 클릭으로 앵커 고정, 더블클릭으로 닫기"
-                          }
-                        >
-                          {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={clearBrush}
-                      className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-                      title="그린 올가미 영역 지우기"
-                    >
-                      전체지우기
-                    </button>
-                    {lassoType !== "free" && lassoPtCount >= 3 && (
                       <button
-                        onClick={commitLassoPoints}
-                        className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary"
-                        title="현재 경로를 닫아 마스크로 확정 (Enter)"
+                        onClick={() => { if (extractMode !== "text") { setExtractMode("text"); clearBrush(); } }}
+                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${extractMode === "text" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                        title="부위 이름으로 분리 (AI)"
                       >
-                        완료 (Enter)
+                        <Tags size={12} /> 입력
                       </button>
-                    )}
-                  </>
-                )}
-                <input
-                  value={extractInput}
-                  onChange={e => setExtractInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key !== "Enter") return;
-                    if (extractMode === "text") handleExtract();
-                    else handleExtractBrush();
-                  }}
-                  placeholder={extractMode === "text" ? "예: 머리, 무기" : "이 영역의 이름 (예: 머리)"}
-                  disabled={extracting}
-                  className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
-                />
-                {extractMode === "text" && (
-                  <>
-                    {/* AI 부위 제안 — 선택 시 부위명을 쉼표로 이어 붙임. 하단 바라 위로 연다. */}
-                    <div className="relative">
-                      <AiSuggestButton loading={extractAiLoading} onClick={handleExtractAiSuggest} compact disabled={isCodex} />
-                      {extractAiSuggestions && (
-                        <AiSuggestDropdown
-                          suggestions={extractAiSuggestions}
-                          placement="bottom"
-                          width="w-[280px]"
-                          onSelect={body =>
-                            setExtractInput(prev => (prev.trim() ? `${prev.trim()}, ${body}` : body))
-                          }
-                          onClose={() => setExtractAiSuggestions(null)}
-                        />
-                      )}
+                      <button
+                        onClick={() => { if (extractMode !== "brush") { setExtractMode("brush"); clearBrush(); } }}
+                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${extractMode === "brush" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                        title="브러시 — 칠한 영역을 분리"
+                      >
+                        <Brush size={12} /> 브러시
+                      </button>
+                      <button
+                        onClick={() => { if (extractMode !== "lasso") { setExtractMode("lasso"); clearBrush(); } }}
+                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${extractMode === "lasso" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                        title="올가미 — 영역을 자유 폴리곤으로 둘러 분리"
+                      >
+                        <Lasso size={12} /> 올가미
+                      </button>
                     </div>
-                    {/* 원본 복원 토글 — 가려진 부위까지 복원(off=보이는 픽셀만). 텍스트 추출에서만 유효. */}
+                    {extractMode === "brush" && brushControls}
+                    {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. */}
+                    {extractMode === "lasso" && (
+                      <>
+                        <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                          {(["free", "poly", "magnetic"] as const).map(t => (
+                            <button
+                              key={t}
+                              onClick={() => { setLassoType(t); clearLassoState(); }}
+                              className={`flex h-6 items-center rounded px-2 text-[11px] ${lassoType === t ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                              title={t === "free" ? "자유 — 드래그로 그리고 떼면 자동으로 닫힘" : t === "poly" ? "다각형 — 클릭으로 꼭짓점, 더블클릭/시작점 클릭으로 닫기 (Backspace 취소·Esc 전체취소)" : "자석 — 이미지 경계선에 자동 스냅, 클릭으로 앵커 고정, 더블클릭으로 닫기"}
+                            >
+                              {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
+                            </button>
+                          ))}
+                        </div>
+                        <button onClick={clearBrush} className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary" title="그린 올가미 영역 지우기">전체지우기</button>
+                        {lassoType !== "free" && lassoPtCount >= 3 && (
+                          <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary" title="현재 경로를 닫아 마스크로 확정 (Enter)">완료 (Enter)</button>
+                        )}
+                      </>
+                    )}
+                    </div>
+                    <button onClick={closeTool} className="flex-none rounded p-1 text-text-muted hover:text-text-primary"><X size={14} /></button>
+                  </div>
+                  {/* 2행: 이름 입력 + 부가 컨트롤 + 분리 버튼 */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={extractInput}
+                      onChange={e => setExtractInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key !== "Enter") return;
+                        if (extractMode === "text") handleExtract();
+                        else handleExtractBrush();
+                      }}
+                      placeholder={extractMode === "text" ? "예: 머리, 무기" : "이 영역의 이름 (예: 머리)"}
+                      disabled={extracting}
+                      className="h-7 w-40 min-w-0 flex-1 rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary placeholder:text-text-muted/50 focus:border-[color:var(--accent)]/60 focus:outline-none"
+                    />
+                    {extractMode === "text" && (
+                      <>
+                        {/* AI 부위 제안 — 선택 시 부위명을 쉼표로 이어 붙임. */}
+                        <div className="relative">
+                          <AiSuggestButton loading={extractAiLoading} onClick={handleExtractAiSuggest} compact disabled={isCodex} />
+                          {extractAiSuggestions && (
+                            <AiSuggestDropdown
+                              suggestions={extractAiSuggestions}
+                              placement="bottom"
+                              width="w-[280px]"
+                              onSelect={body => setExtractInput(prev => (prev.trim() ? `${prev.trim()}, ${body}` : body))}
+                              onClose={() => setExtractAiSuggestions(null)}
+                            />
+                          )}
+                        </div>
+                        {/* 원본 복원 토글 — 가려진 부위까지 복원(off=보이는 픽셀만). 텍스트 추출에서만 유효. */}
+                        <button
+                          onClick={() => setExtractAutoRestore(v => !v)}
+                          className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${extractAutoRestore ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary" : "border-border text-text-muted hover:text-text-primary"}`}
+                          title="가려진 부위까지 복원해 완전한 레이어로 추출 (끄면 보이는 부분만)"
+                        >
+                          원본 복원 {extractAutoRestore ? "ON" : "OFF"}
+                        </button>
+                      </>
+                    )}
                     <button
-                      onClick={() => setExtractAutoRestore(v => !v)}
-                      className={`flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] ${
-                        extractAutoRestore
-                          ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary"
-                          : "border-border text-text-muted hover:text-text-primary"
-                      }`}
-                      title="가려진 부위까지 복원해 완전한 레이어로 추출 (끄면 보이는 부분만)"
+                      onClick={extractMode === "text" ? handleExtract : handleExtractBrush}
+                      disabled={extracting || !extractInput.trim() || (extractMode !== "text" && !brushPainted)}
+                      className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
                     >
-                      원본 복원 {extractAutoRestore ? "ON" : "OFF"}
+                      {extracting ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" /> 분리 중…
+                        </>
+                      ) : (
+                        "분리 ▸"
+                      )}
                     </button>
-                  </>
-                )}
-                <button
-                  onClick={extractMode === "text" ? handleExtract : handleExtractBrush}
-                  disabled={extracting || !extractInput.trim() || (extractMode !== "text" && !brushPainted)}
-                  className="flex h-7 items-center gap-1.5 rounded-lg bg-[color:var(--accent)] px-3 text-xs font-medium text-white disabled:opacity-40"
-                >
-                  {extracting ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" /> 분리 중…
-                    </>
-                  ) : (
-                    "분리 ▸"
-                  )}
-                </button>
+                  </div>
+                </div>
               </>
             ) : (
               <>
@@ -2896,9 +2904,11 @@ export function CanvasEditor({
                 </button>
               </>
             )}
-            <button onClick={closeTool} className="rounded p-1 text-text-muted hover:text-text-primary">
-              <X size={14} />
-            </button>
+            {tool !== "inpaint" && tool !== "extract" && (
+              <button onClick={closeTool} className="rounded p-1 text-text-muted hover:text-text-primary">
+                <X size={14} />
+              </button>
+            )}
           </div>
         </div>
       )}
