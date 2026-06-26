@@ -98,8 +98,9 @@ export async function applyTransparentPostProcess(
   filePath: string,
   chromaKey: ChromaKeyColor,
   cellArea?: number,
+  aggressivePockets?: boolean,
 ): Promise<number> {
-  const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea);
+  const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea, aggressivePockets);
   if (keyedOut === 0) return await fallbackBgRemove(filePath, log);
   return keyedOut;
 }

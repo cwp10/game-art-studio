@@ -51,6 +51,8 @@ export async function chromaKeyFile(
   log: Logger = noop,
   // 셀 면적(px) — enclosed 포켓 키아웃 임계 기준. 시트는 cellW*cellH, 단일 이미지는 미지정(전체).
   cellArea?: number,
+  // true 면 pocketCap 제한 없이 모든 isolated hard-key cluster 제거.
+  aggressivePockets?: boolean,
 ): Promise<number> {
   const { data, info } = await sharp(filePath)
     .ensureAlpha()
@@ -135,7 +137,9 @@ export async function chromaKeyFile(
   {
     // 셀 면적 미지정 시 전체 이미지를 한 셀로 간주(단일 이미지 경로 보수적 처리).
     const cellPx = cellArea && cellArea > 0 ? cellArea : N;
-    const pocketCap = Math.max(48, Math.round(cellPx * 0.02)); // 셀의 2% 미만 = 포켓
+    // aggressivePockets: 크기 제한 없이 모든 isolated hard-key cluster 제거.
+    // text2img VFX/이펙트 이미지에서 연기가 green을 감싸 pocketCap 초과 cluster가 생기는 문제 대응.
+    const pocketCap = aggressivePockets ? Infinity : Math.max(48, Math.round(cellPx * 0.02)); // 셀의 2% 미만 = 포켓
     const visited = new Uint8Array(N);
     const cstk: number[] = [];
     for (let s = 0; s < N; s++) {

@@ -754,7 +754,7 @@ async function runDirectBackendJob(opts: {
   // 실패해도 1차 생성 결과를 그대로 사용(graceful degradation).
   if (text2imgChromaKey) {
     try {
-      await chromaKeyFile(result.imagePath, text2imgChromaKey);
+      await chromaKeyFile(result.imagePath, text2imgChromaKey, undefined, undefined, true);
     } catch {
       // 후처리 실패 무시
     }

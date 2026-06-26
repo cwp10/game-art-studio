@@ -566,7 +566,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           if (genId) {
             const filePath = imagePathFor(genId);
             try {
-              const ckOut = await applyTransparentPostProcess(filePath, genChromaKey);
+              // aggressivePockets: true — text2img wantsTransparent는 항상 순수 피사체 이미지이므로
+              // 연기가 green을 감싼 large isolated cluster까지 pocketCap 제한 없이 제거.
+              const ckOut = await applyTransparentPostProcess(filePath, genChromaKey, undefined, true);
               log(`generate_image chroma-keyed gen=${genId} key=${genChromaKey} keyedOut=${ckOut}`);
             } catch (e) {
               log(`generate_image post-process fail: ${(e as Error).message}`);
@@ -821,8 +823,9 @@ async function applyTransparentPostProcess(
   filePath: string,
   chromaKey: ChromaKeyColor,
   cellArea?: number,
+  aggressivePockets?: boolean,
 ): Promise<number> {
-  const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea);
+  const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea, aggressivePockets);
   if (keyedOut === 0) return await fallbackBgRemove(filePath, log);
   return keyedOut;
 }
