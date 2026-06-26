@@ -112,6 +112,17 @@ function detectBgMode(prompt: string): "luma" | "chroma" {
   return VFX_EFFECT_RE.test(prompt) ? "luma" : "chroma";
 }
 
+/** 유저 프롬프트에서 배경색 지정 문구를 제거 — 파이프라인 배경 지시와 충돌 방지 */
+function stripBgHints(prompt: string): string {
+  return prompt
+    .replace(/,?\s*(against|on)\s+(a\s+)?(pure\s+)?(white|black|green|magenta)\s+background[^,.;]*/gi, "")
+    .replace(/,?\s*with\s+(transparent\s+)?(white|black|green|magenta)?\s*transparent\s+background[^,.;]*/gi, "")
+    .replace(/,?\s*with\s+transparent(\s+(white|black|green|magenta))?\s+background[^,.;]*/gi, "")
+    .replace(/,?\s*transparent\s+(white|black|green|magenta)?\s*background[^,.;]*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function buildLayerExtractPrompt(job: ImageJob): string {
   // 입력: [원본 이미지, 마스크 PNG] — 마스크의 RED 영역이 추출할 오브젝트 힌트
   // 추출 대상이 녹색이면 magenta 배경으로 그리게 지시(후처리도 같은 색으로 키아웃).
@@ -360,7 +371,8 @@ const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
         PROMPT_HEADER +
         `Regenerate the attached VFX effect on a flat solid #000000 pure black background ` +
         `(no gradients, no glow bleed onto background). After Codex saves it as ./output.png, ` +
-        `the post-processing pipeline will apply luminance keying. ${job.prompt}`
+        `the post-processing pipeline will apply luminance keying. ${stripBgHints(job.prompt)} ` +
+        `CRITICAL: background must be #000000 pure black only — ignore any other background color mentioned above.`
       );
     }
     const key = detectKeyColor(job.prompt);
@@ -369,7 +381,8 @@ const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
       PROMPT_HEADER +
       `Regenerate the attached subject on a flat solid ${hex} chroma-key background ` +
       `(no shadows, no gradients, crisp edges). After Codex saves it as ./output.png, ` +
-      `the post-processing pipeline will key out the ${key}. ${job.prompt}`
+      `the post-processing pipeline will key out the ${key}. ${stripBgHints(job.prompt)} ` +
+      `CRITICAL: background must be ${hex} only — ignore any other background color mentioned above.`
     );
   },
   layer_extract: buildLayerExtractPrompt,
