@@ -44,7 +44,7 @@ import {
 import {
   type Directions,
 } from "./spritesheet-classify.js";
-import { GREEN_SUBJECT_RE } from "../image-backend/chroma-key.js";
+import { GREEN_SUBJECT_RE, VFX_EFFECT_RE, lumaKeyFile } from "../image-backend/chroma-key.js";
 import { createGeneration, getGeneration, setGenerationDimensions } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -532,6 +532,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           !/white\s*(bg|background)|흰\s*배경/.test(rawPrompt.toLowerCase()) &&
           ((/transparent|투명/i.test(rawPrompt)) || !(/배경|background/i.test(rawPrompt)));
 
+        // VFX 이펙트 감지 → 검은 배경 + 루미넌스 키. 아니면 chroma-key.
+        const genIsVfx = wantsTransparentGen && VFX_EFFECT_RE.test(rawPrompt);
+
         // 녹색 피사체 감지 → magenta key, 아니면 green key.
         // 명시적 chromaKey override(green/magenta)가 오면 자동감지를 건너뛴다.
         const genGreenSubject = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase());
@@ -543,11 +546,13 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
               ? "magenta"
               : "green";
 
-        // 투명 배경이면 chroma-key 배경 주입 (모델이 직접 알파를 그리면 edge fringe가 남음).
+        // 투명 배경이면 배경 주입: VFX → 검은 배경, 그 외 → chroma-key 배경.
         const genBgInstruction = wantsTransparentGen
-          ? genChromaKey === "magenta"
-            ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
-            : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency."
+          ? genIsVfx
+            ? "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. Post-processing will apply luminance keying to produce true transparency."
+            : genChromaKey === "magenta"
+              ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
+              : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency."
           : "";
 
         const prompt = ensureTransparentDefault(rawPrompt) + genBgInstruction;
@@ -560,16 +565,21 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           signal: extra.signal,
         });
 
-        // 투명 배경 후처리: chroma-key 제거 → fallback flood-fill
+        // 투명 배경 후처리: VFX → 루미넌스 키, 그 외 → chroma-key 제거 → fallback flood-fill
         if (wantsTransparentGen) {
           const genId: string | undefined = genResult?.structuredContent?.generationId;
           if (genId) {
             const filePath = imagePathFor(genId);
             try {
-              // aggressivePockets: true — text2img wantsTransparent는 항상 순수 피사체 이미지이므로
-              // 연기가 green을 감싼 large isolated cluster까지 pocketCap 제한 없이 제거.
-              const ckOut = await applyTransparentPostProcess(filePath, genChromaKey, undefined, true);
-              log(`generate_image chroma-keyed gen=${genId} key=${genChromaKey} keyedOut=${ckOut}`);
+              if (genIsVfx) {
+                const lumaOut = await lumaKeyFile(filePath, log);
+                log(`generate_image luma-keyed gen=${genId} keyedOut=${lumaOut}`);
+              } else {
+                // aggressivePockets: true — text2img wantsTransparent는 항상 순수 피사체 이미지이므로
+                // 연기가 green을 감싼 large isolated cluster까지 pocketCap 제한 없이 제거.
+                const ckOut = await applyTransparentPostProcess(filePath, genChromaKey, undefined, true);
+                log(`generate_image chroma-keyed gen=${genId} key=${genChromaKey} keyedOut=${ckOut}`);
+              }
             } catch (e) {
               log(`generate_image post-process fail: ${(e as Error).message}`);
             }
