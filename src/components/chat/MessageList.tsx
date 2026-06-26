@@ -211,6 +211,12 @@ export function MessageList({ items, generating, onAction, onPickSuggestion, onR
 
         return (
           <div key={`${it.id}-${i}`} className="space-y-3">
+            {it.toolCalls.length === 0 && !it.finished && (
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border border-text-muted border-t-transparent" />
+                이미지 생성 대기 중…
+              </div>
+            )}
             {it.toolCalls.map(tc => (
               <ToolCallBlock
                 key={tc.toolCallId}
