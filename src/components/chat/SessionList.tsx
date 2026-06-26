@@ -14,11 +14,13 @@ type Props = {
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onOpenGallery: () => void;
-  /** true 이면 생성 중 — 세션 전환·새 세션 버튼 비활성. */
+  /** 현재 활성 세션이 생성 중 — 스피너 표시용. */
   generating?: boolean;
+  /** 생성 중인 모든 세션 ID 집합 — 비활성 세션에도 스피너 표시용. */
+  generatingSessions?: Set<string>;
 };
 
-export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onRename, onOpenGallery, generating }: Props) {
+export function SessionList({ sessions, activeId, search, onSearch, onNew, onSelect, onDelete, onRename, onOpenGallery, generating, generatingSessions }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [exportingId, setExportingId] = useState<string | null>(null);
@@ -48,8 +50,6 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
       <div className="space-y-2 border-b border-border p-3">
         <button
           onClick={onNew}
-          disabled={generating}
-          title={generating ? "생성 중에는 세션을 전환할 수 없어요" : undefined}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-border bg-bg-card px-3 py-2 text-sm font-medium hover:border-[color:var(--accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Plus size={14} /> 새 세션
@@ -79,18 +79,14 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
           {sessions.map(s => {
             const active = s.id === activeId;
             const editing = editingId === s.id;
-            const blocked = generating && !active; // 생성 중 + 비활성 세션 → 클릭 차단
             return (
               <li key={s.id}>
                 <div
                   className={`group flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors ${
                     active
                       ? "bg-bg-card text-text-primary"
-                      : blocked
-                        ? "cursor-not-allowed text-text-muted/40"
-                        : "text-text-muted hover:bg-bg-card/60 hover:text-text-primary"
+                      : "text-text-muted hover:bg-bg-card/60 hover:text-text-primary"
                   }`}
-                  title={blocked ? "생성 중에는 세션을 전환할 수 없어요" : undefined}
                 >
                   {editing ? (
                     <input
@@ -112,19 +108,18 @@ export function SessionList({ sessions, activeId, search, onSearch, onNew, onSel
                     />
                   ) : (
                     <button
-                      onClick={() => !blocked && onSelect(s.id)}
-                      onDoubleClick={() => !blocked && startEdit(s)}
-                      disabled={blocked}
-                      className="flex flex-1 items-center gap-2 truncate text-left disabled:cursor-not-allowed"
+                      onClick={() => onSelect(s.id)}
+                      onDoubleClick={() => startEdit(s)}
+                      className="flex flex-1 items-center gap-2 truncate text-left"
                     >
-                      {active && generating
+                      {(active && generating) || generatingSessions?.has(s.id)
                         ? <Loader2 size={12} className="shrink-0 animate-spin text-[color:var(--accent)]" />
                         : <MessageSquare size={12} className="shrink-0" />
                       }
                       <span className="truncate">{s.title || "(제목 없음)"}</span>
                     </button>
                   )}
-                  {!editing && !blocked && (
+                  {!editing && (
                     <>
                       <button
                         onClick={() => startEdit(s)}

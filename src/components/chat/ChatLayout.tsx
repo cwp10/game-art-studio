@@ -114,6 +114,11 @@ export function ChatLayout() {
   const streamSeqRef = useRef(0);
   // 진행 중인 세션 ID 집합 — 세션 전환 후 복귀 시 "생성 중..." 복원에 사용
   const generatingSessionsRef = useRef<Set<string>>(new Set());
+  // 세션 전환 직전 items 스냅샷 — 생성 중 세션으로 복귀 시 tool call 진행 상태 복원용
+  const sessionItemsCacheRef = useRef<Map<string, typeof state.items>>(new Map());
+  // 콜백에서 최신 state 에 접근하기 위한 ref (stale closure 방지, 렌더마다 동기화)
+  const stateRef = useRef(state);
+  stateRef.current = state;
   // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
   const dragCounter = useRef(0);
   const [dragOver, setDragOver] = useState(false);
@@ -179,10 +184,18 @@ export function ChatLayout() {
     const loadAbort = new AbortController();
     listMessages(state.activeSessionId, loadAbort.signal)
       .then(messages => {
-        dispatch({ type: "load_messages", messages });
-        // 이 세션의 생성이 아직 진행 중이면 pending assistant 아이템 복원
-        if (generatingSessionsRef.current.has(state.activeSessionId!)) {
-          dispatch({ type: "restore_in_progress" });
+        const sessionId = state.activeSessionId!;
+        const isGenerating = generatingSessionsRef.current.has(sessionId);
+        const cached = isGenerating ? sessionItemsCacheRef.current.get(sessionId) : undefined;
+        if (cached && cached.length > 0) {
+          // 진행 중 세션 복귀 — tool call 진행 상태가 담긴 캐시로 복원 (DB 로드 생략)
+          dispatch({ type: "restore_generating_items", items: cached });
+        } else {
+          dispatch({ type: "load_messages", messages });
+          if (isGenerating) {
+            dispatch({ type: "restore_in_progress" });
+            dispatch({ type: "set_generating", generating: true });
+          }
         }
       })
       .catch(e => {
@@ -193,17 +206,22 @@ export function ChatLayout() {
 
   // 새 세션 — 생성 중에는 차단 (UI 잠금 외 키보드 단축키 등 모든 경로 방어)
   const handleNew = useCallback(() => {
-    if (state.generating) return;
+    const s = stateRef.current;
+    if (s.generating && s.activeSessionId) {
+      sessionItemsCacheRef.current.set(s.activeSessionId, s.items);
+    }
     streamSeqRef.current++;
     dispatch({ type: "set_active", sessionId: null });
-  }, [state.generating]);
+  }, []);
 
-  // 세션 선택 — 생성 중에는 차단
   const handleSelect = useCallback((id: string) => {
-    if (state.generating) return;
+    const s = stateRef.current;
+    if (s.generating && s.activeSessionId) {
+      sessionItemsCacheRef.current.set(s.activeSessionId, s.items);
+    }
     streamSeqRef.current++;
     dispatch({ type: "set_active", sessionId: id });
-  }, [state.generating]);
+  }, []);
 
   // 세션 삭제
   const handleDelete = useCallback(
@@ -726,6 +744,7 @@ export function ChatLayout() {
           onRename={handleRename}
           onOpenGallery={() => setGalleryOpen(true)}
           generating={state.generating}
+          generatingSessions={state.generatingSessions}
         />
       )}
       {/* 편집 패널은 전체화면(fixed inset-0)으로 이 대화 column 을 완전히 덮으므로 폭은 항상 flex-1.

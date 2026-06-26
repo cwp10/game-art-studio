@@ -175,7 +175,10 @@ export function useStreamChat(params: {
 
       // 진행 중 세션 추적 — 알려진 세션이면 즉시, 새 세션이면 session_started 후 추가
       let trackedSessionId: string | null = currentSessionId;
-      if (currentSessionId) generatingSessionsRef.current.add(currentSessionId);
+      if (currentSessionId) {
+        generatingSessionsRef.current.add(currentSessionId);
+        dispatch({ type: "add_generating_session", sessionId: currentSessionId });
+      }
 
       // 생성 결과(generationId/치수)를 캡처해 호출자에 반환 — 편집 패널의 연속 편집에 사용.
       let sendResult: { generationId: string; width: number; height: number } | null = null;
@@ -201,6 +204,7 @@ export function useStreamChat(params: {
               if (!currentSessionId) {
                 trackedSessionId = event.sessionId;
                 generatingSessionsRef.current.add(event.sessionId);
+                dispatch({ type: "add_generating_session", sessionId: event.sessionId });
               }
               listSessions().then(sessions => dispatch({ type: "set_sessions", sessions }));
             }
@@ -232,7 +236,10 @@ export function useStreamChat(params: {
         if (abortRef.current === abort) abortRef.current = null;
 
         // 진행 중 추적 정리
-        if (trackedSessionId) generatingSessionsRef.current.delete(trackedSessionId);
+        if (trackedSessionId) {
+          generatingSessionsRef.current.delete(trackedSessionId);
+          dispatch({ type: "remove_generating_session", sessionId: trackedSessionId });
+        }
 
         // 스트림이 완료됐을 때 사용자가 이미 이 세션으로 돌아와 있으면 messages 를
         // reload 해 완료된 결과를 표시하고, restore 로 켜둔 generating 을 내린다

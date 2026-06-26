@@ -58,6 +58,7 @@ export type ChatState = {
   activeSessionId: string | null;
   items: ChatItem[];
   generating: boolean;
+  generatingSessions: Set<string>;
 };
 
 export type ChatAction =
@@ -105,6 +106,9 @@ export type ChatAction =
   | { type: "retry_tool_call_success"; assistantId: string; toolCallId: string; result: ToolCallState["result"] }
   | { type: "retry_tool_call_fail"; assistantId: string; toolCallId: string; error: string }
   | { type: "restore_in_progress" }
+  | { type: "restore_generating_items"; items: ChatItem[] }
+  | { type: "add_generating_session"; sessionId: string }
+  | { type: "remove_generating_session"; sessionId: string }
   | { type: "reset_items" };
 
 export const initialState: ChatState = {
@@ -112,6 +116,7 @@ export const initialState: ChatState = {
   activeSessionId: null,
   items: [],
   generating: false,
+  generatingSessions: new Set<string>(),
 };
 
 /**
@@ -493,6 +498,18 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
         generating: true,
       };
+    }
+    case "restore_generating_items":
+      return { ...state, items: action.items, generating: true };
+    case "add_generating_session": {
+      const next = new Set(state.generatingSessions);
+      next.add(action.sessionId);
+      return { ...state, generatingSessions: next };
+    }
+    case "remove_generating_session": {
+      const next = new Set(state.generatingSessions);
+      next.delete(action.sessionId);
+      return { ...state, generatingSessions: next };
     }
     case "reset_items":
       return { ...state, items: [], generating: false };
