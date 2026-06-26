@@ -219,14 +219,19 @@ function cssFilter(f: LayerFilters): string {
   return `brightness(${f.brightness}%) contrast(${f.contrast}%) saturate(${f.saturation}%) hue-rotate(${f.hue}deg) blur(${f.blur}px)`;
 }
 
-/** Sobel 엣지 강도 맵 — 자석 올가미가 스냅할 경계선(휘도 gradient magnitude). 원본 픽셀 1:1. */
+/** Sobel 엣지 강도 맵 — 자석 올가미가 스냅할 경계선(휘도 gradient magnitude). 원본 픽셀 1:1.
+ *  알파 프리멀티플라이: luma * (alpha/255) → 투명 경계도 강한 엣지로 검출. */
 function sobelGradient(imageData: ImageData): Float32Array {
   const { data, width, height } = imageData;
   const grad = new Float32Array(width * height);
-  const luma = (i: number) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  // alpha-premultiplied luma — 투명 픽셀은 0, 불투명 경계에서 큰 gradient 발생.
+  const val = (i: number) => {
+    const a = data[i + 3] / 255;
+    return (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) * a;
+  };
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
-      const px = (dx: number, dy: number) => luma(((y + dy) * width + (x + dx)) * 4);
+      const px = (dx: number, dy: number) => val(((y + dy) * width + (x + dx)) * 4);
       const gx = -px(-1, -1) + px(1, -1) - 2 * px(-1, 0) + 2 * px(1, 0) - px(-1, 1) + px(1, 1);
       const gy = -px(-1, -1) - 2 * px(0, -1) - px(1, -1) + px(-1, 1) + 2 * px(0, 1) + px(1, 1);
       grad[y * width + x] = Math.sqrt(gx * gx + gy * gy);
@@ -282,7 +287,7 @@ export function CanvasEditor({
   const [extracting, setExtracting] = useState(false);
   // 레이어 분리 서브모드 — text(부위명 기반) / brush(칠한 마스크 기반) / lasso(올가미 폴리곤).
   // brush·lasso 모두 brushCanvasRef(원본 해상도·레이어 transform 공유)에 빨강으로 칠해 handleExtractBrush 로 마스크화.
-  const [extractMode, setExtractMode] = useState<"text" | "lasso">("text");
+  const [extractMode, setExtractMode] = useState<"text" | "brush" | "lasso">("text");
   // 올가미 타입 — free(자유 드래그)/poly(클릭 다각형)/magnetic(엣지 스냅). 포토샵식 3종.
   const [lassoType, setLassoType] = useState<"free" | "poly" | "magnetic">("free");
   // 올가미 — LOCAL 좌표(프리줌 CSS 픽셀, lx/ly: data-canvas-frame 기준)를 단일 SSOT 로 누적.
@@ -292,6 +297,9 @@ export function CanvasEditor({
   const lassoClientPtsRef = useRef<{ lx: number; ly: number }[]>([]); // LOCAL 좌표 정점
   const lassoRubberBandRef = useRef<{ lx: number; ly: number } | null>(null); // poly/magnetic 고무줄 끝점
   const lassoEdgeGradRef = useRef<Float32Array | null>(null); // magnetic: Sobel gradient
+  const lassoMagPrevSnapRef = useRef<{ lx: number; ly: number } | null>(null); // magnetic: 직전 스냅 위치(자동 앵커는 여기 찍힘)
+  const lassoMagAccDistRef = useRef(0); // magnetic: 마우스 이동 누적 거리 (Frequency 간격 앵커 배치용)
+  const lassoMagLastClientRef = useRef<{ x: number; y: number } | null>(null); // magnetic: 직전 pointer 위치
   const lassoEdgeSizeRef = useRef<{ w: number; h: number } | null>(null); // magnetic: edge 이미지 크기
   const lassoCommittedRef = useRef(false); // 마스크 커밋 완료 — 파란 선택 영역 오버레이 유지 플래그
   // poly/magnetic "완료" 버튼 가드 — ref 는 렌더를 안 깨우므로 정점 수를 state 로 미러(brushUndoCount 패턴).
@@ -624,6 +632,9 @@ export function CanvasEditor({
     lassoRubberBandRef.current = null;
     lassoDrawingRef.current = false;
     lassoCommittedRef.current = false;
+    lassoMagPrevSnapRef.current = null;
+    lassoMagAccDistRef.current = 0;
+    lassoMagLastClientRef.current = null;
     setLassoPtCount(0);
     const overlay = lassoOverlayRef.current;
     overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
@@ -962,13 +973,28 @@ export function CanvasEditor({
         ctx.stroke();
       }
 
-      // 자석 스냅 위치 표시 — magnetic 모드일 때만 노란 점으로 스냅 위치를 표시.
+      // 앵커 도트 — magnetic 모드에서 각 앵커 위치에 흰 테두리 노란 점 표시.
+      if (lassoType === "magnetic" && pts.length > 0) {
+        pts.forEach(p => {
+          const ap = clientToOverlay(p.lx, p.ly);
+          ctx.beginPath();
+          ctx.arc(ap.x, ap.y, 3.5 * ls, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(255, 220, 0, 0.95)";
+          ctx.fill();
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          ctx.lineWidth = ls;
+          ctx.stroke();
+        });
+      }
+
+      // 현재 스냅 커서 — 마우스 위치는 아웃라인 원으로만 표시(채우지 않음 = 앵커 아님을 구분).
       if (lassoType === "magnetic" && extraPt) {
         const sp = clientToOverlay(extraPt.lx, extraPt.ly);
         ctx.beginPath();
         ctx.arc(sp.x, sp.y, 4 * ls, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 220, 0, 0.9)";
-        ctx.fill();
+        ctx.strokeStyle = "rgba(255, 220, 0, 0.9)";
+        ctx.lineWidth = 1.5 * ls;
+        ctx.stroke();
       }
     },
     [clientToOverlay, lassoType, zp.zoom],
@@ -1030,7 +1056,7 @@ export function CanvasEditor({
 
       const center = screenToSource(canvas, clientX, clientY, layer);
       const rect = canvas.getBoundingClientRect();
-      const imgRadiusPx = 20 * (canvas.width / (rect.width || 1)); // 화면 20px → 원본 픽셀
+      const imgRadiusPx = 8 * (canvas.width / (rect.width || 1)); // 화면 8px → 원본 픽셀 (마우스 근처만 스냅)
       const r = Math.ceil(imgRadiusPx);
 
       let best = -1, bx = center.x, by = center.y;
@@ -1043,6 +1069,8 @@ export function CanvasEditor({
           if (g > best) { best = g; bx = center.x + dx; by = center.y + dy; }
         }
       }
+      // 픽셀/엣지가 없는 빈 영역 — gradient 최소 임계값 미달 시 스냅 거부.
+      if (best < 8) return null;
       return imageToClient(bx, by, layer);
     },
     [layers, selectedLayerId, screenToSource, imageToClient],
@@ -1115,7 +1143,12 @@ export function CanvasEditor({
       if (lassoType === "magnetic") {
         // snapToEdge 는 client 좌표 반환 → local 로 변환해 저장.
         const snapped = snapToEdge(e.clientX, e.clientY);
-        pts.push(snapped ? clientToLocal(snapped.cx, snapped.cy) : el);
+        const clicked = snapped ? clientToLocal(snapped.cx, snapped.cy) : el;
+        pts.push(clicked);
+        // 클릭으로 앵커를 고정했으므로 누적 거리·prevSnap 리셋.
+        lassoMagPrevSnapRef.current = null;
+        lassoMagAccDistRef.current = 0;
+        lassoMagLastClientRef.current = null;
       } else {
         pts.push(el);
       }
@@ -1131,16 +1164,40 @@ export function CanvasEditor({
       if (lassoType !== "magnetic" && lassoClientPtsRef.current.length === 0) return;
       let pt: { lx: number; ly: number };
       if (lassoType === "magnetic") {
-        // snapToEdge 는 client 좌표 반환 → local 로 변환.
+        // snapToEdge: 엣지 없는 빈 영역이면 null 반환.
         const snapped = snapToEdge(e.clientX, e.clientY);
+        // 고무줄 미리보기는 현재 스냅 위치 우선, 없으면 마우스 원위치.
         pt = snapped ? clientToLocal(snapped.cx, snapped.cy) : clientToLocal(e.clientX, e.clientY);
+
+        // 마우스 이동 거리 누적 — 일정 Frequency(12 screen px)마다 직전 스냅 위치에 앵커 배치.
+        const pts = lassoClientPtsRef.current;
+        const lastClient = lassoMagLastClientRef.current;
+        if (lastClient) {
+          const mdx = e.clientX - lastClient.x, mdy = e.clientY - lastClient.y;
+          lassoMagAccDistRef.current += Math.sqrt(mdx * mdx + mdy * mdy);
+        }
+        lassoMagLastClientRef.current = { x: e.clientX, y: e.clientY };
+
+        if (pts.length > 0 && snapped !== null) {
+          const FREQ = 40; // 화면 40px 이동마다 앵커 1개
+          if (lassoMagAccDistRef.current >= FREQ) {
+            lassoMagAccDistRef.current = 0;
+            // 직전 스냅 위치(prevSnap)에 찍어 "지나간 자리에 달라붙는" 효과.
+            const prev = lassoMagPrevSnapRef.current ?? pt;
+            pts.push(prev);
+            setLassoPtCount(pts.length);
+          }
+          lassoMagPrevSnapRef.current = pt;
+        } else if (snapped === null) {
+          lassoMagPrevSnapRef.current = null;
+        }
       } else {
         pt = clientToLocal(e.clientX, e.clientY);
       }
       lassoRubberBandRef.current = pt;
       redrawLassoOverlay(pt); // 마지막 앵커 → 현재(스냅된) 점 고무줄 미리보기
     },
-    [lassoType, redrawLassoOverlay, snapToEdge, clientToLocal],
+    [lassoType, redrawLassoOverlay, snapToEdge, clientToLocal, zp.zoom],
   );
   const onLassoOverlayDblClick = useCallback(() => {
     if (lassoClientPtsRef.current.length >= 3) commitLassoPoints();
@@ -1172,7 +1229,7 @@ export function CanvasEditor({
     const handler = (e: KeyboardEvent) => {
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
-      if (e.key === "Backspace" || e.key === "Delete") {
+      if (e.key === "Backspace" || e.key === "Delete" || e.key === "\\") {
         lassoClientPtsRef.current.pop();
         setLassoPtCount(lassoClientPtsRef.current.length);
         redrawLassoOverlay(lassoRubberBandRef.current ?? undefined);
@@ -2049,7 +2106,7 @@ export function CanvasEditor({
                           poly/magnetic 은 위 오버레이 캔버스가 클릭을 받는다. lasso 라도 mask commit 에 필요해 mount 유지.
                           마스크 commit 빨강 fill 은 보여선 안 되므로 lasso 일 때는 캔버스를 숨긴다(opacity-0). */}
                       {(tool === "inpaint" ||
-                        (tool === "extract" && extractMode === "lasso")) &&
+                        (tool === "extract" && (extractMode === "lasso" || extractMode === "brush"))) &&
                         selectedLayerId === layer.id &&
                         inpaintNat && (
                         <canvas
@@ -2679,6 +2736,18 @@ export function CanvasEditor({
                   </button>
 
                   <button
+                    onClick={() => { if (extractMode !== "brush") { setExtractMode("brush"); clearBrush(); } }}
+                    className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
+                      extractMode === "brush"
+                        ? "bg-[color:var(--accent)]/20 text-text-primary"
+                        : "text-text-muted hover:text-text-primary"
+                    }`}
+                    title="브러시 — 칠한 영역을 분리"
+                  >
+                    <Brush size={12} /> 브러시
+                  </button>
+
+                  <button
                     onClick={() => { if (extractMode !== "lasso") { setExtractMode("lasso"); clearBrush(); } }}
                     className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${
                       extractMode === "lasso"
@@ -2690,6 +2759,8 @@ export function CanvasEditor({
                     <Lasso size={12} /> 올가미
                   </button>
                 </div>
+
+                {extractMode === "brush" && brushControls}
 
                 {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. 타입 전환 시 진행 중 경로 리셋. */}
                 {extractMode === "lasso" && (
