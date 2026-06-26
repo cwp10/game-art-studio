@@ -705,7 +705,7 @@ async function runDirectBackendJob(opts: {
   let text2imgChromaKey: ChromaKeyColor | null = null;
   let text2imgUseLuma = false;
   if (kind === "text2img") {
-    const hasSceneDesc = /도시|city|거리|street|숲|forest|하늘|sky|해변|beach|던전|dungeon|실내|indoor|야외|outdoor|네온|neon|사이버|cyber|빗|비\s*내리|눈\s*내리|우천|landscape|배경|정원|garden|공원|park|들판|field|meadow|바다|ocean|sea|산|mountain|마을|village|town|성|castle|환경|environment|scene|setting|배경화면|wallpaper|tileset|타일/.test(rawPrompt.toLowerCase());
+    const hasSceneDesc = /도시|\bcity\b|거리|\bstreet\b|숲|\bforest\b|하늘|\bsky\b|해변|\bbeach\b|던전|\bdungeon\b|실내|\bindoor\b|야외|\boutdoor\b|네온|\bneon\b|사이버|\bcyber\b|빗|비\s*내리|눈\s*내리|우천|\blandscape\b|배경|정원|\bgarden\b|공원|\bpark\b|들판|\bfield\b|\bmeadow\b|바다|\bocean\b|\bsea\b|산|\bmountain\b|마을|\bvillage\b|\btown\b|성|\bcastle\b|환경|\benvironment\b|\bscene\b|\bsetting\b|배경화면|\bwallpaper\b|\btileset\b|타일/.test(rawPrompt.toLowerCase());
     const wantsTransparent =
       !hasSceneDesc &&
       !/white\s*(bg|background)|흰\s*배경/.test(rawPrompt.toLowerCase()) &&
