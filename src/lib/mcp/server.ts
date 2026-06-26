@@ -44,7 +44,7 @@ import {
 import {
   type Directions,
 } from "./spritesheet-classify.js";
-import { GREEN_SUBJECT_RE, VFX_EFFECT_RE, lumaKeyFile } from "../image-backend/chroma-key.js";
+import { GREEN_SUBJECT_RE, VFX_EFFECT_RE, lumaKeyFile, stripBgHints } from "../image-backend/chroma-key.js";
 import { createGeneration, getGeneration, setGenerationDimensions } from "../db/repo/generations.js";
 import { createJob, updateJob } from "../db/repo/jobs.js";
 import { newGenerationId, newJobId } from "../util/ids.js";
@@ -532,13 +532,15 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
           !/white\s*(bg|background)|흰\s*배경/.test(rawPrompt.toLowerCase()) &&
           ((/transparent|투명/i.test(rawPrompt)) || !(/배경|background/i.test(rawPrompt)));
 
+        // 명시적 chromaKey override(green/magenta)가 오면 VFX 자동감지/자동키를 건너뛴다.
+        const argsChromaKey = args.chromaKey;
+
         // VFX 이펙트 감지 → 검은 배경 + 루미넌스 키. 아니면 chroma-key.
-        const genIsVfx = wantsTransparentGen && VFX_EFFECT_RE.test(rawPrompt);
+        // 명시적 chromaKey가 지정되면 VFX 자동감지 건너뜀 — caller 의도 우선.
+        const genIsVfx = wantsTransparentGen && !argsChromaKey && VFX_EFFECT_RE.test(rawPrompt);
 
         // 녹색 피사체 감지 → magenta key, 아니면 green key.
-        // 명시적 chromaKey override(green/magenta)가 오면 자동감지를 건너뛴다.
         const genGreenSubject = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase());
-        const argsChromaKey = args.chromaKey;
         const genChromaKey: ChromaKeyColor =
           argsChromaKey === "green" || argsChromaKey === "magenta"
             ? argsChromaKey
@@ -555,7 +557,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
               : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency."
           : "";
 
-        const prompt = ensureTransparentDefault(rawPrompt) + genBgInstruction;
+        const cleanPrompt = stripBgHints(rawPrompt);
+        const prompt = ensureTransparentDefault(cleanPrompt) + genBgInstruction;
         const genResult = await runImageTool({
           name,
           kind: "text2img",
@@ -574,6 +577,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
               if (genIsVfx) {
                 const lumaOut = await lumaKeyFile(filePath, log);
                 log(`generate_image luma-keyed gen=${genId} keyedOut=${lumaOut}`);
+                if (lumaOut === 0) {
+                  await fallbackBgRemove(filePath, log);
+                }
               } else {
                 // aggressivePockets: true — text2img wantsTransparent는 항상 순수 피사체 이미지이므로
                 // 연기가 green을 감싼 large isolated cluster까지 pocketCap 제한 없이 제거.

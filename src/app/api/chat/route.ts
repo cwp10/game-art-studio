@@ -20,7 +20,8 @@ import { tailProgress } from "@/lib/cli/progress-tail";
 import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
 import { DATA_DIR, IMAGES_DIR, imagePath, toRelative } from "@/lib/util/paths";
 import { parseIntent, type CodexIntent } from "@/lib/codex-orchestrator";
-import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, type ChromaKeyColor } from "@/lib/image-backend/chroma-key";
+import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, stripBgHints, type ChromaKeyColor } from "@/lib/image-backend/chroma-key";
+import { fallbackBgRemove } from "@/lib/image-backend/spritesheet-postprocess";
 
 /**
  * POST /api/chat — SSE 스트림 (M3: Claude → MCP → Codex 체인).
@@ -713,12 +714,12 @@ async function runDirectBackendJob(opts: {
     if (wantsTransparent) {
       if (VFX_EFFECT_RE.test(rawPrompt)) {
         text2imgUseLuma = true;
-        prompt = rawPrompt +
+        prompt = stripBgHints(rawPrompt) +
           "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. The post-processing pipeline will apply luminance keying — do NOT run remove_chroma_key.py or any chroma-key removal; save output.png as-is on the black background.";
       } else {
         const chromaKey: ChromaKeyColor = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase()) ? "magenta" : "green";
         text2imgChromaKey = chromaKey;
-        prompt = rawPrompt + (chromaKey === "magenta"
+        prompt = stripBgHints(rawPrompt) + (chromaKey === "magenta"
           ? "\nCRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the magenta to produce true transparency."
           : "\nCRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, crisp silhouette. Post-processing will key out the green to produce true transparency.");
       }
@@ -761,7 +762,10 @@ async function runDirectBackendJob(opts: {
   // 실패해도 1차 생성 결과를 그대로 사용(graceful degradation).
   if (text2imgUseLuma) {
     try {
-      await lumaKeyFile(result.imagePath);
+      const lumaOut = await lumaKeyFile(result.imagePath);
+      if (lumaOut === 0) {
+        await fallbackBgRemove(result.imagePath);
+      }
     } catch {
       // 후처리 실패 무시
     }

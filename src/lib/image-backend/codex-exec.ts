@@ -16,7 +16,7 @@ import type {
   ImageResult,
   ProgressCallback,
 } from "./index";
-import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, type ChromaKeyColor } from "./chroma-key";
+import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, stripBgHints, type ChromaKeyColor } from "./chroma-key";
 
 /**
  * CodexExecBackend — `codex exec` 를 spawn 해서 imagegen 스킬을 자동 발동.
@@ -114,17 +114,6 @@ function detectKeyColor(prompt: string): ChromaKeyColor {
 /** 배경 방식 결정: VFX 이펙트 → 검은 배경 + 루미넌스 키, 그 외 → 크로마키. */
 function detectBgMode(prompt: string): "luma" | "chroma" {
   return VFX_EFFECT_RE.test(prompt) ? "luma" : "chroma";
-}
-
-/** 유저 프롬프트에서 배경색 지정 문구를 제거 — 파이프라인 배경 지시와 충돌 방지 */
-function stripBgHints(prompt: string): string {
-  return prompt
-    .replace(/,?\s*(against|on)\s+(a\s+)?(pure\s+)?(white|black|green|magenta)\s+background[^,.;]*/gi, "")
-    .replace(/,?\s*with\s+(transparent\s+)?(white|black|green|magenta)?\s*transparent\s+background[^,.;]*/gi, "")
-    .replace(/,?\s*with\s+transparent(\s+(white|black|green|magenta))?\s+background[^,.;]*/gi, "")
-    .replace(/,?\s*transparent\s+(white|black|green|magenta)?\s*background[^,.;]*/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
 }
 
 function buildLayerExtractPrompt(job: ImageJob): string {
@@ -648,8 +637,12 @@ export class CodexExecBackend implements ImageBackend {
     if (job.kind === "remove_bg") {
       if (detectBgMode(job.prompt) === "luma") {
         onProgress("recovering", "luma key post-process");
-        const lumaKeyedOut = await lumaKeyFile(destPath);
-        await fs.appendFile(logFile, `\n# lumaKeyFile: keyedOut=${lumaKeyedOut}`);
+        try {
+          const lumaKeyedOut = await lumaKeyFile(destPath);
+          await fs.appendFile(logFile, `\n# lumaKeyFile: keyedOut=${lumaKeyedOut}`);
+        } catch (e) {
+          await fs.appendFile(logFile, `\n# lumaKeyFile error: ${(e as Error).message}`);
+        }
       } else {
         onProgress("recovering", "chroma key post-process");
         await chromaKeyAuto(destPath, job.prompt);

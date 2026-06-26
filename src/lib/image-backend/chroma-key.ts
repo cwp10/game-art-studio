@@ -36,7 +36,21 @@ export const GREEN_SUBJECT_RE =
  * GREEN_SUBJECT_RE 와 함께 codex-exec.ts detectBgMode() 에서 우선순위 결정에 쓴다.
  */
 export const VFX_EFFECT_RE =
-  /\b(smoke|fire|flame|glow|explosion|explode|aura|lightning|fog|mist|spark|ember|blast|flare|beam|burst|particle|vfx)\b|연기|불꽃|불길|글로우|폭발|오라|번개|안개|파티클|이펙트|빔|버스트/i;
+  /\b(smoke|flame|explosion|explode|lightning|fog|mist|spark|ember|flare|particle|vfx)\b|연기|불꽃|불길|폭발|번개|안개|파티클|이펙트/i;
+
+/**
+ * 유저 프롬프트에서 배경색 지정 문구를 제거 — 파이프라인 배경 지시와 충돌 방지.
+ * route.ts / server.ts / codex-exec.ts 공용.
+ */
+export function stripBgHints(prompt: string): string {
+  return prompt
+    .replace(/,?\s*(against|on)\s+(a\s+)?(pure\s+)?(white|black|green|magenta)\s+background[^,.;\n]*/gi, "")
+    .replace(/,?\s*with\s+(transparent\s+)?(white|black|green|magenta)?\s*transparent\s+background[^,.;\n]*/gi, "")
+    .replace(/,?\s*with\s+transparent(\s+(white|black|green|magenta))?\s+background[^,.;\n]*/gi, "")
+    .replace(/,?\s*transparent\s+(white|black|green|magenta)?\s*background[^,.;\n]*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
 type Logger = (line: string) => void;
 const noop: Logger = () => {};
@@ -247,21 +261,16 @@ export async function chromaKeyFile(
     // alpha_f < 0.1 이면 픽셀이 사실상 순수 배경색 — R/B 부스팅 금지(×10+ 증폭 방지).
     const alpha_f = 1 - ratio;
     if (alpha_f > 0.1) {
-      // Un-premultiply: pixel = fg * alpha_f + bg * ratio 에서 fg 역산.
+      // 키 채널만 un-premultiply — 비-키 채널은 증폭하지 않는다.
       if (keyColor === "green") {
-        // bg = (0, 255, 0)
-        data[i]     = Math.min(255, Math.round(data[i] / alpha_f));
         data[i + 1] = Math.max(0, Math.min(255, Math.round((data[i + 1] - 255 * ratio) / alpha_f)));
-        data[i + 2] = Math.min(255, Math.round(data[i + 2] / alpha_f));
       } else {
-        // bg = (255, 0, 255)
         data[i]     = Math.max(0, Math.min(255, Math.round((data[i] - 255 * ratio) / alpha_f)));
-        data[i + 1] = Math.min(255, Math.round(data[i + 1] / alpha_f));
         data[i + 2] = Math.max(0, Math.min(255, Math.round((data[i + 2] - 255 * ratio) / alpha_f)));
       }
     }
-    // AND합성: 크로마키 요구 알파와 기존 알파 중 더 투명한 쪽.
-    const chromaAlpha = Math.round(alpha_f * 255);
+    // alpha_f <= 0.1 은 순수 배경픽셀 — 완전 투명으로 처리.
+    const chromaAlpha = alpha_f > 0.1 ? Math.round(alpha_f * 255) : 0;
     data[i + 3] = Math.min(data[i + 3], chromaAlpha);
   }
 
@@ -305,7 +314,7 @@ export async function lumaKeyFile(
       data[i]     = Math.min(255, Math.round(r / a));
       data[i + 1] = Math.min(255, Math.round(g / a));
       data[i + 2] = Math.min(255, Math.round(b / a));
-      data[i + 3] = luma;
+      data[i + 3] = Math.min(data[i + 3], luma);
     }
   }
 
