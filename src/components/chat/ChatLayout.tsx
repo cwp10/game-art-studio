@@ -185,7 +185,10 @@ export function ChatLayout() {
     listMessages(state.activeSessionId, loadAbort.signal)
       .then(messages => {
         const sessionId = state.activeSessionId!;
-        const isGenerating = generatingSessionsRef.current.has(sessionId);
+        // ref(동기)와 React state(비동기) 둘 다 확인 — finally 블록에서 ref.delete가
+        // React update 처리보다 먼저 실행되는 race를 방지한다.
+        const isGenerating = generatingSessionsRef.current.has(sessionId)
+          || stateRef.current.generatingSessions.has(sessionId);
         const cached = isGenerating ? sessionItemsCacheRef.current.get(sessionId) : undefined;
         if (cached && cached.length > 0) {
           // 진행 중 세션 복귀 — tool call 진행 상태가 담긴 캐시로 복원 (DB 로드 생략)
