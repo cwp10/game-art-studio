@@ -337,7 +337,14 @@ function buildEmoteSheetPrompt(job: ImageJob): string {
 // normal_map 은 sharp 결정적 처리(server.ts)라 codex 미경유.
 const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
   text2img: (job) => PROMPT_HEADER + `Generate an image: ${job.prompt}`,
-  img2img: (job) => PROMPT_HEADER + `Use the attached image as a reference. Generate a new image: ${job.prompt}`,
+  img2img: (job) => {
+    // srcHasTransparent: 원본이 투명 배경이면 Codex 가 결과를 흰색으로 채우는 경향이 있어
+    // (composite-ai 합성 흐름) #00ff00 green 위에 그리게 지시하고 후처리에서 키아웃한다.
+    const greenSuffix = job.params?.srcHasTransparent
+      ? ` Place the subject on a flat solid #00ff00 green chroma-key background. The post-processing pipeline will remove the green.`
+      : ``;
+    return PROMPT_HEADER + `Use the attached image as a reference. Generate a new image: ${job.prompt}.${greenSuffix}`;
+  },
   inpaint: buildInpaintPrompt,
   upscale: (job) => PROMPT_HEADER + `Upscale the attached image to higher resolution while preserving all detail. ${job.prompt}`,
   remove_bg: (job) => {
@@ -407,7 +414,7 @@ async function chromaKeyAuto(filePath: string, prompt: string): Promise<void> {
  * 다운샘플은 알파의 부분 투명을 평균내므로 alpha<255 임계는 보수적으로 동작
  * (완전 불투명 시트만 false 가 됨).
  */
-async function hasTransparentBackground(imagePath: string): Promise<boolean> {
+export async function hasTransparentBackground(imagePath: string): Promise<boolean> {
   const { data, info } = await sharp(imagePath, { limitInputPixels: false })
     .resize(100, 100, { fit: "inside" })
     .ensureAlpha()
@@ -623,6 +630,13 @@ export class CodexExecBackend implements ImageBackend {
         onProgress("recovering", "chroma key post-process (transparent parent)");
         await chromaKeyFile(destPath, "green");
       }
+    }
+
+    // img2img 후처리: srcHasTransparent=true(원본 투명 배경, composite-ai 합성)면
+    // 프롬프트에서 #00ff00 green 위에 그리도록 지시했으므로 green 을 키아웃해 투명 복원.
+    if (job.kind === "img2img" && job.params?.srcHasTransparent) {
+      onProgress("recovering", "chroma key post-process (transparent parent)");
+      await chromaKeyFile(destPath, "green");
     }
 
     // 메타데이터

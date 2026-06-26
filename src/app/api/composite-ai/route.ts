@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getGeneration, createGeneration } from "@/lib/db/repo/generations";
 import { runComposite } from "@/lib/image-backend/composite-runner";
 import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
+import { hasTransparentBackground } from "@/lib/image-backend/codex-exec";
 import { claudeRunSimple } from "@/lib/cli/claude-cli";
 import { newGenerationId, newJobId } from "@/lib/util/ids";
 import { resolveImagePath, toRelative } from "@/lib/util/paths";
@@ -120,7 +121,11 @@ export async function POST(req: NextRequest) {
   }
   const inputPath = resolveImagePath(flatGen.image_path);
 
-  // 2.5 Claude Vision(Read 도구)으로 평탄화 이미지를 분석해 img2img 프롬프트 자동 생성.
+  // 2.5 평탄화 결과가 투명 배경이면(레이어가 캔버스를 다 못 채움) Codex img2img 가 흰색으로
+  //     채우는 경향이 있어, srcHasTransparent 를 job.params 로 전달해 green chroma-key 경유시킨다.
+  const srcHasTransparent = await hasTransparentBackground(inputPath);
+
+  // 2.6 Claude Vision(Read 도구)으로 평탄화 이미지를 분석해 img2img 프롬프트 자동 생성.
   //     실패하거나 빈 결과면 FALLBACK_PROMPT 로 안전하게 대체(graceful degradation).
   let generatedPrompt = FALLBACK_PROMPT;
   try {
@@ -145,6 +150,7 @@ export async function POST(req: NextRequest) {
     kind: "img2img",
     prompt: generatedPrompt,
     inputImagePaths: [inputPath],
+    params: { aiComposite: true, srcHasTransparent },
   };
 
   const backend = await selectImageBackend();
