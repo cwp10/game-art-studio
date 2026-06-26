@@ -215,34 +215,24 @@ export async function chromaKeyFile(
     // fringe 는 배경(bgKey)에서 반경 이내일 때만 처리 — 내부 깊은 키색 보존.
     if (bgDist[p] > DESPILL_RADIUS) continue;
     const origKeyChannel = keyColor === "green" ? data[i + 1] : Math.min(data[i], data[i + 2]);
-    // despill: 키 채널을 반대 채널 쪽으로 끌어내림(green→g=max(r,b), magenta→r,b=g).
-    // magenta despill: G 채널에 반비례해 despill 강도 조절 (gStrength = 1 - G/160).
-    // G=0(순수 마젠타 스필) → 100% despill, G=160 이상 → 0%(완전 보존).
-    // 자주색/보라색 캐릭터는 G가 높아 자동으로 보호됨.
-    if (keyColor === "green") {
-      // 경계 4px 이내: 강제 100% despill (색 오염 최대 구간).
-      // 이후: 거리 선형 감쇠. bgDist=5→0.67, bgDist=14→0.07.
-      const spillStrength = bgDist[p] <= 4 ? 1.0 : 1 - bgDist[p] / (DESPILL_RADIUS + 1);
-      const targetG = Math.max(data[i], data[i + 2]);
-      data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * spillStrength);
-      if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
-    } else {
-      // G에 비례해 despill 강도를 감쇠: G=0이면 100%, G=160이면 0%.
-      // G 높음(청록/자주 이펙트) → 색 보존, G 낮음(마젠타 스필) → 완전 despill.
-      // continue 제거로 fade는 항상 적용.
-      const gStrength = Math.max(0, 1 - data[i + 1] / 160);
-      if (gStrength > 0) {
-        const targetRB = data[i + 1];
-        data[i] = Math.round(data[i] - (data[i] - targetRB) * gStrength);
-        data[i + 2] = Math.round(data[i + 2] - (data[i + 2] - targetRB) * gStrength);
-      }
-    }
-    // ratio 기반 알파 페이드 — Python chroma-key 방식:
-    // ratio = keyness / 키채널값 → 순수 키색(ratio=1): alpha=0, 혼합 픽셀(ratio=0): alpha 유지.
-    // origKeyChannel 사용: despill이 채널을 수정하기 전 원본 비율로 계산.
     const ratio = origKeyChannel > 0 ? Math.max(0, Math.min(1, k / origKeyChannel)) : 0;
-    // AND합성: 크로마키 요구 알파와 기존 알파 중 더 투명한 쪽 — 기존 반투명 보존.
-    const chromaAlpha = Math.round((1 - ratio) * 255);
+    // alpha_f: 전경(피사체) 기여 비율. 최소 0.05 설정으로 극값 방지.
+    const alpha_f = Math.max(0.05, 1 - ratio);
+    // Un-premultiply: pixel = fg * alpha_f + bg * ratio 에서 fg 역산.
+    // 배경색 기여분을 제거하고 전경색을 복원 — R·B도 boost해 불꽃·이펙트 색상 보존.
+    if (keyColor === "green") {
+      // bg = (0, 255, 0)
+      data[i]     = Math.min(255, Math.round(data[i] / alpha_f));
+      data[i + 1] = Math.max(0, Math.min(255, Math.round((data[i + 1] - 255 * ratio) / alpha_f)));
+      data[i + 2] = Math.min(255, Math.round(data[i + 2] / alpha_f));
+    } else {
+      // bg = (255, 0, 255)
+      data[i]     = Math.max(0, Math.min(255, Math.round((data[i] - 255 * ratio) / alpha_f)));
+      data[i + 1] = Math.min(255, Math.round(data[i + 1] / alpha_f));
+      data[i + 2] = Math.max(0, Math.min(255, Math.round((data[i + 2] - 255 * ratio) / alpha_f)));
+    }
+    // AND합성: 크로마키 요구 알파와 기존 알파 중 더 투명한 쪽.
+    const chromaAlpha = Math.round(alpha_f * 255);
     data[i + 3] = Math.min(data[i + 3], chromaAlpha);
   }
 
