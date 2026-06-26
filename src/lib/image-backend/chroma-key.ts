@@ -94,7 +94,6 @@ export async function chromaKeyFile(
     hardThresh = Math.max(thMin, Math.min(thMax, Math.round(median * 0.5)));
   }
   const fringeFloor = keyColor === "green" ? 5 : 2;
-  const fringeSpan = Math.max(8, Math.round((hardThresh - fringeFloor) * 0.6));
 
   // 2. hard-key 후보 마스크.
   const isHardKey = new Uint8Array(N);
@@ -148,22 +147,22 @@ export async function chromaKeyFile(
       const comp: number[] = [s];
       cstk.length = 0;
       cstk.push(s);
+      const tryp = (q: number) => {
+        if (q >= 0 && q < N && isHardKey[q] === 1 && bgKey[q] === 0 && visited[q] === 0) {
+          visited[q] = 1;
+          comp.push(q);
+          cstk.push(q);
+        }
+      };
       while (cstk.length > 0) {
         const p = cstk.pop()!;
         const x = p % W;
-        const tryp = (q: number) => {
-          if (q >= 0 && q < N && isHardKey[q] === 1 && bgKey[q] === 0 && visited[q] === 0) {
-            visited[q] = 1;
-            comp.push(q);
-            cstk.push(q);
-          }
-        };
         if (x > 0) tryp(p - 1);
         if (x < W - 1) tryp(p + 1);
         if (p >= W) tryp(p - W);
         if (p < N - W) tryp(p + W);
       }
-      if (comp.length < pocketCap) {
+      if (comp.length < pocketCap) { // 엄격 미만: pocketCap 이상은 캐릭터 내부로 보존
         for (const p of comp) bgKey[p] = 1; // 작은 포켓 → 배경으로 흡수
       }
     }
@@ -173,7 +172,7 @@ export async function chromaKeyFile(
   //   1px → N px feather 로 확대해 다크 엣지 2~3px 안쪽 녹색 halo 까지 잡되, 내부 깊은
   //   키색(옷·본체)은 거리 > 반경이라 영향 없음(CASE D 보존).
   const DESPILL_RADIUS = 14; // 경계에서 먼 fringe 잔재까지 흡수 (green/magenta 동일)
-  const bgDist = new Uint8Array(N).fill(255);
+  const bgDist = new Uint8Array(N).fill(255); // 255 = 미방문 sentinel (> DESPILL_RADIUS)
   {
     const bfs: number[] = [];
     for (let p = 0; p < N; p++) {
@@ -215,14 +214,16 @@ export async function chromaKeyFile(
     if (k <= fringeFloor) continue;
     // fringe 는 배경(bgKey)에서 반경 이내일 때만 처리 — 내부 깊은 키색 보존.
     if (bgDist[p] > DESPILL_RADIUS) continue;
+    const origKeyChannel = keyColor === "green" ? data[i + 1] : Math.min(data[i], data[i + 2]);
     // despill: 키 채널을 반대 채널 쪽으로 끌어내림(green→g=max(r,b), magenta→r,b=g).
-    // magenta despill: G 채널이 높으면 진짜 자주색/보라색 캐릭터 픽셀이므로 스킵.
-    // 마젠타 스필은 G≈0-20, 자주색 캐릭터는 G≈30-80 으로 구분 가능.
+    // magenta despill: G 채널에 반비례해 despill 강도 조절 (gStrength = 1 - G/160).
+    // G=0(순수 마젠타 스필) → 100% despill, G=160 이상 → 0%(완전 보존).
+    // 자주색/보라색 캐릭터는 G가 높아 자동으로 보호됨.
     if (keyColor === "green") {
-      // 배경 거리에 따라 despill 강도 조절: 가까울수록 더 강하게
+      // 배경 거리에 비례해 선형 감쇠: 가까울수록 강하게, 멀수록 약하게
       const spillStrength = 1 - bgDist[p] / (DESPILL_RADIUS + 1);
       const targetG = Math.max(data[i], data[i + 2]);
-      data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * Math.max(0.5, spillStrength));
+      data[i + 1] = Math.round(data[i + 1] - (data[i + 1] - targetG) * spillStrength);
       if (data[i + 1] > 0) data[i + 1] = Math.max(0, data[i + 1] - 3);
     } else {
       // G에 비례해 despill 강도를 감쇠: G=0이면 100%, G=160이면 0%.
@@ -235,15 +236,26 @@ export async function chromaKeyFile(
         data[i + 2] = Math.round(data[i + 2] - (data[i + 2] - targetRB) * gStrength);
       }
     }
-    const fade = 1 - Math.min(1, (k - fringeFloor) / fringeSpan);
-    data[i + 3] = Math.round(data[i + 3] * fade);
+    // ratio 기반 알파 페이드 — Python chroma-key 방식:
+    // ratio = keyness / 키채널값 → 순수 키색(ratio=1): alpha=0, 혼합 픽셀(ratio=0): alpha 유지.
+    // origKeyChannel 사용: despill이 채널을 수정하기 전 원본 비율로 계산.
+    const ratio = origKeyChannel > 0 ? Math.max(0, Math.min(1, k / origKeyChannel)) : 0;
+    // AND합성: 크로마키 요구 알파와 기존 알파 중 더 투명한 쪽 — 기존 반투명 보존.
+    const chromaAlpha = Math.round((1 - ratio) * 255);
+    data[i + 3] = Math.min(data[i + 3], chromaAlpha);
   }
 
   // Alpha erosion: 배경 경계 1px 이내 픽셀을 투명화해 despill 후 남은 fringe 잔재 제거.
   // 이펙트·소프트 경계 이미지에서 haloing을 확실히 없앤다.
   for (let p = 0; p < N; p++) {
     if (data[p * ch + 3] === 0) continue;
-    if (bgDist[p] <= 1) data[p * ch + 3] = 0;
+    if (bgDist[p] > 1) continue;
+    const pi = p * ch;
+    const ek = keyness(pi);
+    if (ek <= fringeFloor) continue;
+    const eOrig = keyColor === "green" ? data[pi + 1] : Math.min(data[pi], data[pi + 2]);
+    const eRatio = eOrig > 0 ? Math.max(0, Math.min(1, ek / eOrig)) : 0;
+    data[pi + 3] = Math.min(data[pi + 3], Math.round((1 - eRatio) * 255));
   }
 
   const tmpPath = filePath + ".chroma.tmp";
