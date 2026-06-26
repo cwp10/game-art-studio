@@ -503,8 +503,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         generating: true,
       };
     }
-    case "restore_generating_items":
-      return { ...state, items: action.items, generating: true };
+    case "restore_generating_items": {
+      const last = action.items[action.items.length - 1];
+      // 캐시가 user 메시지로 끝나면 (SSE 이벤트 도착 전 전환) pending placeholder 추가
+      const items =
+        last?.kind === "user"
+          ? [...action.items, { kind: "assistant" as const, id: "__pending__", toolCalls: [], finished: false }]
+          : action.items;
+      return { ...state, items, generating: true };
+    }
     case "add_generating_session": {
       const next = new Set(state.generatingSessions);
       next.add(action.sessionId);
