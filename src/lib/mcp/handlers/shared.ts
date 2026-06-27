@@ -429,63 +429,58 @@ export async function buildSpritePrompt(
 
   // ── 보행 사이클 규칙 ────────────────────────────────────────────────────
   const walkCycleRule = isWalk && isCharacter
-    ? `ANTI-STATIC ANIMATION RULE (CRITICAL, READ FIRST): Each of the ${cols * rows} frames MUST be visually different from every other frame. If any two frames look identical or near-identical, those frames are WRONG — walking means legs move continuously through the gait cycle. A static character repeated ${cols * rows} times is a COMPLETE FAILURE. YOU MUST SHOW CONTINUOUS MOVEMENT. ` +
+    ? `ANIMATION VARIETY (CRITICAL): Each of the ${cols * rows} frames shows a visually distinct pose — legs advance continuously through the gait cycle. Avoid frames that look identical or near-identical to any other frame. Avoid repeating the same pose across multiple cells. ` +
       `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
       `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
       `(1) CONTACT — left leg fully forward, right leg fully back; ` +
       `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
       `(3) CONTACT — right leg fully forward, left leg fully back; ` +
       `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
-      `This 4-phase pattern covers exactly ONE complete gait cycle. All ${cols * rows} frames must span EXACTLY ONE cycle — not a partial loop, not two repetitions. For more frames, subdivide each phase finely within that single cycle. ` +
-      `The crossover frames (legs close/passing) are REQUIRED — they are what makes the motion look natural and smooth. ` +
-      `NEVER produce a cycle where the legs stay extended in the same direction for multiple frames with no crossover. ` +
-      `LEG VISIBILITY (CRITICAL): In EVERY frame, BOTH legs must be clearly visible and spatially separated. ` +
-      `The gap between the two legs must be OBVIOUS — never draw them overlapping or merged into a single shape. ` +
-      `For side views: one leg is visibly in FRONT of the other with clear fore/aft depth separation. ` +
-      `For front/back views: one foot is visibly further FORWARD (lower in frame) while the other is back (higher). ` +
-      `If the character has visible joints (knees, ankles), show those joints at different positions between the two legs in every frame. ` +
+      `This 4-phase pattern covers exactly ONE complete gait cycle. All ${cols * rows} frames span exactly one cycle — subdivide each phase finely when there are more frames. ` +
+      `Crossover frames (legs close/passing) are required — they produce natural, smooth motion. ` +
+      `Avoid a cycle where legs stay extended in the same direction for multiple consecutive frames with no crossover. ` +
+      `LEG VISIBILITY (CRITICAL): In every frame, both legs are clearly visible and spatially separated — the gap between them is obvious. For side views: one leg is visibly in FRONT of the other with clear fore/aft depth. For front/back views: one foot is clearly further forward (lower in frame) while the other is back (higher). Show knee and ankle joints at visibly different positions between the two legs. Avoid overlapping or merging the two legs into a single shape in any frame. ` +
       (parsedWalkDir && !singleDirWalkDir
         ? `WALKING DIRECTION (CRITICAL): The character walks toward screen-${parsedWalkDir}. ` +
-          `The character MUST face screen-${parsedWalkDir} in EVERY frame — do NOT reverse or mirror this direction. ` +
+          `The character faces screen-${parsedWalkDir} in every frame. Avoid reversing or mirroring the facing direction. ` +
           (poseRefPath ? `Use the FACING CUE nub in the pose guide to confirm the correct facing. ` : "")
         : "") +
       (singleDirWalkDir
         ? `FOOT/TOE DIRECTION (CRITICAL): The character walks toward screen-${singleDirWalkDir}. ` +
-          `Both feet and toes MUST point toward screen-${singleDirWalkDir} in EVERY frame. ` +
-          `In stride/contact frames BOTH legs must extend — one leg forward, one backward — symmetrically. ` +
-          `Do NOT show only one leg extending. Do NOT draw feet or toes pointing opposite to the walking direction. ` +
+          `Both feet and toes point toward screen-${singleDirWalkDir} in every frame. ` +
+          `In stride/contact frames both legs extend — one forward, one backward. ` +
+          `Avoid showing only one leg extending. Avoid feet or toes pointing opposite to the walking direction. ` +
           `STRIDE DEPTH (CRITICAL): The forward/leading leg is always drawn IN FRONT OF the trailing leg — the leading boot visibly overlaps the back boot. ` +
           `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
           `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
-          `BOTH boots must take turns being the leading boot. Never show the same boot in front across every stride frame. ` +
-          `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
-          `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
-          `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — ` +
-          `when LEFT leg is forward (+angle), RIGHT leg MUST be back (-angle) at equal magnitude, and vice versa. ` +
-          `Typical contact stride: one leg at approximately +25° to +35°, the other at -25° to -35°. ` +
-          `MID-STANCE/CROSSOVER frames: both legs are near vertical (0°) but STILL at slightly different positions — ` +
-          `e.g. LEFT at +5°, RIGHT at -5° — they are crossing, NOT both at 0° simultaneously. ` +
-          `NEVER draw both legs at the same angle in any frame. Symmetric leg poses (both legs identical) indicate a static T-pose, NOT a walk cycle — this is a critical error. `
+          `Both boots take turns being the leading boot. Avoid showing the same boot in front in every contact frame. ` +
+          `LEG ANGLES (CRITICAL, NON-NEGOTIABLE): ` +
+          `The LEFT leg and the RIGHT leg have DIFFERENT angles in every single frame. ` +
+          `CONTACT frames: LEFT and RIGHT legs are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT is back (−angle) at equal magnitude, and vice versa. ` +
+          `Typical contact stride: one leg at approximately +25° to +35°, the other at −25° to −35°. ` +
+          `MID-STANCE/CROSSOVER frames: both legs near vertical (0°) but still at slightly different positions — e.g. LEFT at +5°, RIGHT at −5° — they are crossing. ` +
+          `Avoid identical leg angles in any frame. Avoid symmetric leg poses — matched angles indicate a static T-pose, not a walk cycle. ` +
+          `CROSSING DEPTH SWAP (CRITICAL): In every crossover/mid-stance frame, the leg that was in the foreground during the previous contact moves visibly to the background as the opposite leg comes forward — the fore/aft depth order swaps at every cross. Avoid crossing frames where the legs only close together without changing which is in front. Avoid keeping the same leg in the foreground before and after the crossover. Avoid merged or fused legs during the passing phase — both legs remain individually visible with clear spatial separation throughout the cross. `
         : parsedWalkDir === "DOWN" || parsedWalkDir === "UP"
         ? `FRONT/BACK LEG DEPTH RULE (CRITICAL): For this front/back-facing walk, leg separation is shown as DEPTH, not side-to-side angles. ` +
           `CONTACT frames: ONE foot is drawn LOWER in the frame (stepped forward toward the camera) and the OTHER foot is drawn HIGHER (pulled back away from the camera). ` +
           `The vertical gap between the two feet must be OBVIOUS — at least 15% of the cell height. ` +
-          `CROSSOVER frames: both feet near the same height, but STILL at slightly different vertical positions — never both at exactly the same height. ` +
-          `In EVERY frame, the two feet MUST be at different heights. Never let both feet sit at the same vertical position — that is a T-pose (static), not a walk. `
+          `CROSSOVER frames: both feet near the same height but at slightly different vertical positions. In every frame, the two feet are at different heights. Avoid placing both feet at exactly the same vertical position — that indicates a T-pose, not a walk. `
         : parsedWalkDir
-        ? `LEFT vs RIGHT LEG ANGLE (CRITICAL, NON-NEGOTIABLE): ` +
-          `The LEFT leg and the RIGHT leg MUST have DIFFERENT angles in EVERY single frame. ` +
-          `CONTACT frames: LEFT leg and RIGHT leg are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT MUST be back (-angle), and vice versa. ` +
-          `Typical contact stride: one leg ~+20° to +32°, the other ~-20° to -32°. ` +
-          `CROSSOVER frames: both legs near 0° but STILL slightly different — e.g. LEFT +5°, RIGHT -5°. ` +
-          `NEVER draw both legs at the same angle in any frame. Symmetric poses indicate a static T-pose, NOT a walk cycle. `
+        ? `LEG ANGLES (CRITICAL, NON-NEGOTIABLE): ` +
+          `The LEFT leg and the RIGHT leg have DIFFERENT angles in every single frame. ` +
+          `CONTACT frames: LEFT and RIGHT legs are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT is back (−angle), and vice versa. ` +
+          `Typical contact stride: one leg ~+20° to +32°, the other ~−20° to −32°. ` +
+          `CROSSOVER frames: both legs near 0° but still slightly different — e.g. LEFT +5°, RIGHT −5°. ` +
+          `Avoid identical leg angles in any frame. Avoid symmetric poses — they indicate a static T-pose, not a walk cycle. `
         : "") +
       (rows > 1 && parsedWalkDir
-        ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row continues the animation from the previous row — NOT a new cycle. ` +
-          `The leading foot at the START of each row MUST be the OPPOSITE foot from the start of the previous row (alternating per row). ` +
+        ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row continues the animation from the previous row. ` +
+          `The leading foot at the start of each row alternates — opposite to the previous row's starting foot. ` +
           `row1col1 = L-CONTACT (left foot forward); row2col1 = R-CONTACT (right foot forward)` +
           (rows > 2 ? `; row3col1 = L-CONTACT again` : "") +
-          `. Every row MUST look visually DISTINCT from every other row — never copy or repeat poses across rows. `
+          `. Every row is visually distinct from every other row. Avoid copying or repeating poses from one row to another. ` +
+          `Row 2 continues directly from where row 1 ended — row2col1 shows the RIGHT foot as the leading/forward foot. Avoid treating row 2 as a new or restarted animation cycle. Avoid drawing row2col1 with the left foot forward. Avoid repeating the same opening pose from row1col1 in row2col1. `
         : "")
     : "";
 
