@@ -36,7 +36,7 @@ export const GREEN_SUBJECT_RE =
  * GREEN_SUBJECT_RE 와 함께 codex-exec.ts detectBgMode() 에서 우선순위 결정에 쓴다.
  */
 export const VFX_EFFECT_RE =
-  /\b(smoke|flame|explosion|explode|lightning|fog|mist|spark|ember|flare|particle|vfx)\b|연기|불꽃|불길|폭발|번개|안개|파티클|이펙트/i;
+  /\b(smoke|fire|flame|glow|explosion|explode|aura|lightning|fog|mist|spark|ember|blast|flare|beam|burst|particle|vfx)\b|연기|불꽃|불길|글로우|폭발|오라|번개|안개|파티클|이펙트|빔|버스트/i;
 
 /**
  * 유저 프롬프트에서 배경색 지정 문구를 제거 — 파이프라인 배경 지시와 충돌 방지.
