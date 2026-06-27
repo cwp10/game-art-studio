@@ -418,7 +418,10 @@ export async function buildSpritePrompt(
       const lA = a.leftDeg;
       const rA = a.rightDeg;
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
-      return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})`;
+      const leadingLeg =
+        a.label === "L-CONTACT" ? " — LEADING LEG: LEFT (left foot reaches FORWARD, right foot BACK)" :
+        a.label === "R-CONTACT" ? " — LEADING LEG: RIGHT (right foot reaches FORWARD, left foot BACK)" : "";
+      return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
     return `MANDATORY FRAME SEQUENCE: ${descs.join("; ")}. `;
   };
