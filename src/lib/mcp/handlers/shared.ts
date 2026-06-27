@@ -249,7 +249,7 @@ export async function buildSpritePrompt(
   const loopInstruction = seamlessLoop
     ? `INFINITE LOOP (CRITICAL): Frames play [1→2→…→N→1→2…] forever — Frame N leads directly back into Frame 1. ` +
       `Design a CLOSED CYCLE: Walk/run — Frame N flows into Frame 1's pose. Idle — Frame N is mid-motion flowing into Frame 1. Attack — Frame N is the final recovery moment returning toward Frame 1's ready stance. ` +
-      `NEVER design a linear arc (wind-up → peak → stop). ALWAYS a seamless cycle. `
+      `Design a seamless closed cycle — avoid a linear arc (wind-up → peak → stop). `
     : "";
 
   // ── 앵커·콘텐츠 규칙 ────────────────────────────────────────────────────
@@ -267,13 +267,13 @@ export async function buildSpritePrompt(
           : isObject
           ? `center the object so its visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
             `Keep the object at a CONSISTENT scale across all frames — only the animated aspect (rotation angle, deformation, etc.) changes between frames. ` +
-            `The object's complete bounding box must be vertically and horizontally centered; do NOT rest it on the bottom edge or use any ground line. `
-          : `this is a visual effect / VFX, NOT a grounded character. ` +
+            `The object's complete bounding box must be vertically and horizontally centered. Avoid resting it on the bottom edge or using any ground line. `
+          : `this is a visual effect / VFX, not a grounded character. ` +
             `Place the effect so its OWN visual center sits exactly at the cell center X=${cx}, Y=${cy} in EVERY cell. ` +
             `The effect's COMPLETE bounding box — INCLUDING any trailing tail, motion streak, after-image, sparks, and particles — must be vertically centered: ` +
             `the topmost and bottommost drawn pixels must be EQUIDISTANT from the cell's top and bottom edges (equal empty rows above and below the whole shape). ` +
-            `The trailing tail must NOT reach or touch the bottom edge. ` +
-            `Do NOT rest it on the bottom edge, do NOT use any ground line, floor, or shadow plane — the effect floats centered and radiates symmetrically in all directions. `;
+            `The trailing tail must stay clear of the bottom edge. ` +
+            `The effect floats centered and radiates symmetrically in all directions. Avoid resting it on the bottom edge. Avoid any ground line, floor, or shadow plane. `;
     }
   })();
   const anchorRule = `(5) ${isCharacter ? "CHARACTER" : isObject ? "OBJECT" : "EFFECT"} ANCHOR — ${placementRule}`;
@@ -291,9 +291,7 @@ export async function buildSpritePrompt(
 
   const effectGuard = isCharacter
     ? `Render the character's body and its INTRINSIC design only. ` +
-      `Do NOT add action or ability visual effects: NO attack slash trails, ` +
-      `NO spell or magic particles, NO projectiles, NO emitted auras around the body, ` +
-      `NO motion lines, NO impact flashes, NO smoke, NO sparkles, NO extra decorative VFX. ` +
+      `Avoid adding action or ability visual effects: avoid attack slash trails, spell or magic particles, projectiles, emitted auras around the body, motion lines, impact flashes, smoke, sparkles, or extra decorative VFX. ` +
       `The character's OWN intrinsic material is fine (e.g. a robot's status lights or ` +
       `glowing core, a fire creature's flame body, a weapon that glows as part of its ` +
       `resting design). Any action or ability effect belongs on a SEPARATE effect sprite sheet. `
@@ -302,16 +300,16 @@ export async function buildSpritePrompt(
   const directionPrompt = isCharacter && directions ? buildDirectionPrompt(directions, cols) : "";
   const rowCountRule = isCharacter && directions
     ? `The sheet MUST have EXACTLY ${rows} horizontal rows of cells (one row per direction), filled from top to bottom. ` +
-      `Draw all ${rows} rows — do NOT compress, merge, or omit rows, do NOT leave any row empty, and keep EQUAL vertical spacing between the ${rows} rows. `
+      `Draw all ${rows} rows with equal vertical spacing. Avoid compressing, merging, or omitting rows. Avoid leaving any row empty. `
     : "";
   const colCountRule = isCharacter && directions
     ? `Each row MUST contain EXACTLY ${cols} frames placed left to right, filling every column. ` +
-      `Draw all ${cols} frames in every row — do NOT compress, merge, or omit frames, do NOT leave any column empty, and keep EQUAL horizontal spacing between the ${cols} frames. `
+      `Draw all ${cols} frames in every row with equal horizontal spacing. Avoid compressing, merging, or omitting frames. Avoid leaving any column empty. `
     : "";
   const equipmentRule = isCharacter
-    ? `OBJECT VISIBILITY: Every held, carried, or worn object MUST be fully visible in EVERY frame — never hidden, shrunk, or omitted, even mid-swing or when the limb faces away. ` +
-      `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, shield, backpack, wings, scabbard): MUST protrude from the back in every frame — never absorbed into the body outline in side, rear, or 3/4 poses. ` +
-      `ARM-MOUNTED ITEMS (shield, buckler, bracer): MUST remain visible even when that arm swings backward — never fully covered by the body silhouette. ` +
+    ? `OBJECT VISIBILITY: Every held, carried, or worn object is fully visible in every frame — including mid-swing and when the limb faces away. Avoid hiding, shrinking, or omitting any object in any frame. ` +
+      `BACK-MOUNTED ACCESSORIES (bow, quiver, cape, shield, backpack, wings, scabbard): protrude from the back in every frame. Avoid absorbing them into the body outline in side, rear, or 3/4 poses. ` +
+      `ARM-MOUNTED ITEMS (shield, buckler, bracer): remain visible even when that arm swings backward. Avoid fully covering them with the body silhouette. ` +
       (() => {
         if (refHandDescription) {
           // 화면 좌/우 기준 — 요청 facing 은 참조 방향에 정렬돼 있으므로(handler 방안 A),
@@ -324,9 +322,7 @@ export async function buildSpritePrompt(
           if (parts.length > 0) {
             return `PERMANENT ARM ASSIGNMENT (non-negotiable, matched to the reference image): in the reference, ${parts.join("; ")} ` +
               `(LEFT side / RIGHT side = which half of the image, same orientation as the reference). ` +
-              `Each object is LOCKED to that same arm and that same side of the body for the ENTIRE animation — it NEVER crosses to the other arm or the other side at any frame. ` +
-              `When the torso twists or the arm swings behind the body, the object MOVES WITH ITS ARM and stays visible on its side. ` +
-              `Any cross-over swap is a CRITICAL ERROR — verify against the reference image. `;
+              `Each object stays locked to that same arm and side of the body for the entire animation — it moves with its arm even when the torso twists or the arm swings behind the body. Avoid crossing any object to the other arm or the other side at any frame. Verify arm assignments against the reference image. `;
           }
         }
         if (refPath) {
@@ -502,13 +498,10 @@ export async function buildSpritePrompt(
   })();
 
   const actionAnimRule = !isWalk && isCharacter && cols >= 2
-    ? `ACTION ANIMATION — DISTINCT POSES REQUIRED (CRITICAL): This is an action animation, NOT a static image. ` +
-      `Each of the ${cols * rows} frames MUST show a dramatically different body pose. ` +
-      `If any two frames look similar or identical, those frames are WRONG. ` +
+    ? `ACTION ANIMATION — DISTINCT POSES REQUIRED (CRITICAL): This is an action animation — each of the ${cols * rows} frames shows a dramatically different body pose. ` +
       (rows === 1 ? actionPhaseDesc : "") +
-      `The body pose change between consecutive frames MUST be OBVIOUS and EXAGGERATED — ` +
-      `subtle head tilts or minor arm shifts are NOT enough. Show full-body commitment to each phase. ` +
-      `All ${cols * rows} frames cover EXACTLY ONE complete action cycle from start to finish — not a partial action, not two repetitions. `
+      `The body pose change between consecutive frames is obvious and exaggerated — show full-body commitment to each phase. Avoid subtle head tilts or minor arm shifts as the only change between frames. ` +
+      `All ${cols * rows} frames cover exactly ONE complete action cycle from start to finish. Avoid partial actions or repeated cycles. `
     : "";
 
   // ── 액션 다행 연속성 규칙 ─────────────────────────────────────────────
@@ -533,19 +526,18 @@ export async function buildSpritePrompt(
       }).join(", ");
       return `Row ${r + 1}: ${phases}`;
     }).join("; ");
-    return `ACTION CYCLE — ROW CONTINUITY (CRITICAL): All ${total} frames read left→right then top→bottom form ONE unbroken action cycle — NOT ${rows} separate cycles. ` +
-      `Row 2 starts exactly where Row 1 left off — it is NOT a reset or a new cycle. ` +
+    return `ACTION CYCLE — ROW CONTINUITY (CRITICAL): All ${total} frames read left→right then top→bottom form ONE unbroken action cycle. Row 2 starts exactly where Row 1 left off — it continues the cycle, not resets it. ` +
       `PER-FRAME PHASE MAP: ${rowDescs}. ` +
-      `Every row MUST look completely different from every other row — identical row poses are a CRITICAL ERROR. `;
+      `Every row looks completely different from every other row. Avoid repeating or restarting the action cycle at the start of a new row. `;
   })();
 
   const poseRefInstruction = poseRefPath
     ? `POSE GUIDE (first attached image): The first attached image is the grid template with stick-figure skeletons already drawn inside each cell. ` +
       `CRITICAL COLOR CODING — Blue skeleton line = LEFT leg (character's own left); Red skeleton line = RIGHT leg (character's own right). ` +
-      `FACING CUE — the short nub protruding from the head marks the FACING direction: orient the character to face the way the nub points (this disambiguates left-facing vs right-facing side views). A dark/filled head with no nub = back view (facing away). Do NOT draw the nub itself as a spike or feature — it only indicates which way the character looks. ` +
+      `FACING CUE — the short nub protruding from the head marks the FACING direction: orient the character to face the way the nub points (this disambiguates left-facing vs right-facing side views). A dark/filled head with no nub = back view (facing away). The nub indicates direction only — avoid drawing it as a spike or visible feature. ` +
       `Each skeleton shows the EXACT per-leg angle required for that cell. ` +
       `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
-      `Do NOT swap left and right legs. Do NOT average or blend the two angles into a single symmetric pose. Do NOT use the same angle for both legs. ` +
+      `Match each leg to its skeleton color independently and precisely. Avoid swapping left and right legs. Avoid averaging or blending the two angles into a symmetric pose. Avoid using the same angle for both legs. ` +
       `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
       (poseFrameAnglesText
         ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
@@ -554,19 +546,19 @@ export async function buildSpritePrompt(
             ? `ROW CONTINUITY (CRITICAL): This grid is ONE continuous animation sequence — each row continues from where the previous row ended. ` +
               `The leading foot at the start of each row alternates: row1col1 = L-CONTACT, row2col1 = R-CONTACT` +
               (rows > 2 ? `, row3col1 = L-CONTACT, and so on` : "") +
-              `. Every row MUST look visually DISTINCT from every other row — never copy, mirror, or repeat poses across rows. `
+              `. Every row is visually distinct from every other row. Avoid copying, mirroring, or repeating poses across rows. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
           `, negative = back. ` +
           `Each cell specifies a DIFFERENT angle for L and R — you MUST match both independently. ` +
           `When L and R have OPPOSITE signs (one positive, one negative), it is a contact/stride frame: draw maximum separation with clearly different fore/aft positions. ` +
-          `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles, never merged into one silhouette. ` +
+          `When L and R have SIMILAR signs (both near 0°), it is a crossover frame: draw both legs close together but still at their specified angles. Avoid merging them into a single silhouette. ` +
           `Some cells (front/back-facing rows) use a depth note instead of an angle, because their legs swing toward/away from the camera, not sideways. ` +
           `'fwd(lower)' = draw that foot CLEARLY LOWER in the frame (stepped forward toward the viewer) — in CONTACT frames, this foot must be at least 15% of the cell height lower than the other foot. ` +
           `'fwd(higher)' = draw that foot CLEARLY HIGHER in the frame (stepped forward away from the viewer, back-facing walk). ` +
           `'back(lower)' / 'back(higher)' = the trailing foot at the opposite position. ` +
-          `In ALL CONTACT frames, the two feet must have an OBVIOUS height difference — never draw both feet at the same vertical position. `
+          `In every contact frame, the two feet have an obvious height difference. Avoid placing both feet at the same vertical position. `
         : "")
     : "";
 
@@ -600,8 +592,8 @@ export async function buildSpritePrompt(
         (singleDirWalkDir
           ? `This is a pure side view: the nose, face, chest, and leading foot all point ${singleDirWalkDir}, ` +
             `while the back, ponytail/hair, cape, and trailing limbs stream toward the OPPOSITE side. ` +
-            `Do NOT mirror, flip, or reverse this orientation — if the character ends up facing the other way, the ENTIRE sheet is WRONG and must be redrawn facing ${singleDirWalkDir}. `
-          : `Keep this exact orientation in every frame — do NOT mirror or flip it. `) +
+            `Keep this exact orientation in every frame — the character faces ${singleDirWalkDir}. Avoid mirroring, flipping, or reversing this orientation. `
+          : `Keep this exact orientation in every frame. Avoid mirroring or flipping it. `) +
         (rows > 1
           ? `ALL ${rows} rows in this sheet face the SAME direction: ${parsedWalkDir}. ` +
             `Starting a new row does NOT change the facing direction — every row, every frame faces ${parsedWalkDir}. `
@@ -637,15 +629,15 @@ export async function buildSpritePrompt(
     colCountRule +
     `Place exactly one animation frame per cell, filling every cell. ` +
     `CRITICAL framing rules (apply to EVERY cell): ` +
-    `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. NOT A SINGLE PIXEL may cross into a neighboring cell. ` +
-    `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone, never touching the cell edges. ` +
-    `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin — never let it sprawl across cell boundaries. ` +
+    `(1) The ENTIRE frame content — ${containedContent} — must be FULLY contained within its own cell. Avoid any pixel crossing into a neighboring cell. ` +
+    `(2) Keep a clear EMPTY margin of at least ${Math.round(Math.min(cellW, cellH) * 0.12)}px on all four sides of each cell — fit everything inside the central safe zone. Avoid touching the cell edges. ` +
+    `(3) If the content would be large (${oversizeContent}), SCALE THE WHOLE FRAME DOWN so it fits inside the cell with the margin. Avoid letting content sprawl across cell boundaries. ` +
     `(4) Use the SAME scale in every frame and keep ZERO positional drift between cells — the content stays anchored at the same spot, only the animation changes. ` +
     anchorRule +
     directionPrompt +
     effectGuard +
     loopInstruction +
-    `Do NOT include the gray guide lines in the output — they are reference only. ` +
+    `The gray guide lines are reference only — avoid rendering them in the output. ` +
     bgInstruction;
 
   return { decorated, overrideInputPaths };

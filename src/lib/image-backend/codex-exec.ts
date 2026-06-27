@@ -173,7 +173,7 @@ function buildSpritesheetPrompt(job: ImageJob): string {
       `Frame N plays immediately before Frame 1 — design a closed cycle with no visible start or end. ` +
       `Walk/run: Frame N's foot position is the natural step just before Frame 1's foot position resumes. ` +
       `Idle: Frame N is a mid-breath moment that flows directly into Frame 1. ` +
-      `NEVER a linear arc. ALWAYS a cycle. `
+      `Design a seamless cycle — avoid a linear arc. `
     : "";
 
   if (inputCount >= 3) {
@@ -183,7 +183,7 @@ function buildSpritesheetPrompt(job: ImageJob): string {
       PROMPT_HEADER +
       `I am attaching THREE images:\n` +
       `(1) BASE POSE REFERENCE — a stick-figure skeleton strip showing the exact leg/arm angles per column. ` +
-      `Use it ONLY as a form guide for leg positions and stride alternation. Do NOT copy its colors or style.\n` +
+      `Use it as a form guide for leg positions and stride alternation only. Avoid copying its colors or style.\n` +
       `(2) REFERENCE CHARACTER — reproduce this character's exact visual style, colors, outfit, ` +
       `and proportions in every frame.\n` +
       `(3) GRID TEMPLATE — the OUTPUT CANVAS. ` +
@@ -269,7 +269,7 @@ function buildReskinPrompt(job: ImageJob): string {
         `must COMPLETELY REPLACE the character in every cell of Image 1.\n\n` +
         `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
         `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
-        `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+        `Each cell keeps its own unique pose exactly as shown in Image 1. Avoid repeating the same pose across cells. ` +
         `Same grid dimensions as Image 1. Transparent background. ` +
         extra
       );
@@ -286,7 +286,7 @@ function buildReskinPrompt(job: ImageJob): string {
         `must fill every cell of Image 1's grid.\n\n` +
         `Task: Redraw every cell of Image 1 using Image 2's character in each corresponding pose. ` +
         `The character in every cell must look IDENTICAL to Image 2 — NOT Image 1. ` +
-        `Each cell must keep its own UNIQUE pose exactly as shown in Image 1. Do NOT repeat the same pose across cells. ` +
+        `Each cell keeps its own unique pose exactly as shown in Image 1. Avoid repeating the same pose across cells. ` +
         `Same grid dimensions as Image 1. Transparent background. ` +
         extra
       );
