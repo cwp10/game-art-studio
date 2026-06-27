@@ -484,7 +484,9 @@ export async function buildSpritePrompt(
           `row1col1 = L-CONTACT (left foot forward); row2col1 = R-CONTACT (right foot forward)` +
           (rows > 2 ? `; row3col1 = L-CONTACT again` : "") +
           `. Every row is visually distinct from every other row. Avoid copying or repeating poses from one row to another. ` +
-          `Row 2 continues directly from where row 1 ended — row2col1 shows the RIGHT foot as the leading/forward foot. Avoid treating row 2 as a new or restarted animation cycle. Avoid drawing row2col1 with the left foot forward. Avoid repeating the same opening pose from row1col1 in row2col1. `
+          `Row 2 continues directly from where row 1 ended — row2col1 shows the RIGHT foot as the leading/forward foot. Avoid treating row 2 as a new or restarted animation cycle. Avoid drawing row2col1 with the left foot forward. Avoid repeating the same opening pose from row1col1 in row2col1. ` +
+          `R-CONTACT MIRROR TEST (row2col1): Look at row1col1 — the LEFT boot is the front/forward boot. In row2col1 you MUST draw the OPPOSITE: the RIGHT boot is the front/forward boot, extended just as far forward as the left boot was in row1col1. The RIGHT heel leads ahead of the body center. The LEFT foot is pulled back behind the hips. If row2col1 looks similar to row1col1 in terms of which foot is forward, that is a CRITICAL ERROR — redraw it as the exact foot-swap mirror of row1col1. ` +
+          `EQUIPMENT IN ALL ROW-2 FRAMES (CRITICAL): Every weapon, shield, and held object that appears in row 1 MUST also appear fully drawn in EVERY frame of row 2 — including mid-swing and crossover frames. Arm swing during row 2 does not cause any held item to disappear. If the sword arm swings behind the body in any row-2 frame, show the sword partially visible behind the torso. Avoid any row-2 frame where a weapon or shield is missing, reduced in size, or omitted. `
         : "")
     : "";
 
