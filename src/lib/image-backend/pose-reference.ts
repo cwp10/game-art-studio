@@ -297,8 +297,8 @@ export type FrameAngle = {
 /** 한 프레임의 computePose 결과 → FrameAngle(각도 텍스트의 단일 소스). */
 function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, isRun: boolean): FrameAngle {
   const { walkX, walkY, left, right, phase } = computePose(col, totalFrames, dirIndex, isRun);
-  const leftDeg = Math.round(left.swingAngle);
-  const rightDeg = Math.round(right.swingAngle);
+  let leftDeg = Math.round(left.swingAngle);
+  let rightDeg = Math.round(right.swingAngle);
   const cosP = Math.cos(phase);
   const absC = Math.abs(cosP);
   // 정면/후면(walkX≈0): 스윙각 0이라 degenerate → 전후(fore/aft) 오프셋 언어로.
@@ -306,6 +306,15 @@ function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, is
     // L-CONTACT = 왼발이 진행방향 앞(depthY*walkY>0). UP(walkY<0)에서 부호 보정 필수.
     const label = absC > 0.85 ? (left.depthY * walkY > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
     return { col, leftDeg, rightDeg, label, foreAft: `L foot ${classifyForeAft(left.depthY, true, walkY)}/R foot ${classifyForeAft(right.depthY, true, walkY)}` };
+  }
+  // 8프레임 이상 사이클에서 정확히 L=0°/R=0°인 교차 순간을 전용 프레임으로 만들지 않는다.
+  // 크로스오버는 프레임 사이의 전환이지, 전용 "양발 나란히" 프레임이 아니다.
+  // 이전 리딩 발 방향으로 약간(8°) 편향시켜 모델이 한 발이 여전히 앞서 있는 것으로 인식하게 한다.
+  if (totalFrames >= 8 && leftDeg === 0 && rightDeg === 0) {
+    const bias = col < totalFrames / 2 ? 8 : -8; // 전반부=왼발 리드, 후반부=오른발 리드
+    leftDeg = bias;
+    rightDeg = -bias;
+    return { col, leftDeg, rightDeg, label: `f${col}`, foreAft: null };
   }
   // L-CONTACT = 왼발이 진행방향 앞. LEFT(walkX<0)에서 swingAngle 부호가 뒤집히므로 sign(walkX) 보정.
   const label = absC > 0.85 ? (leftDeg * Math.sign(walkX) > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
@@ -316,8 +325,11 @@ function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, is
  * cols 프레임 사이클의 각도 배열을 계산. computePose와 동일 소스(이미지와 영원히 일치).
  * dirIndex 기본값 6=RIGHT(기존 단일행 fallback 동작 유지).
  */
-export function computeFrameAngles(cols: number, isRun = false, dirIndex = 6): FrameAngle[] {
-  return Array.from({ length: cols }, (_, c) => poseToFrameAngle(c, cols, dirIndex, isRun));
+export function computeFrameAngles(cols: number, isRun = false, dirIndex = 6, startFrame = 0, totalCycle = cols): FrameAngle[] {
+  return Array.from({ length: cols }, (_, c) => ({
+    ...poseToFrameAngle(c + startFrame, totalCycle, dirIndex, isRun),
+    col: c,
+  }));
 }
 
 /**
@@ -408,10 +420,13 @@ export async function getCachedPoseRow(
   cellSize: number,
   templatesDir: string,
   isRun = false,
+  startFrame = 0,
+  totalCycle = cols,
 ): Promise<{ path: string; angles: FrameAngle[] }> {
   const type = isRun ? "run" : "walk";
-  const cacheFile = `${templatesDir}/pose-${type}-dir${dirIndex}-c${cols}.png`;
-  const angles = computeFrameAngles(cols, isRun, dirIndex);
+  const sfSuffix = startFrame > 0 ? `-sf${startFrame}` : "";
+  const cacheFile = `${templatesDir}/pose-${type}-dir${dirIndex}-c${cols}${sfSuffix}.png`;
+  const angles = computeFrameAngles(cols, isRun, dirIndex, startFrame, totalCycle);
 
   const { existsSync, mkdirSync, writeFileSync } = await import("node:fs");
   if (existsSync(cacheFile)) return { path: cacheFile, angles };
@@ -425,7 +440,7 @@ export async function getCachedPoseRow(
 
   const frames = await Promise.all(
     Array.from({ length: cols }, async (_, c) => {
-      const svg = buildPoseSvg(c, cols, true, dirIndex, isRun);
+      const svg = buildPoseSvg(c + startFrame, totalCycle, true, dirIndex, isRun);
       return sharp(Buffer.from(svg)).resize(skelW, skelH).png().toBuffer();
     }),
   );

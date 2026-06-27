@@ -419,8 +419,8 @@ export async function buildSpritePrompt(
       const rA = a.rightDeg;
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
       const leadingLeg =
-        a.label === "L-CONTACT" ? " — LEADING LEG: LEFT (left foot reaches FORWARD, right foot BACK)" :
-        a.label === "R-CONTACT" ? " — LEADING LEG: RIGHT (right foot reaches FORWARD, left foot BACK)" : "";
+        a.label === "L-CONTACT" ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK" :
+        a.label === "R-CONTACT" ? " — LEADING LEG: RIGHT foot FORWARD / left foot BACK" : "";
       return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
     return `MANDATORY FRAME SEQUENCE: ${descs.join("; ")}. `;
@@ -495,7 +495,7 @@ export async function buildSpritePrompt(
           (rows > 2 ? `; row3col1 = L-CONTACT again` : "") +
           `. Every row is visually distinct from every other row. Avoid copying or repeating poses from one row to another. ` +
           `Row 2 continues directly from where row 1 ended — row2col1 shows the RIGHT foot as the leading/forward foot. Avoid treating row 2 as a new or restarted animation cycle. Avoid drawing row2col1 with the left foot forward. Avoid repeating the same opening pose from row1col1 in row2col1. ` +
-          `R-CONTACT MIRROR TEST (row2col1): Look at row1col1 — the LEFT boot is the front/forward boot. In row2col1 you MUST draw the OPPOSITE: the RIGHT boot is the front/forward boot, extended just as far forward as the left boot was in row1col1. The RIGHT heel leads ahead of the body center. The LEFT foot is pulled back behind the hips. If row2col1 looks similar to row1col1 in terms of which foot is forward, that is a CRITICAL ERROR — redraw it as the exact foot-swap mirror of row1col1. ` +
+          `R-CONTACT MIRROR TEST (row2col1): Look at row1col1 — the LEFT foot is the front/forward foot. In row2col1 you MUST draw the OPPOSITE: the RIGHT foot is the front/forward foot, extended just as far forward as the left foot was in row1col1. The RIGHT heel leads ahead of the body center. The LEFT foot is pulled back behind the hips. If row2col1 looks similar to row1col1 in terms of which foot is forward, that is a CRITICAL ERROR — redraw it as the exact foot-swap mirror of row1col1. ` +
           `EQUIPMENT IN ALL ROW-2 FRAMES (CRITICAL): Every weapon, shield, and held object that appears in row 1 MUST also appear fully drawn in EVERY frame of row 2 — including mid-swing and crossover frames. Arm swing during row 2 does not cause any held item to disappear. If the sword arm swings behind the body in any row-2 frame, show the sword partially visible behind the torso. Avoid any row-2 frame where a weapon or shield is missing, reduced in size, or omitted. `
         : "")
     : "";
@@ -602,6 +602,33 @@ export async function buildSpritePrompt(
     "UP-LEFT": "away toward the viewer's upper-left (3/4 back-left)",
     "UP-RIGHT": "away toward the viewer's upper-right (3/4 back-right)",
   };
+  // 대각선 방향별 3/4 카메라 뷰 설명 — facingDirective 에서 singleDirWalkDir 없는 대각선에 사용.
+  const diagonalViewDesc: Record<string, string> = {
+    "DOWN-LEFT":
+      `This is a TRUE 3/4 FRONT-LEFT VIEW (camera at ~45° angle — NOT a pure side view). ` +
+      `The character runs toward lower-left. The character's RIGHT side and partial front chest are simultaneously visible. ` +
+      `The torso is angled diagonally: right shoulder is closest to the camera, left shoulder is further away. ` +
+      `Do NOT draw a pure side profile. Do NOT draw a pure front view. The body must appear rotated ~45°. ` +
+      `Match the exact body angle shown in the attached pose guide skeleton — the skeleton already shows the correct diagonal body orientation. `,
+    "DOWN-RIGHT":
+      `This is a TRUE 3/4 FRONT-RIGHT VIEW (camera at ~45° angle — NOT a pure side view). ` +
+      `The character runs toward lower-right. The character's LEFT side and partial front chest are simultaneously visible. ` +
+      `The torso is angled diagonally: left shoulder is closest to the camera, right shoulder is further away. ` +
+      `Do NOT draw a pure side profile. Do NOT draw a pure front view. The body must appear rotated ~45°. ` +
+      `Match the exact body angle shown in the attached pose guide skeleton — the skeleton already shows the correct diagonal body orientation. `,
+    "UP-LEFT":
+      `This is a TRUE 3/4 BACK-LEFT VIEW (camera at ~45° angle — NOT a pure side view). ` +
+      `The character runs away toward upper-left. The character's RIGHT side and partial back are simultaneously visible. ` +
+      `Back of head and right shoulder blade are facing the camera. The torso is angled diagonally. ` +
+      `Do NOT draw a pure side profile. Do NOT draw a pure back view. The body must appear rotated ~45° away. ` +
+      `Match the exact body angle shown in the attached pose guide skeleton. `,
+    "UP-RIGHT":
+      `This is a TRUE 3/4 BACK-RIGHT VIEW (camera at ~45° angle — NOT a pure side view). ` +
+      `The character runs away toward upper-right. The character's LEFT side and partial back are simultaneously visible. ` +
+      `Back of head and left shoulder blade are facing the camera. The torso is angled diagonally. ` +
+      `Do NOT draw a pure side profile. Do NOT draw a pure back view. The body must appear rotated ~45° away. ` +
+      `Match the exact body angle shown in the attached pose guide skeleton. `,
+  };
   const facingDirective =
     isCharacter && isSingleDirection && parsedWalkDir
       ? `CRITICAL FACING DIRECTION (READ THIS FIRST — it overrides any default drawing tendency): ` +
@@ -613,7 +640,9 @@ export async function buildSpritePrompt(
           ? `This is a pure side view: the nose, face, chest, and leading foot all point ${singleDirWalkDir}, ` +
             `while the back, ponytail/hair, cape, and trailing limbs stream toward the OPPOSITE side. ` +
             `Keep this exact orientation in every frame — the character faces ${singleDirWalkDir}. Avoid mirroring, flipping, or reversing this orientation. `
-          : `Keep this exact orientation in every frame. Avoid mirroring or flipping it. `) +
+          : parsedWalkDir && diagonalViewDesc[parsedWalkDir]
+            ? diagonalViewDesc[parsedWalkDir]
+            : `Keep this exact orientation in every frame. Avoid mirroring or flipping it. `) +
         (rows > 1
           ? `ALL ${rows} rows in this sheet face the SAME direction: ${parsedWalkDir}. ` +
             `Starting a new row does NOT change the facing direction — every row, every frame faces ${parsedWalkDir}. `
