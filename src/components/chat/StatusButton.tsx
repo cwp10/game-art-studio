@@ -7,12 +7,6 @@ import { useOrchestratorContext } from "@/lib/context/orchestrator-context";
 type ToolStatus = { ok: boolean; version?: string; error?: string };
 type Status = { claude: ToolStatus; codex: ToolStatus; mcp: ToolStatus };
 
-const TOOL_LABELS: Record<keyof Status, string> = {
-  claude: "Claude CLI",
-  codex: "Codex CLI",
-  mcp: "MCP 서버",
-};
-
 const ERROR_HINTS: Record<keyof Status, string> = {
   claude: "claude CLI가 PATH에 없습니다. https://claude.ai/code 에서 설치하세요.",
   codex: "codex CLI가 PATH에 없습니다. npm install -g @openai/codex 로 설치하세요.",
@@ -26,6 +20,31 @@ function Dot({ ok, loading }: { ok: boolean; loading: boolean }) {
     : <XCircle size={12} className="text-[color:var(--danger)]" />;
 }
 
+function StatusRow({ label, status, loading, hint }: {
+  label: string;
+  status?: ToolStatus;
+  loading: boolean;
+  hint: string;
+}) {
+  return (
+    <div className="px-3 py-2.5">
+      <div className="flex items-center gap-2">
+        <Dot ok={status?.ok ?? false} loading={loading || !status} />
+        <span className="flex-1 text-xs text-text-primary">{label}</span>
+        {status?.version && (
+          <span className="max-w-[80px] truncate text-[10px] text-text-muted/60">{status.version}</span>
+        )}
+      </div>
+      {status && !status.ok && (
+        <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[color:var(--danger)]/80">
+          <AlertCircle size={10} className="mt-0.5 shrink-0" />
+          {status.error === "not found" || status.error === "timeout" ? hint : status.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function StatusButton() {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
@@ -34,8 +53,7 @@ export function StatusButton() {
   const [clearMsg, setClearMsg] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const { isCodex, toggleOrchestrator } = useOrchestratorContext();
-  const orchestrator = isCodex ? "codex" : "claude";
-  const isClaudeMode = !isCodex;
+  const claudeEnabled = !isCodex;
 
   async function runCleanup() {
     setClearing(true);
@@ -71,13 +89,11 @@ export function StatusButton() {
   }
 
   useEffect(() => {
-    // 마운트 시 1회 상태 fetch — fetchStatus 내부 setLoading/setStatus 는 의도된 동기화.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchStatus();
   }, []);
 
   useEffect(() => {
-    // 패널 열림 시 아직 상태가 없으면 fetch — 외부(CLI) 상태와의 동기화.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open && !status) fetchStatus();
   }, [open, status]);
@@ -100,11 +116,11 @@ export function StatusButton() {
       <button
         onClick={() => setOpen(v => !v)}
         className="flex items-center gap-1.5 rounded p-1.5 text-text-muted hover:bg-bg-card hover:text-text-primary"
-        title="연결 상태"
+        title="도구 상태"
       >
-        {(status || orchestrator === "codex") && (
+        {(status || isCodex) && (
           <span className={`h-1.5 w-1.5 rounded-full ${
-            orchestrator === "codex"
+            isCodex
               ? "bg-[color:var(--warning)]"
               : allOk
                 ? "bg-[color:var(--success)]"
@@ -116,8 +132,9 @@ export function StatusButton() {
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-xl border border-border bg-bg-panel shadow-xl">
+          {/* 헤더 */}
           <div className="flex items-center justify-between border-b border-border px-3 py-2">
-            <span className="text-xs font-medium text-text-primary">연결 상태</span>
+            <span className="text-xs font-medium text-text-primary">도구 상태</span>
             <button
               onClick={fetchStatus}
               disabled={loading}
@@ -128,56 +145,55 @@ export function StatusButton() {
             </button>
           </div>
 
+          {/* 이미지 생성 도구 — 항상 활성 */}
           <div className="divide-y divide-border">
-            {(Object.keys(TOOL_LABELS) as Array<keyof Status>).map(key => {
-              const s = status?.[key];
-              return (
-                <div key={key} className="px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Dot ok={s?.ok ?? false} loading={loading || !status} />
-                    <span className="flex-1 text-xs text-text-primary">{TOOL_LABELS[key]}</span>
-                    {s?.version && (
-                      <span className="max-w-[80px] truncate text-[10px] text-text-muted/60">{s.version}</span>
-                    )}
-                    {key === "claude" && (
-                      <button
-                        onClick={toggleOrchestrator}
-                        title={isClaudeMode ? "오케스트레이터: Claude — 클릭 시 Codex 직접 모드로 전환" : "오케스트레이터: Codex 직접 — 클릭 시 Claude로 전환"}
-                        className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                          isClaudeMode
-                            ? "border-[color:var(--accent)]/40 bg-[color:var(--accent)]/20 text-text-primary hover:bg-[color:var(--accent)]/30"
-                            : "border-border text-text-muted hover:border-[color:var(--accent)]/30 hover:text-text-primary"
-                        }`}
-                      >
-                        {isClaudeMode ? "Claude" : "Codex 직접"}
-                      </button>
-                    )}
-                    {key === "codex" && orchestrator === "codex" && (
-                      <span className="shrink-0 rounded-md border border-[color:var(--accent)]/40 bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] text-text-primary">사용 중</span>
-                    )}
-                  </div>
-                  {key === "codex" && (
-                    <p className="mt-1 pl-5 text-[10px] text-text-muted/60">이미지 생성 전용</p>
-                  )}
-                  {s && !s.ok && (
-                    <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[color:var(--danger)]/80">
-                      <AlertCircle size={10} className="mt-0.5 shrink-0" />
-                      {s.error === "not found" || s.error === "timeout"
-                        ? ERROR_HINTS[key]
-                        : s.error}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+            <StatusRow label="Codex CLI" status={status?.codex} loading={loading} hint={ERROR_HINTS.codex} />
+            <StatusRow label="MCP 서버" status={status?.mcp} loading={loading} hint={ERROR_HINTS.mcp} />
+          </div>
+
+          {/* Claude 오케스트레이션 — 선택적 */}
+          <div className="border-t border-border px-3 pb-3 pt-2.5">
+            <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-text-muted/50">
+              Claude 오케스트레이션
+            </p>
+            <div className="flex items-center gap-2">
+              <Dot ok={status?.claude.ok ?? false} loading={loading || !status} />
+              <span className="flex-1 text-xs text-text-primary">Claude CLI</span>
+              {status?.claude.version && (
+                <span className="max-w-[80px] truncate text-[10px] text-text-muted/60">{status.claude.version}</span>
+              )}
+              <button
+                onClick={toggleOrchestrator}
+                title={claudeEnabled ? "Claude 오케스트레이션 끄기" : "Claude 오케스트레이션 켜기"}
+                className={`relative flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                  claudeEnabled ? "bg-[color:var(--accent)]" : "bg-border"
+                }`}
+              >
+                <span className={`absolute h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                  claudeEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                }`} />
+              </button>
+            </div>
+            {status?.claude && !status.claude.ok && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-[color:var(--danger)]/80">
+                <AlertCircle size={10} className="mt-0.5 shrink-0" />
+                {status.claude.error === "not found" || status.claude.error === "timeout"
+                  ? ERROR_HINTS.claude
+                  : status.claude.error}
+              </p>
+            )}
+            <p className={`mt-1.5 text-[10px] ${claudeEnabled ? "text-[color:var(--success)]/80" : "text-text-muted/50"}`}>
+              {claudeEnabled ? "✓ 제안·맥락 이해 활성" : "이미지 생성만 가능 · 제안 불가"}
+            </p>
           </div>
 
           {!status && !loading && (
-            <p className="px-3 py-3 text-center text-xs text-text-muted/60">
+            <p className="border-t border-border px-3 py-3 text-center text-xs text-text-muted/60">
               새로고침을 눌러 확인하세요.
             </p>
           )}
 
+          {/* 파일 정리 */}
           <div className="border-t border-border px-3 py-2.5">
             <button
               onClick={runCleanup}

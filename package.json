@@ -47,6 +47,14 @@
           "**/*",
           "!cache/**"
         ]
+      },
+      {
+        "from": "node_modules/.pnpm/@img+sharp-darwin-arm64@0.33.5/node_modules/@img/sharp-darwin-arm64",
+        "to": "app/node_modules/@img/sharp-darwin-arm64"
+      },
+      {
+        "from": "node_modules/.pnpm/@img+sharp-libvips-darwin-arm64@1.0.4/node_modules/@img/sharp-libvips-darwin-arm64",
+        "to": "app/node_modules/@img/sharp-libvips-darwin-arm64"
       }
     ],
     "mac": {
