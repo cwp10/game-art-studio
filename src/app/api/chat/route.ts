@@ -715,7 +715,7 @@ async function runDirectBackendJob(opts: {
       if (VFX_EFFECT_RE.test(rawPrompt)) {
         text2imgUseLuma = true;
         prompt = stripBgHints(rawPrompt) +
-          "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. The post-processing pipeline will apply luminance keying — do NOT run remove_chroma_key.py or any chroma-key removal; save output.png as-is on the black background.";
+          "\nCRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the VFX effect — no gradients, no glow bleed onto background. The post-processing pipeline will apply luminance keying — avoid running remove_chroma_key.py or any chroma-key removal; save output.png as-is on the black background.";
       } else {
         const chromaKey: ChromaKeyColor = GREEN_SUBJECT_RE.test(rawPrompt.toLowerCase()) ? "magenta" : "green";
         text2imgChromaKey = chromaKey;

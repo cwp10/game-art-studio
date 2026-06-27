@@ -150,7 +150,7 @@ export function buildDirectionPrompt(n: Directions, framesPerDir: number): strin
     `the SAME character and the SAME ${framesPerDir}-frame action cycle, ` +
     `only the camera facing changes between rows. ` +
     `The image has EXACTLY ${n} horizontal rows (bands), one per direction, stacked top to bottom. ` +
-    `Draw ALL ${n} rows — do NOT merge, skip, drop, or compress any row, and do NOT spread the characters into fewer than ${n} rows. ` +
+    `Draw all ${n} rows with equal vertical spacing. Avoid merging, skipping, dropping, or compressing any row. Avoid spreading the characters into fewer than ${n} rows. ` +
     `Space the ${n} rows at EQUAL vertical intervals so each row occupies one horizontal band of the sheet; there must be ${n} distinct horizontal bands of characters, no more and no fewer. ` +
     `${rowLines} ` +
     `DIAGONAL rows (DOWN-LEFT, DOWN-RIGHT, UP-LEFT, UP-RIGHT) are 3/4 perspective views — draw them like a side view rotated 45°: ` +
