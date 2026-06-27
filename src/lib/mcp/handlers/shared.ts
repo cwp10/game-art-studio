@@ -476,7 +476,12 @@ export async function buildSpritePrompt(
           `CONTACT frames: LEFT and RIGHT legs are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT is back (−angle), and vice versa. ` +
           `Typical contact stride: one leg ~+20° to +32°, the other ~−20° to −32°. ` +
           `CROSSOVER frames: both legs near 0° but still slightly different — e.g. LEFT +5°, RIGHT −5°. ` +
-          `Avoid identical leg angles in any frame. Avoid symmetric poses — they indicate a static T-pose, not a walk cycle. `
+          `Avoid identical leg angles in any frame. Avoid symmetric poses — they indicate a static T-pose, not a walk cycle. ` +
+          `DEPTH ORDER IN CONTACT FRAMES (CRITICAL for 3/4 diagonal views): In a 3/4 perspective, the two contact phases are distinguished by which leg is in the FOREGROUND (closer to the camera, drawn overlapping in front). ` +
+          `L-CONTACT: the LEFT leg is in the foreground — it overlaps and is drawn IN FRONT OF the right leg. The right leg is in the background behind. ` +
+          `R-CONTACT: the RIGHT leg is in the foreground — it overlaps and is drawn IN FRONT OF the left leg. The left leg is in the background behind. ` +
+          `This foreground/background depth swap is the primary visual difference between L-CONTACT and R-CONTACT in a 3/4 view — make it obvious and exaggerated. ` +
+          `In the pose guide: the BLUE skeleton line (LEFT leg) is in the foreground at L-CONTACT; the RED skeleton line (RIGHT leg) is in the foreground at R-CONTACT. Match this depth order precisely. `
         : "") +
       (rows > 1 && parsedWalkDir
         ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row continues the animation from the previous row. ` +
