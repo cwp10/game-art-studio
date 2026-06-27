@@ -221,6 +221,11 @@ export function ChatLayout() {
     dispatch({ type: "set_generating", generating });
   }, []);
 
+  const handleRegenBusyChange = useCallback((busy: boolean) => {
+    setSpriteRegenBusy(busy);
+    markSessionGenerating(busy);
+  }, [markSessionGenerating]);
+
   // 새 세션 — 생성 중에는 차단 (UI 잠금 외 키보드 단축키 등 모든 경로 방어)
   const handleNew = useCallback(() => {
     const s = stateRef.current;
@@ -675,7 +680,7 @@ export function ChatLayout() {
               imageHeight={editing.height}
               sessionId={state.activeSessionId}
               sheetGenerationId={editing.generationId}
-              onRegenBusyChange={busy => { setSpriteRegenBusy(busy); markSessionGenerating(busy); }}
+              onRegenBusyChange={handleRegenBusyChange}
               onOverlay={handleSpriteOverlay}
               onVfxOverlay={handleVfxOverlay}
               onSheetUpdated={res => {
