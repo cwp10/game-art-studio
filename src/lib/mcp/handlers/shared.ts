@@ -450,6 +450,11 @@ export async function buildSpritePrompt(
           `STRIDE ALTERNATION (CRITICAL): The two contact phases MUST be visually distinct — ` +
           `one contact frame has the LEFT boot as the leading (front) boot; the other contact frame has the RIGHT boot as the leading (front) boot. ` +
           `Both boots take turns being the leading boot. Avoid showing the same boot in front in every contact frame. ` +
+          `CONTACT FRAME DEFINITION (CRITICAL): A CONTACT frame means the striking foot REACHES CLEARLY FORWARD — the heel is ahead of the body's center line, the leg is nearly straight, and the foot is close to the ground, reaching toward the direction of travel. ` +
+          `L-CONTACT: left heel extends FORWARD (toward direction of travel), left leg nearly straight, right leg bent and behind the body. ` +
+          `R-CONTACT: right heel extends FORWARD (toward direction of travel), right leg nearly straight, left leg bent and behind the body. ` +
+          `The forward extension magnitude of the right leg in R-CONTACT must equal the forward extension magnitude of the left leg in L-CONTACT — both legs take symmetric turns reaching ahead. ` +
+          `A RAISED KNEE (heel-kick) is the mid-flight recovery phase — the knee is up and the foot is lifted BEHIND or ABOVE the body, NOT reaching forward. Avoid treating a raised-knee / heel-kick pose as R-CONTACT. Avoid making R-CONTACT smaller or shorter in forward reach than L-CONTACT. ` +
           `LEG ANGLES (CRITICAL, NON-NEGOTIABLE): ` +
           `The LEFT leg and the RIGHT leg have DIFFERENT angles in every single frame. ` +
           `CONTACT frames: LEFT and RIGHT legs are at OPPOSITE angles — when LEFT is forward (+angle), RIGHT is back (−angle) at equal magnitude, and vice versa. ` +
