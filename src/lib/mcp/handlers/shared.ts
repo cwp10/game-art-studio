@@ -477,6 +477,10 @@ export async function buildSpritePrompt(
           `Typical contact stride: one leg ~+20° to +32°, the other ~−20° to −32°. ` +
           `CROSSOVER frames: both legs near 0° but still slightly different — e.g. LEFT +5°, RIGHT −5°. ` +
           `Avoid identical leg angles in any frame. Avoid symmetric poses — they indicate a static T-pose, not a walk cycle. ` +
+          `VERTICAL SEPARATION IN 3/4 VIEW (CRITICAL): In a 3/4 diagonal view, the forward (leading) leg appears LOWER in the frame and the trailing leg appears HIGHER — this vertical height gap is the main visual cue for stride depth. ` +
+          `CONTACT frames: The forward foot must be drawn at least 15% of the cell height LOWER than the trailing foot. This gap must be large and obvious — if both feet are at the same height, it looks like jogging in place with no stride. ` +
+          `CROSSOVER frames: Both feet are at nearly the SAME vertical height — the gap collapses to near zero as the legs pass each other. This height collapse IS the crossover — it must be visually distinct from contact frames. ` +
+          `The animation cycle alternates: wide vertical gap (contact) → gap collapses (crossover) → wide vertical gap (opposite contact) → collapses (crossover). Without this alternating gap, there is no visible gait cycle. ` +
           `DEPTH ORDER IN CONTACT FRAMES (CRITICAL for 3/4 diagonal views): In a 3/4 perspective, the two contact phases are distinguished by which leg is in the FOREGROUND (closer to the camera, drawn overlapping in front). ` +
           `L-CONTACT: the LEFT leg is in the foreground — it overlaps and is drawn IN FRONT OF the right leg. The right leg is in the background behind. ` +
           `R-CONTACT: the RIGHT leg is in the foreground — it overlaps and is drawn IN FRONT OF the left leg. The left leg is in the background behind. ` +
