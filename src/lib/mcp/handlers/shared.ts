@@ -428,7 +428,8 @@ export async function buildSpritePrompt(
 
   // ── 보행 사이클 규칙 ────────────────────────────────────────────────────
   const walkCycleRule = isWalk && isCharacter
-    ? `ANIMATION VARIETY (CRITICAL): Each of the ${cols * rows} frames shows a visually distinct pose — legs advance continuously through the gait cycle. Avoid frames that look identical or near-identical to any other frame. Avoid repeating the same pose across multiple cells. ` +
+    ? `FRAME CONSISTENCY (CRITICAL): The character's torso, head, and body proportions remain IDENTICAL across every frame — the same size, same body lean angle, same head height relative to the feet. Only the LIMBS (legs and arms) change position between frames. Avoid making the character taller, shorter, more upright, or more bent in some frames than others. The body lean angle is fixed at a single consistent forward tilt throughout the entire animation — it does not straighten or lean more in individual frames. ` +
+      `ANIMATION VARIETY (CRITICAL): Each of the ${cols * rows} frames shows a visually distinct pose — legs advance continuously through the gait cycle. Avoid frames that look identical or near-identical to any other frame. Avoid repeating the same pose across multiple cells. ` +
       `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
       `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
       `(1) CONTACT — left leg fully forward, right leg fully back; ` +
