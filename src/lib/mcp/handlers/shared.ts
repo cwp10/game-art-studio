@@ -420,14 +420,10 @@ export async function buildSpritePrompt(
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
       const isRow2Start = numRows > 1 && i === numCols;
       const leadingLeg =
-        a.label === "R-PREP" && i === 0
-          ? " — [ROW 1 START] FEET TOGETHER: RED (right) foot is AIRBORNE/BENT UP, BLUE (left) foot is on ground. Right foot is about to swing forward. Do NOT draw feet spread apart here."
-          : a.label === "R-CONTACT"
-          ? " — RIGHT foot FULLY FORWARD (max stride) / left foot PULLED BACK. RED leg forward, BLUE leg back."
-          : a.label === "L-PREP" && isRow2Start
-          ? " — [ROW 2 START] FEET TOGETHER: BLUE (left) foot is AIRBORNE/BENT UP, RED (right) foot is on ground. Left foot is about to swing forward. Do NOT draw feet spread apart here."
+        a.label === "R-CONTACT"
+          ? " — right foot FULLY FORWARD (max stride), left foot back"
           : a.label === "L-CONTACT"
-          ? " — LEFT foot FULLY FORWARD (max stride) / right foot PULLED BACK. BLUE leg forward, RED leg back."
+          ? " — left foot FULLY FORWARD (max stride), right foot back"
           : "";
       return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
@@ -497,14 +493,9 @@ export async function buildSpritePrompt(
           `In the pose guide: the BLUE skeleton line (LEFT leg) is in the foreground at L-CONTACT; the RED skeleton line (RIGHT leg) is in the foreground at R-CONTACT. Match this depth order precisely. `
         : "") +
       (rows > 1 && parsedWalkDir
-        ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, each row continues the animation from the previous row. ` +
-          `The leading foot at the start of each row alternates — opposite to the previous row's starting foot. ` +
-          `row1col1 = L-CONTACT (left foot forward); row2col1 = R-CONTACT (right foot forward)` +
-          (rows > 2 ? `; row3col1 = L-CONTACT again` : "") +
-          `. Every row is visually distinct from every other row. Avoid copying or repeating poses from one row to another. ` +
-          `Row 2 continues directly from where row 1 ended — row2col1 shows the RIGHT foot as the leading/forward foot. Avoid treating row 2 as a new or restarted animation cycle. Avoid drawing row2col1 with the left foot forward. Avoid repeating the same opening pose from row1col1 in row2col1. ` +
-          `R-CONTACT MIRROR TEST (row2col1): Look at row1col1 — the LEFT foot is the front/forward foot. In row2col1 you MUST draw the OPPOSITE: the RIGHT foot is the front/forward foot, extended just as far forward as the left foot was in row1col1. The RIGHT heel leads ahead of the body center. The LEFT foot is pulled back behind the hips. If row2col1 looks similar to row1col1 in terms of which foot is forward, that is a CRITICAL ERROR — redraw it as the exact foot-swap mirror of row1col1. BODY ORIENTATION IDENTICAL (CRITICAL): The foot-swap is the ONLY difference between row1col1 and row2col1 — the torso lean, the camera angle, the body's horizontal rotation toward the viewer, the shoulder width, and the head height are all IDENTICAL in both frames. Do NOT rotate or tilt the body differently when swapping the feet. The camera and body orientation stay exactly the same as row 1; only the legs and arms switch roles. This rule extends to ALL row-2 frames: every frame in row 2 must have the same body-camera angle as the corresponding phase in row 1. ` +
-          `EQUIPMENT IN ALL ROW-2 FRAMES (CRITICAL): Every weapon, shield, and held object that appears in row 1 MUST also appear fully drawn in EVERY frame of row 2 — including mid-swing and crossover frames. Arm swing during row 2 does not cause any held item to disappear. If the sword arm swings behind the body in any row-2 frame, show the sword partially visible behind the torso. Avoid any row-2 frame where a weapon or shield is missing, reduced in size, or omitted. `
+        ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, all ${cols * rows} frames form ONE unbroken run cycle. Row 2 continues directly from where row 1 ended — it does NOT restart or reset. ` +
+          `CAMERA AND BODY IDENTICAL ACROSS ALL ROWS (NON-NEGOTIABLE): Every frame in every row shows the character from the EXACT SAME camera angle, with the EXACT SAME body lean, torso angle, shoulder width, and head height. The camera does NOT rotate or shift between rows. If row 1 is a 3/4 view, every row-2 frame is also that same 3/4 view — not more frontal, not more sideways. Do NOT change the body posture, lean, or facing angle between rows. ` +
+          `EQUIPMENT IN ALL ROW-2 FRAMES (CRITICAL): Every weapon, shield, and held object that appears in row 1 MUST also appear fully drawn in EVERY frame of row 2. Avoid any row-2 frame where a weapon or shield is missing, reduced in size, or omitted. `
         : "")
     : "";
 
@@ -571,13 +562,8 @@ export async function buildSpritePrompt(
         ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
           `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
           (rows > 1
-            ? `ROW STRUCTURE — MANDATORY: ROW 1 is the RIGHT-FOOT cycle, ROW 2 is the LEFT-FOOT cycle. ` +
-              `ROW 1 (frames 1-${cols}): col 1=feet together with RED (right) foot LIFTED, col 3=R-CONTACT (RED foot fully forward, max stride), col 4=RED foot crossing back. ` +
-              `ROW 2 (frames ${cols+1}-${cols*rows}): col 1=feet together with BLUE (left) foot LIFTED, col 3=L-CONTACT (BLUE foot fully forward, max stride), col 4=BLUE foot crossing back. ` +
-              `CRITICAL — row2col1 (bottom-left) must show FEET CLOSE TOGETHER with the BLUE (left) foot AIRBORNE/BENT. ` +
-              `Look at the skeleton in row2col1 in the pose guide: legs are nearly parallel, BLUE leg is bent up (not planted). ` +
-              `NEVER draw row2col1 with feet spread wide apart — that is a CONTACT pose and belongs at row1col${cols} or row2col${cols}. ` +
-              `Row 1 and row 2 are visually distinct: row 1 shows right-foot stride, row 2 shows left-foot stride. `
+            ? `RUN CYCLE CONTINUITY (CRITICAL): All ${cols * rows} frames form ONE unbroken run cycle read left→right then top→bottom. Row 2 continues exactly where row 1 left off — it does NOT reset or restart. ` +
+              `BODY CONSISTENCY ACROSS ALL ROWS (NON-NEGOTIABLE): The character's forward lean angle, torso angle, shoulder width, head height, and camera-facing direction are ABSOLUTELY IDENTICAL in every single frame — row 1 and row 2 frames look like the same character filmed from the same camera. Do NOT change the body lean or camera angle between rows. The ONLY things that change frame to frame are the leg and arm positions. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +

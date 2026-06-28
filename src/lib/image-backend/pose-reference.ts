@@ -109,7 +109,7 @@ function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A
  */
 export function computePose(frame: number, totalFrames: number, dirIndex: number, isRun: boolean) {
   const A = isRun ? 48 : 32;
-  const phase = (2 * Math.PI * frame) / totalFrames + Math.PI / 2;
+  const phase = (2 * Math.PI * frame) / totalFrames;
   const { walkX, walkY } = walkComponents(dirIndex);
   const left = computeLeg(1, phase, walkX, walkY, A);
   const right = computeLeg(-1, phase, walkX, walkY, A);
