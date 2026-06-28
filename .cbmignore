@@ -1,0 +1,33 @@
+# 빌드 아티팩트
+.next/
+out/
+dist/
+build/
+
+# 의존성
+node_modules/
+
+# 테스트 결과
+test-results/
+playwright-report/
+coverage/
+
+# 런타임 데이터 (생성 이미지·세션 중간 산출물)
+_workspace/
+_workspace_prev/
+data/
+public/
+
+# TypeScript 빌드 캐시
+*.tsbuildinfo
+next-env.d.ts
+
+# 잠금 파일
+pnpm-lock.yaml
+
+# 기타
+.DS_Store
+*.pem
+.env*
+.vercel/
+icon-assets/
