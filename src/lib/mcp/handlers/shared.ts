@@ -493,6 +493,7 @@ export async function buildSpritePrompt(
         : "") +
       (rows > 1 && parsedWalkDir
         ? `MULTI-ROW CONTINUITY (CRITICAL): In a ${cols}×${rows} grid, all ${cols * rows} frames form ONE unbroken run cycle. Row 2 continues directly from where row 1 ended — it does NOT restart or reset. ` +
+          `FOOT ALTERNATION (CRITICAL): Because the cycle continues unbroken, row 1 and row 2 MUST show OPPOSITE leading feet. Row 1 starts with the LEFT foot forward (L-CONTACT); therefore row 2 MUST start with the RIGHT foot forward (R-CONTACT). The leading foot at row2col1 is the RIGHT foot — not the left. Drawing row2col1 with the left foot forward again is a critical error that breaks the gait cycle. ` +
           `CAMERA AND BODY IDENTICAL ACROSS ALL ROWS (NON-NEGOTIABLE): Every frame in every row shows the character from the EXACT SAME camera angle, with the EXACT SAME body lean, torso angle, shoulder width, and head height. The camera does NOT rotate or shift between rows. If row 1 is a 3/4 view, every row-2 frame is also that same 3/4 view — not more frontal, not more sideways. Do NOT change the body posture, lean, or facing angle between rows. ` +
           `EQUIPMENT IN ALL ROW-2 FRAMES (CRITICAL): Every weapon, shield, and held object that appears in row 1 MUST also appear fully drawn in EVERY frame of row 2. Avoid any row-2 frame where a weapon or shield is missing, reduced in size, or omitted. `
         : "")
@@ -563,6 +564,7 @@ export async function buildSpritePrompt(
           `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
           (rows > 1
             ? `RUN CYCLE CONTINUITY (CRITICAL): All ${cols * rows} frames form ONE unbroken run cycle read left→right then top→bottom. Row 2 continues exactly where row 1 left off — it does NOT reset or restart. ` +
+              `FOOT ALTERNATION ACROSS ROWS: The per-cell angles in the pose guide already encode natural gait alternation — row 1 leads with one foot, row 2 leads with the opposite foot. Match the angles precisely and the alternation follows automatically. Do NOT repeat the same leading foot pattern from row 1 in row 2. ` +
               `BODY CONSISTENCY ACROSS ALL ROWS (NON-NEGOTIABLE): The character's forward lean angle, torso angle, shoulder width, head height, and camera-facing direction are ABSOLUTELY IDENTICAL in every single frame — row 1 and row 2 frames look like the same character filmed from the same camera. Do NOT change the body lean or camera angle between rows. The ONLY things that change frame to frame are the leg and arm positions. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
