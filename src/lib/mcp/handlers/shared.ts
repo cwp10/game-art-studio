@@ -124,6 +124,14 @@ export type SpritePromptInput = {
   viewpoint?: string; // "side" | "topdown" | "isometric" | "2.5d-topdown", 기본 "side"
   facing?: string | null; // UI 명시 방향 — NL regex 감지보다 우선
   refHandDescription?: string | null; // 참조에서 추출한 "SCREEN-LEFT: X | SCREEN-RIGHT: Y" (화면 좌/우 기준)
+  /** 행별 분할 생성 시 이 행의 사이클 시작 프레임 (0-based). 미지정 → 표준 전체 시트 경로. */
+  startFrame?: number;
+  /** 행별 분할 생성 시 전체 사이클 프레임 수. startFrame 과 함께 사용. */
+  totalCycle?: number;
+  /** 행별 분할 생성 시 이 행의 인덱스 (0-based). 프롬프트 ROW CONTEXT 에 사용. */
+  rowIndex?: number;
+  /** 행별 분할 생성 시 전체 행 수. */
+  totalRows?: number;
 };
 
 /**
@@ -212,7 +220,7 @@ export async function buildSpritePrompt(
   const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
     wantsTransparent, chromaKeyColor, seamlessLoop,
     subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint, facing,
-    refHandDescription } = p;
+    refHandDescription, startFrame, totalCycle, rowIndex, totalRows } = p;
   const normalizedViewpoint = viewpoint ?? "side";
 
   const isCharacter = subjectType === "character";
@@ -356,17 +364,19 @@ export async function buildSpritePrompt(
         )
         .join(", ");
     try {
-      const { path: guidePath, angles } = await extractPoseGuideGrid(
-        dirIndex, cols, rows, cellW, REFERENCE_DIR, TEMPLATES_DIR, isRun,
-      );
+      // 행별 분할 생성(startFrame 설정 시) → 이 행 전용 단일 행 포즈 가이드.
+      // 전체 시트 단일 호출 시 → 다행 포즈 가이드(extractPoseGuideGrid).
+      const { path: guidePath, angles } = startFrame !== undefined && totalCycle !== undefined
+        ? await getCachedPoseRow(dirIndex, cols, cellW, TEMPLATES_DIR, isRun, startFrame, totalCycle)
+        : await extractPoseGuideGrid(dirIndex, cols, rows, cellW, REFERENCE_DIR, TEMPLATES_DIR, isRun);
       poseRefPath = guidePath;
-      poseFrameAnglesText = toAngleText(angles, rows);
+      poseFrameAnglesText = toAngleText(angles, startFrame !== undefined ? 1 : rows);
       poseFrameAngles = angles;
       log(`make_spritesheet: pose guide → ${path.basename(guidePath)}`);
     } catch (e) {
       log(`make_spritesheet: pose guide reference unavailable (${(e as Error).message}), falling back to SVG`);
       try {
-        const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, cellW, TEMPLATES_DIR, isRun);
+        const { path: guidePath, angles } = await getCachedPoseRow(dirIndex, cols, cellW, TEMPLATES_DIR, isRun, startFrame, totalCycle);
         poseRefPath = guidePath;
         poseFrameAnglesText = toAngleText(angles, 1);
         poseFrameAngles = angles;
@@ -435,12 +445,18 @@ export async function buildSpritePrompt(
     ? `FRAME CONSISTENCY (CRITICAL): The character's torso, head, and body proportions remain IDENTICAL across every frame — the same size, same body lean angle, same head height relative to the feet. Only the LIMBS (legs and arms) change position between frames. Avoid making the character taller, shorter, more upright, or more bent in some frames than others. The body lean angle is fixed at a single consistent forward tilt throughout the entire animation — it does not straighten or lean more in individual frames. BODY ROTATION LOCKED (CRITICAL): The character's horizontal rotation toward the camera is also FIXED and IDENTICAL in every frame across every row — the exact same fraction of the character's front, side, and back of the torso is visible from frame 1 to the last frame. If this is a 3/4 view, the 3/4 angle does NOT drift toward a more frontal or more sideways view in any frame. The shoulder width, chest visibility, and back visibility are constant. Avoid any frame where the character appears to rotate to face the camera more directly or turn more sideways compared to other frames. This applies equally to EVERY frame in EVERY row — row 2 frames must have the exact same camera-facing angle as row 1 frames. ` +
       `ANIMATION VARIETY (CRITICAL): Each of the ${cols * rows} frames shows a visually distinct pose — legs advance continuously through the gait cycle. Avoid frames that look identical or near-identical to any other frame. Avoid repeating the same pose across multiple cells. ` +
       `WALK CYCLE GAIT (CRITICAL, NON-NEGOTIABLE): ` +
-      `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
-      `(1) CONTACT — left leg fully forward, right leg fully back; ` +
-      `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
-      `(3) CONTACT — right leg fully forward, left leg fully back; ` +
-      `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
-      `This 4-phase pattern covers exactly ONE complete gait cycle. All ${cols * rows} frames span exactly one cycle — subdivide each phase finely when there are more frames. ` +
+      (rowIndex !== undefined && startFrame !== undefined && totalCycle !== undefined
+        ? `ROW ${rowIndex + 1}/${totalRows ?? rows} — frames ${startFrame + 1}–${startFrame + cols} of ${totalCycle}. ` +
+          `This is a PARTIAL cycle segment — do NOT start a fresh gait cycle. Match the POSE GUIDE frame-by-frame. ` +
+          (startFrame === 0
+            ? `Row ${rowIndex + 1} starts at L-CONTACT (left foot leads). Do NOT compress a full gait cycle into these ${cols} frames — show only the first half of the cycle. R-CONTACT begins in the NEXT row. `
+            : `Row ${rowIndex + 1} starts at ${poseFrameAngles?.[0]?.label ?? "the phase shown in pose guide col1"} — do NOT reset to L-CONTACT. The pose guide col1 is the mandatory first frame. `)
+        : `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
+          `(1) CONTACT — left leg fully forward, right leg fully back; ` +
+          `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
+          `(3) CONTACT — right leg fully forward, left leg fully back; ` +
+          `(4) CROSSOVER/MID-STANCE — both legs passing each other again. ` +
+          `This 4-phase pattern covers exactly ONE complete gait cycle. All ${cols * rows} frames span exactly one cycle — subdivide each phase finely when there are more frames. `) +
       `Crossover frames (legs close/passing) are required — they produce natural, smooth motion. ` +
       `Avoid a cycle where legs stay extended in the same direction for multiple consecutive frames with no crossover. ` +
       `LEG VISIBILITY (CRITICAL): In every frame, both legs are clearly visible and spatially separated — the gap between them is obvious. For side views: one leg is visibly in FRONT of the other with clear fore/aft depth. For front/back views: one foot is clearly further forward (lower in frame) while the other is back (higher). Show knee and ankle joints at visibly different positions between the two legs. Avoid overlapping or merging the two legs into a single shape in any frame. ` +
@@ -661,8 +677,12 @@ export async function buildSpritePrompt(
         )
       : userPrompt;
 
+  const perRowContext = rowIndex !== undefined && startFrame !== undefined && totalCycle !== undefined
+    ? `[ROW ${rowIndex + 1}/${totalRows ?? rows}: frames ${startFrame + 1}–${startFrame + cols} of ${totalCycle}-frame cycle, starts at ${poseFrameAngles?.[0]?.label ?? "pose guide col1"}] `
+    : "";
+
   const decorated =
-    `${sanitizedUserPrompt}. ` +
+    `${perRowContext}${sanitizedUserPrompt}. ` +
     facingDirective +
     viewpointRule +
     equipmentRule +

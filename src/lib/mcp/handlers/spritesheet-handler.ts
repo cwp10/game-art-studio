@@ -17,7 +17,7 @@ import {
   type SubjectType,
 } from "../../image-backend/spritesheet-postprocess.js";
 import { GREEN_SUBJECT_RE } from "../../image-backend/chroma-key.js";
-import { inferSubjectType, type Directions } from "../spritesheet-classify.js";
+import { inferSubjectType, isLocomotion, type Directions } from "../spritesheet-classify.js";
 import {
   analyzeRefFacing,
   analyzeRefHandObjects,
@@ -263,6 +263,31 @@ export async function handleMakeSpritesheet(
       rowDecorated, dirList, refId, spritesheetParams,
       wantsTransparent, chromaKeyColor, rows, cols,
       canvasW, rowCanvasH: cellH,
+      anchorStrategy, subjectType, resolvedAnchor,
+      finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
+    }));
+  } else if (isLocomotion(userPrompt) && rows > 1) {
+    // ③ 다행 단일방향 보행/달리기: 행별 개별 Codex 호출 후 수직 stitch.
+    // 단일 호출에서 모델이 row2를 row1과 동일하게 시작하는(L-CONTACT 반복) 문제를 방지한다.
+    const totalCycle = rows * cols;
+    const rowGridTemplatePath = await generateGridTemplate(cols, 1, cellW, cellH);
+    const rowDecorated = await Promise.all(
+      Array.from({ length: rows }, (_, r) =>
+        buildSpritePrompt({
+          userPrompt, rows: 1, cols, cellW, cellH, canvasW, canvasH: cellH,
+          wantsTransparent, chromaKeyColor, seamlessLoop,
+          subjectType, resolvedAnchor, directions: null,
+          refPath, gridTemplatePath: rowGridTemplatePath, viewpoint, facing,
+          refHandDescription,
+          startFrame: r * cols, totalCycle, rowIndex: r, totalRows: rows,
+        }),
+      ),
+    );
+    ({ best, cumulativeMs } = await runDirectionalSpritesheet({
+      rowDecorated,
+      dirList: Array.from({ length: rows }, (_, r) => `row${r + 1}`),
+      refId, spritesheetParams,
+      wantsTransparent, chromaKeyColor, rows, cols, canvasW, rowCanvasH: cellH,
       anchorStrategy, subjectType, resolvedAnchor,
       finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
     }));
