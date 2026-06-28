@@ -108,7 +108,7 @@ function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A
  * 이미지 렌더(buildPoseSvg)와 각도 텍스트(computeFrameAngles/extractPoseGuideGrid)의 단일 소스.
  */
 export function computePose(frame: number, totalFrames: number, dirIndex: number, isRun: boolean) {
-  const A = isRun ? 48 : 32;
+  const A = isRun ? 60 : 32;
   const phase = (2 * Math.PI * frame) / totalFrames;
   const { walkX, walkY } = walkComponents(dirIndex);
   const left = computeLeg(1, phase, walkX, walkY, A);

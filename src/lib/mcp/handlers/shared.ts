@@ -417,7 +417,8 @@ export async function buildSpritePrompt(
       }
       const lA = a.leftDeg;
       const rA = a.rightDeg;
-      const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
+      const isContactFrame = a.label === "R-CONTACT" || a.label === "L-CONTACT";
+      const phase = isContactFrame ? "MAX STRIDE" : Math.abs(lA) >= 15 ? "swing" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
       const leadingLeg =
         a.label === "R-CONTACT"
           ? " — RED (right) foot FULLY FORWARD (max stride), BLUE (left) foot back"
