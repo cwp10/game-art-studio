@@ -450,7 +450,11 @@ export async function buildSpritePrompt(
           `This is a PARTIAL cycle segment — do NOT start a fresh gait cycle. Match the POSE GUIDE frame-by-frame. ` +
           (startFrame === 0
             ? `Row ${rowIndex + 1} starts at L-CONTACT (left foot leads). Do NOT compress a full gait cycle into these ${cols} frames — show only the first half of the cycle. R-CONTACT begins in the NEXT row. `
-            : `Row ${rowIndex + 1} starts at ${poseFrameAngles?.[0]?.label ?? "the phase shown in pose guide col1"} — do NOT reset to L-CONTACT. The pose guide col1 is the mandatory first frame. `)
+            : `Row ${rowIndex + 1} starts at ${poseFrameAngles?.[0]?.label ?? "the phase shown in pose guide col1"} — do NOT reset to L-CONTACT. The pose guide col1 is the mandatory first frame. ` +
+              `BODY POSTURE ACROSS ROWS (CRITICAL): The character's body height, center of gravity, and upright running lean are IDENTICAL in this row to Row 1. Do NOT lower the body, crouch down, or compress the stance between rows — only the legs change. ` +
+              (poseFrameAngles?.[0]?.label === "R-CONTACT"
+                ? `R-CONTACT (col1) = RIGHT heel extends FULLY FORWARD past the body centerline, right leg nearly straight, LEFT leg back — SAME stride extension distance as Row 1's L-CONTACT but mirrored. The body is upright at the SAME height as Row 1. R-CONTACT is NOT a crouched, recovery, or gathering pose — it is a full extended stride contact. `
+                : ""))
         : `This is a WALKING/RUNNING animation. You MUST depict the complete, natural gait cycle including EVERY phase: ` +
           `(1) CONTACT — left leg fully forward, right leg fully back; ` +
           `(2) CROSSOVER/MID-STANCE — both legs passing each other (legs close together, weight centered); ` +
@@ -678,7 +682,9 @@ export async function buildSpritePrompt(
       : userPrompt;
 
   const perRowContext = rowIndex !== undefined && startFrame !== undefined && totalCycle !== undefined
-    ? `[ROW ${rowIndex + 1}/${totalRows ?? rows}: frames ${startFrame + 1}–${startFrame + cols} of ${totalCycle}-frame cycle, starts at ${poseFrameAngles?.[0]?.label ?? "pose guide col1"}] `
+    ? `[ROW ${rowIndex + 1}/${totalRows ?? rows}: frames ${startFrame + 1}–${startFrame + cols} of ${totalCycle}-frame cycle — starts at ${poseFrameAngles?.[0]?.label ?? "pose guide col1"}` +
+      (startFrame > 0 ? `, body height = same as Row 1` : "") +
+      `] `
     : "";
 
   const decorated =
