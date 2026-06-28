@@ -418,9 +418,17 @@ export async function buildSpritePrompt(
       const lA = a.leftDeg;
       const rA = a.rightDeg;
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
+      const isRow2Start = numRows > 1 && i === numCols;
       const leadingLeg =
-        a.label === "L-CONTACT" ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK" :
-        a.label === "R-CONTACT" ? " — LEADING LEG: RIGHT foot FORWARD / left foot BACK" : "";
+        a.label === "L-CONTACT" && i === 0
+          ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK [ROW 1 STARTS HERE — left boot leads]"
+          : a.label === "L-CONTACT"
+          ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK"
+          : a.label === "R-CONTACT" && isRow2Start
+          ? ` — !!!ROW 2 OPENS HERE WITH R-CONTACT!!!: The RED (RIGHT) skeleton leg angles FORWARD. The BLUE (LEFT) skeleton leg angles BACK. Your character's RIGHT boot must be the boot closest to the direction of travel, extended forward. The LEFT boot is pulled back behind the hips. This cell must look like the OPPOSITE of row1col1 in terms of which boot is forward. If you draw the LEFT boot forward here, that is a CRITICAL FAILURE — erase and redraw with the RIGHT boot forward.`
+          : a.label === "R-CONTACT"
+          ? " — LEADING LEG: RIGHT foot FORWARD / left foot BACK"
+          : "";
       return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
     return `MANDATORY FRAME SEQUENCE: ${descs.join("; ")}. `;
@@ -563,10 +571,13 @@ export async function buildSpritePrompt(
         ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
           `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
           (rows > 1
-            ? `ROW CONTINUITY (CRITICAL): This grid is ONE continuous animation sequence — each row continues from where the previous row ended. ` +
-              `The leading foot at the start of each row alternates: row1col1 = L-CONTACT, row2col1 = R-CONTACT` +
-              (rows > 2 ? `, row3col1 = L-CONTACT, and so on` : "") +
-              `. Every row is visually distinct from every other row. Avoid copying, mirroring, or repeating poses across rows. `
+            ? `ROW CONTINUITY — MANDATORY: This grid is ONE continuous animation film strip, NOT two separate animations. Reading left→right, top→bottom gives frames 1,2,3,...,${cols * rows} in unbroken sequence. ` +
+              `CRITICAL — THE BOTTOM-LEFT CELL (row2col1) IS R-CONTACT: The very first cell of row 2 MUST have the RIGHT foot extended FORWARD (toward the direction of travel) and the LEFT foot pulled BACK. ` +
+              `Look at the skeleton in row2col1 in the attached pose guide: the RED line (right leg) angles FORWARD, the BLUE line (left leg) angles BACK. Match this exactly. ` +
+              `NEVER start row 2 with the LEFT foot forward — that is L-CONTACT and belongs only at row1col1. ` +
+              `Row 2 col 1 = R-CONTACT (right foot forward). Row 2 does NOT reset to the beginning. Row 2 continues from frame ${cols + 1} of ${cols * rows}. `+
+              (rows > 2 ? `row3col1 = L-CONTACT again. ` : "") +
+              `Every row is visually distinct from every other row. Avoid copying, mirroring, or repeating poses across rows. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +
