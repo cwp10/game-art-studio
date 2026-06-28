@@ -311,12 +311,12 @@ function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, is
   // 크로스오버는 프레임 사이의 전환이지, 전용 "양발 나란히" 프레임이 아니다.
   // 이전 리딩 발 방향으로 약간(8°) 편향시켜 모델이 한 발이 여전히 앞서 있는 것으로 인식하게 한다.
   if (totalFrames >= 8 && leftDeg === 0 && rightDeg === 0) {
-    // 전반부(row1)=오른발 준비: LEFT 살짝 앞(접지), RIGHT 들림. 후반부(row2)=왼발 준비.
+    // 정확히 0°인 크로스오버 순간을 "양발 나란히" 프레임으로 오해하지 않도록 ±8° 편향.
+    // 크로스오버는 방향성이 없는 전환점이므로 전반/후반 모두 동일한 f{col} 라벨 사용.
     const bias = col < totalFrames / 2 ? 8 : -8;
     leftDeg = bias;
     rightDeg = -bias;
-    const prepLabel = col < totalFrames / 2 ? "R-PREP" : "L-PREP";
-    return { col, leftDeg, rightDeg, label: prepLabel, foreAft: null };
+    return { col, leftDeg, rightDeg, label: `f${col}`, foreAft: null };
   }
   // L-CONTACT = 왼발이 진행방향 앞. LEFT(walkX<0)에서 swingAngle 부호가 뒤집히므로 sign(walkX) 보정.
   const label = absC > 0.85 ? (leftDeg * Math.sign(walkX) > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;

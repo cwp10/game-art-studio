@@ -418,12 +418,11 @@ export async function buildSpritePrompt(
       const lA = a.leftDeg;
       const rA = a.rightDeg;
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
-      const isRow2Start = numRows > 1 && i === numCols;
       const leadingLeg =
         a.label === "R-CONTACT"
-          ? " — right foot FULLY FORWARD (max stride), left foot back"
+          ? " — RED (right) foot FULLY FORWARD (max stride), BLUE (left) foot back"
           : a.label === "L-CONTACT"
-          ? " — left foot FULLY FORWARD (max stride), right foot back"
+          ? " — BLUE (left) foot FULLY FORWARD (max stride), RED (right) foot back"
           : "";
       return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
@@ -558,6 +557,7 @@ export async function buildSpritePrompt(
       `You MUST render your character OVER these skeletons so that the LEFT leg matches the BLUE angle and the RIGHT leg matches the RED angle — independently and precisely. ` +
       `Match each leg to its skeleton color independently and precisely. Avoid swapping left and right legs. Avoid averaging or blending the two angles into a symmetric pose. Avoid using the same angle for both legs. ` +
       `The skeleton is your binding reference — replace it with the actual character while keeping each leg's angle exactly as shown by its color. ` +
+      `POSE GUIDE STRICT ADHERENCE (NON-NEGOTIABLE): Every cell MUST faithfully reproduce the leg angles shown in the pose guide skeleton for that cell. Do NOT invent a different pose, substitute your own run cycle interpretation, or smooth/interpolate between cells beyond what the guide shows. The pose guide is the single source of truth for limb positions — deviation from it is a critical error. ` +
       (poseFrameAnglesText
         ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
           `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
