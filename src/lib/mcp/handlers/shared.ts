@@ -255,9 +255,27 @@ export async function buildSpritePrompt(
     : "White background.";
 
   const loopInstruction = seamlessLoop
-    ? `INFINITE LOOP (CRITICAL): Frames play [1→2→…→N→1→2…] forever — Frame N leads directly back into Frame 1. ` +
-      `Design a CLOSED CYCLE: Walk/run — Frame N flows into Frame 1's pose. Idle — Frame N is mid-motion flowing into Frame 1. Attack — Frame N is the final recovery moment returning toward Frame 1's ready stance. ` +
-      `Design a seamless closed cycle — avoid a linear arc (wind-up → peak → stop). `
+    ? rowIndex !== undefined && totalRows !== undefined
+        // 행별 분할 생성: 루프 지시를 행 위치에 따라 특화
+        ? rowIndex < totalRows - 1
+            // 중간 행: 다음 행 첫 프레임으로 이어짐 (자기 자신으로 루프 아님)
+            ? (() => {
+                const sf = startFrame ?? 0;
+                const tc = totalCycle ?? rows * cols;
+                const cosp = Math.cos(2 * Math.PI * (sf + cols) / tc);
+                const nextLabel = Math.abs(cosp) > 0.85 ? (cosp > 0 ? "L-CONTACT" : "R-CONTACT") : "next phase";
+                return `ROW CONTINUITY: The last frame of Row ${rowIndex + 1} transitions into Row ${rowIndex + 2} Frame 1 (${nextLabel}). ` +
+                  `End this row approaching ${nextLabel} — do NOT loop back to this row's own first frame. `;
+              })()
+            // 마지막 행: 전체 애니메이션 루프 (→ Row1 Frame1 L-CONTACT)
+            : `SEAMLESS LOOP (CRITICAL): This is the FINAL row of the ${totalCycle}-frame animation. ` +
+              `The last frame loops back to Row 1 Frame 1 (L-CONTACT — left leg fully forward). ` +
+              `Design the last frame to approach L-CONTACT: left leg swinging forward, right leg behind — the transition must be smooth and natural. ` +
+              `Do NOT loop back to this row's own first frame (R-CONTACT). `
+        // 표준 단일 호출: 기존 루프 지시
+        : `INFINITE LOOP (CRITICAL): Frames play [1→2→…→N→1→2…] forever — Frame N leads directly back into Frame 1. ` +
+          `Design a CLOSED CYCLE: Walk/run — Frame N flows into Frame 1's pose. Idle — Frame N is mid-motion flowing into Frame 1. Attack — Frame N is the final recovery moment returning toward Frame 1's ready stance. ` +
+          `Design a seamless closed cycle — avoid a linear arc (wind-up → peak → stop). `
     : "";
 
   // ── 앵커·콘텐츠 규칙 ────────────────────────────────────────────────────
