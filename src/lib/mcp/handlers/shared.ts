@@ -420,14 +420,14 @@ export async function buildSpritePrompt(
       const phase = Math.abs(lA) >= 15 ? "MAX STRIDE" : Math.abs(lA) <= 5 ? "CROSSOVER" : "mid-stride";
       const isRow2Start = numRows > 1 && i === numCols;
       const leadingLeg =
-        a.label === "L-CONTACT" && i === 0
-          ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK [ROW 1 STARTS HERE — left boot leads]"
-          : a.label === "L-CONTACT"
-          ? " — LEADING LEG: LEFT foot FORWARD / right foot BACK"
-          : a.label === "R-CONTACT" && isRow2Start
-          ? ` — !!!ROW 2 OPENS HERE WITH R-CONTACT!!!: The RED (RIGHT) skeleton leg angles FORWARD. The BLUE (LEFT) skeleton leg angles BACK. Your character's RIGHT boot must be the boot closest to the direction of travel, extended forward. The LEFT boot is pulled back behind the hips. This cell must look like the OPPOSITE of row1col1 in terms of which boot is forward. If you draw the LEFT boot forward here, that is a CRITICAL FAILURE — erase and redraw with the RIGHT boot forward.`
+        a.label === "R-PREP" && i === 0
+          ? " — [ROW 1 START] FEET TOGETHER: RED (right) foot is AIRBORNE/BENT UP, BLUE (left) foot is on ground. Right foot is about to swing forward. Do NOT draw feet spread apart here."
           : a.label === "R-CONTACT"
-          ? " — LEADING LEG: RIGHT foot FORWARD / left foot BACK"
+          ? " — RIGHT foot FULLY FORWARD (max stride) / left foot PULLED BACK. RED leg forward, BLUE leg back."
+          : a.label === "L-PREP" && isRow2Start
+          ? " — [ROW 2 START] FEET TOGETHER: BLUE (left) foot is AIRBORNE/BENT UP, RED (right) foot is on ground. Left foot is about to swing forward. Do NOT draw feet spread apart here."
+          : a.label === "L-CONTACT"
+          ? " — LEFT foot FULLY FORWARD (max stride) / right foot PULLED BACK. BLUE leg forward, RED leg back."
           : "";
       return `${pos}[${a.label}/${phase}]: L=${lA >= 0 ? "+" : ""}${lA}°(${lA > 5 ? "FWD" : lA < -5 ? "BACK" : "~0"}), R=${rA >= 0 ? "+" : ""}${rA}°(${rA > 5 ? "FWD" : rA < -5 ? "BACK" : "~0"})${leadingLeg}`;
     });
@@ -571,13 +571,13 @@ export async function buildSpritePrompt(
         ? (poseFrameAngles ? buildFrameNarrative(poseFrameAngles, rows, cols) : "") +
           `EXACT PER-LEG ANGLES PER CELL (${rows > 1 ? `${cols}×${rows} grid, read left→right then top→bottom` : `columns`}): ${poseFrameAnglesText}. ` +
           (rows > 1
-            ? `ROW CONTINUITY — MANDATORY: This grid is ONE continuous animation film strip, NOT two separate animations. Reading left→right, top→bottom gives frames 1,2,3,...,${cols * rows} in unbroken sequence. ` +
-              `CRITICAL — THE BOTTOM-LEFT CELL (row2col1) IS R-CONTACT: The very first cell of row 2 MUST have the RIGHT foot extended FORWARD (toward the direction of travel) and the LEFT foot pulled BACK. ` +
-              `Look at the skeleton in row2col1 in the attached pose guide: the RED line (right leg) angles FORWARD, the BLUE line (left leg) angles BACK. Match this exactly. ` +
-              `NEVER start row 2 with the LEFT foot forward — that is L-CONTACT and belongs only at row1col1. ` +
-              `Row 2 col 1 = R-CONTACT (right foot forward). Row 2 does NOT reset to the beginning. Row 2 continues from frame ${cols + 1} of ${cols * rows}. `+
-              (rows > 2 ? `row3col1 = L-CONTACT again. ` : "") +
-              `Every row is visually distinct from every other row. Avoid copying, mirroring, or repeating poses across rows. `
+            ? `ROW STRUCTURE — MANDATORY: ROW 1 is the RIGHT-FOOT cycle, ROW 2 is the LEFT-FOOT cycle. ` +
+              `ROW 1 (frames 1-${cols}): col 1=feet together with RED (right) foot LIFTED, col 3=R-CONTACT (RED foot fully forward, max stride), col 4=RED foot crossing back. ` +
+              `ROW 2 (frames ${cols+1}-${cols*rows}): col 1=feet together with BLUE (left) foot LIFTED, col 3=L-CONTACT (BLUE foot fully forward, max stride), col 4=BLUE foot crossing back. ` +
+              `CRITICAL — row2col1 (bottom-left) must show FEET CLOSE TOGETHER with the BLUE (left) foot AIRBORNE/BENT. ` +
+              `Look at the skeleton in row2col1 in the pose guide: legs are nearly parallel, BLUE leg is bent up (not planted). ` +
+              `NEVER draw row2col1 with feet spread wide apart — that is a CONTACT pose and belongs at row1col${cols} or row2col${cols}. ` +
+              `Row 1 and row 2 are visually distinct: row 1 shows right-foot stride, row 2 shows left-foot stride. `
             : "") +
           `L = LEFT leg angle, R = RIGHT leg angle. Positive = forward` +
           (singleDirWalkDir ? ` (screen-${singleDirWalkDir}, the walking direction)` : "") +

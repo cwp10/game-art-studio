@@ -109,7 +109,7 @@ function computeLeg(side: 1 | -1, phase: number, walkX: number, walkY: number, A
  */
 export function computePose(frame: number, totalFrames: number, dirIndex: number, isRun: boolean) {
   const A = isRun ? 48 : 32;
-  const phase = (2 * Math.PI * frame) / totalFrames;
+  const phase = (2 * Math.PI * frame) / totalFrames + Math.PI / 2;
   const { walkX, walkY } = walkComponents(dirIndex);
   const left = computeLeg(1, phase, walkX, walkY, A);
   const right = computeLeg(-1, phase, walkX, walkY, A);
@@ -311,10 +311,12 @@ function poseToFrameAngle(col: number, totalFrames: number, dirIndex: number, is
   // 크로스오버는 프레임 사이의 전환이지, 전용 "양발 나란히" 프레임이 아니다.
   // 이전 리딩 발 방향으로 약간(8°) 편향시켜 모델이 한 발이 여전히 앞서 있는 것으로 인식하게 한다.
   if (totalFrames >= 8 && leftDeg === 0 && rightDeg === 0) {
-    const bias = col < totalFrames / 2 ? 8 : -8; // 전반부=왼발 리드, 후반부=오른발 리드
+    // 전반부(row1)=오른발 준비: LEFT 살짝 앞(접지), RIGHT 들림. 후반부(row2)=왼발 준비.
+    const bias = col < totalFrames / 2 ? 8 : -8;
     leftDeg = bias;
     rightDeg = -bias;
-    return { col, leftDeg, rightDeg, label: `f${col}`, foreAft: null };
+    const prepLabel = col < totalFrames / 2 ? "R-PREP" : "L-PREP";
+    return { col, leftDeg, rightDeg, label: prepLabel, foreAft: null };
   }
   // L-CONTACT = 왼발이 진행방향 앞. LEFT(walkX<0)에서 swingAngle 부호가 뒤집히므로 sign(walkX) 보정.
   const label = absC > 0.85 ? (leftDeg * Math.sign(walkX) > 0 ? "L-CONTACT" : "R-CONTACT") : absC < 0.15 ? "PASSING" : `f${col}`;
