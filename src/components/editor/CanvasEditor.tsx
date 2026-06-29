@@ -1358,6 +1358,16 @@ export function CanvasEditor({
     }
   }, [layers, selectedLayerId, extracting, extractInput, brushPainted, onExtractBrush, pushUndo, closeTool]);
 
+  // TODO: Task 3
+  const handleLassoCutout = useCallback(async () => {}, []);
+  // TODO: Task 4
+  const handleLassoDuplicate = useCallback(async () => {}, []);
+  // TODO: Task 5
+  const handleLassoMoveStart = useCallback(() => {}, []);
+  // TODO: Task 6
+  const handleLassoMoveConfirm = useCallback(async () => {}, []);
+  const handleLassoMoveCancel = useCallback(() => { setLassoMoveOffset(null); }, [setLassoMoveOffset]);
+
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
   // FLIP — 재정렬로 행 위치가 바뀌면 옛 위치에서 새 위치로 부드럽게 슬라이드(자연스러운 인지).
@@ -2811,21 +2821,88 @@ export function CanvasEditor({
                     {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. */}
                     {extractMode === "lasso" && (
                       <>
-                        <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                          {(["free", "poly", "magnetic"] as const).map(t => (
+                        {!lassoCommittedRef.current ? (
+                          /* ── 드로잉 모드 ── */
+                          <>
+                            <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
+                              {(["free", "poly", "magnetic"] as const).map(t => (
+                                <button
+                                  key={t}
+                                  onClick={() => { setLassoType(t); clearLassoState(); }}
+                                  className={`flex h-6 items-center rounded px-2 text-[11px] ${lassoType === t ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
+                                  title={t === "free" ? "자유 — 드래그로 그리고 떼면 자동으로 닫힘" : t === "poly" ? "다각형 — 클릭으로 꼭짓점, 더블클릭/시작점 클릭으로 닫기" : "자석 — 이미지 경계선에 자동 스냅"}
+                                >
+                                  {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
+                                </button>
+                              ))}
+                            </div>
+                            <button onClick={clearBrush} className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary">전체지우기</button>
+                            {lassoType !== "free" && lassoPtCount >= 3 && (
+                              <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary">완료 (Enter)</button>
+                            )}
+                          </>
+                        ) : lassoDraggingMove || lassoMoveOffset ? (
+                          /* ── 이동 모드 ── */
+                          <>
+                            <span className="text-[11px] text-text-muted">드래그로 이동하세요</span>
                             <button
-                              key={t}
-                              onClick={() => { setLassoType(t); clearLassoState(); }}
-                              className={`flex h-6 items-center rounded px-2 text-[11px] ${lassoType === t ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-                              title={t === "free" ? "자유 — 드래그로 그리고 떼면 자동으로 닫힘" : t === "poly" ? "다각형 — 클릭으로 꼭짓점, 더블클릭/시작점 클릭으로 닫기 (Backspace 취소·Esc 전체취소)" : "자석 — 이미지 경계선에 자동 스냅, 클릭으로 앵커 고정, 더블클릭으로 닫기"}
+                              onClick={handleLassoMoveConfirm}
+                              disabled={extracting}
+                              className="flex h-6 items-center gap-1 rounded-lg bg-[color:var(--accent)] px-3 text-[11px] font-medium text-white disabled:opacity-40"
                             >
-                              {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
+                              {extracting ? <><Loader2 size={12} className="animate-spin" /> 처리 중…</> : "확정"}
                             </button>
-                          ))}
-                        </div>
-                        <button onClick={clearBrush} className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary" title="그린 올가미 영역 지우기">전체지우기</button>
-                        {lassoType !== "free" && lassoPtCount >= 3 && (
-                          <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary" title="현재 경로를 닫아 마스크로 확정 (Enter)">완료 (Enter)</button>
+                            <button
+                              onClick={handleLassoMoveCancel}
+                              className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                            >
+                              취소
+                            </button>
+                            <button
+                              onClick={() => setLassoAiRestore(v => !v)}
+                              className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] ${lassoAiRestore ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary" : "border-border text-text-muted hover:text-text-primary"}`}
+                            >
+                              AI 복원 {lassoAiRestore ? "ON" : "OFF"}
+                            </button>
+                          </>
+                        ) : (
+                          /* ── 액션 선택 모드 ── */
+                          <>
+                            <span className="text-[11px] text-text-muted">영역이 선택됐습니다</span>
+                            <button
+                              onClick={handleLassoCutout}
+                              disabled={extracting}
+                              className="flex h-6 items-center rounded-lg border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+                            >
+                              {extracting ? <><Loader2 size={12} className="animate-spin" /></> : "누끼 따기"}
+                            </button>
+                            <button
+                              onClick={() => setLassoAiCutout(v => !v)}
+                              className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] ${lassoAiCutout ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary" : "border-border text-text-muted hover:text-text-primary"}`}
+                              title="누끼 방식: OFF=즉시 픽셀 크롭, ON=AI 부드러운 누끼"
+                            >
+                              AI {lassoAiCutout ? "ON" : "OFF"}
+                            </button>
+                            <button
+                              onClick={handleLassoDuplicate}
+                              disabled={extracting}
+                              className="flex h-6 items-center rounded-lg border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
+                            >
+                              복제
+                            </button>
+                            <button
+                              onClick={handleLassoMoveStart}
+                              className="flex h-6 items-center rounded-lg border border-border px-2 text-[11px] text-text-muted hover:text-text-primary"
+                            >
+                              이동
+                            </button>
+                            <button
+                              onClick={() => { clearLassoState(); setBrushPainted(false); }}
+                              className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
+                            >
+                              다시 그리기
+                            </button>
+                          </>
                         )}
                       </>
                     )}
