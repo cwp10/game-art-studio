@@ -45,7 +45,8 @@
         "to": "app/.next",
         "filter": [
           "**/*",
-          "!cache/**"
+          "!cache/**",
+          "!dev/node_modules/**"
         ]
       },
       {
