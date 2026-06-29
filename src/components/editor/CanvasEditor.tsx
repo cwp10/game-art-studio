@@ -1358,8 +1358,66 @@ export function CanvasEditor({
     }
   }, [layers, selectedLayerId, extracting, extractInput, brushPainted, onExtractBrush, pushUndo, closeTool]);
 
-  // TODO: Task 3
-  const handleLassoCutout = useCallback(async () => {}, []);
+  const handleLassoCutout = useCallback(async () => {
+    const layer = layers.find(l => l.id === selectedLayerId);
+    if (!layer || !inpaintNat || extracting) return;
+    const imagePts = lassoImagePtsRef.current;
+    if (imagePts.length < 3) return;
+
+    if (lassoAiCutout) {
+      // AI 경로 — 기존 handleExtractBrush 재사용 (brushCanvasRef 빨강 마스크 이미 있음)
+      await handleExtractBrush();
+      return;
+    }
+
+    setExtracting(true);
+    setError(null);
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("이미지 로드 실패"));
+        img.src = `/api/images/${layer.generationId}`;
+      });
+
+      const { w, h } = inpaintNat;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, w, h);
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.moveTo(imagePts[0].x, imagePts[0].y);
+      imagePts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+      ctx.closePath();
+      ctx.fill();
+
+      const dataUrl = canvas.toDataURL("image/png");
+      const r = await uploadImage({ dataUrl, sessionId });
+      pushUndo();
+      const nl: Layer = {
+        ...makeLayer(r.generationId),
+        x: layer.x,
+        y: layer.y,
+        scale: layer.scale,
+        stretchW: layer.stretchW,
+        stretchH: layer.stretchH,
+        rotation: layer.rotation,
+        flipH: layer.flipH,
+      };
+      setLayers(prev => [...prev, nl]);
+      setSelectedLayerId(nl.id);
+      closeTool();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExtracting(false);
+    }
+  }, [layers, selectedLayerId, inpaintNat, extracting, lassoAiCutout, handleExtractBrush,
+      sessionId, pushUndo, setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
   // TODO: Task 4
   const handleLassoDuplicate = useCallback(async () => {}, []);
   // TODO: Task 5
