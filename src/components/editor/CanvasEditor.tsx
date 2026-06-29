@@ -651,6 +651,9 @@ export function CanvasEditor({
     setLassoPtCount(0);
     setLassoMoveOffset(null);           // ← 추가
     setLassoDraggingMove(false);        // ← 추가
+    setLassoAiCutout(false);
+    setLassoAiRestore(false);
+    setBrushPainted(false);
     const overlay = lassoOverlayRef.current;
     overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
   }, []);
@@ -1383,24 +1386,39 @@ export function CanvasEditor({
       });
 
       const { w, h } = inpaintNat;
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0, w, h);
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.fillStyle = "#000";
-      ctx.beginPath();
-      ctx.moveTo(imagePts[0].x, imagePts[0].y);
-      imagePts.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
-      ctx.closePath();
-      ctx.fill();
 
-      const dataUrl = canvas.toDataURL("image/png");
-      const r = await uploadImage({ dataUrl, sessionId });
+      // Step 1 — 원본 구멍 내기 (선택 영역 투명화)
+      const holeCanvas = document.createElement("canvas");
+      holeCanvas.width = w; holeCanvas.height = h;
+      const hctx = holeCanvas.getContext("2d")!;
+      hctx.drawImage(img, 0, 0, w, h);
+      hctx.globalCompositeOperation = "destination-out";
+      hctx.fillStyle = "#000";
+      hctx.beginPath();
+      hctx.moveTo(imagePts[0].x, imagePts[0].y);
+      imagePts.slice(1).forEach(p => hctx.lineTo(p.x, p.y));
+      hctx.closePath();
+      hctx.fill();
+      const holeResult = await uploadImage({ dataUrl: holeCanvas.toDataURL("image/png"), sessionId });
+
+      // Step 2 — 분리된 픽셀 새 레이어
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = w; cropCanvas.height = h;
+      const cctx = cropCanvas.getContext("2d")!;
+      cctx.drawImage(img, 0, 0, w, h);
+      cctx.globalCompositeOperation = "destination-in";
+      cctx.fillStyle = "#000";
+      cctx.beginPath();
+      cctx.moveTo(imagePts[0].x, imagePts[0].y);
+      imagePts.slice(1).forEach(p => cctx.lineTo(p.x, p.y));
+      cctx.closePath();
+      cctx.fill();
+      const cropResult = await uploadImage({ dataUrl: cropCanvas.toDataURL("image/png"), sessionId });
+
       pushUndo();
+      patchLayer(layer.id, { generationId: holeResult.generationId });
       const nl: Layer = {
-        ...makeLayer(r.generationId),
+        ...makeLayer(cropResult.generationId),
         x: layer.x,
         y: layer.y,
         scale: layer.scale,
@@ -1418,7 +1436,7 @@ export function CanvasEditor({
       setExtracting(false);
     }
   }, [layers, selectedLayerId, inpaintNat, extracting, lassoAiCutout, handleExtractBrush,
-      sessionId, pushUndo, setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
+      sessionId, pushUndo, patchLayer, setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
   const handleLassoDuplicate = useCallback(async () => {
     const layer = layers.find(l => l.id === selectedLayerId);
     if (!layer || !inpaintNat || extracting) return;
@@ -3071,7 +3089,7 @@ export function CanvasEditor({
                     {/* 올가미 타입(자유/다각형/자석) + 전체지우기 + (점≥3) 완료. */}
                     {extractMode === "lasso" && (
                       <>
-                        {!lassoCommittedRef.current ? (
+                        {!brushPainted ? (
                           /* ── 드로잉 모드 ── */
                           <>
                             <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
