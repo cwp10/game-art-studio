@@ -1514,8 +1514,95 @@ export function CanvasEditor({
     [],
   );
 
-  // TODO: Task 6
-  const handleLassoMoveConfirm = useCallback(async () => {}, []);
+  const handleLassoMoveConfirm = useCallback(async () => {
+    const layer = layers.find(l => l.id === selectedLayerId);
+    if (!layer || !inpaintNat || !lassoMoveOffset || extracting) return;
+    const imagePts = lassoImagePtsRef.current;
+    if (imagePts.length < 3) return;
+
+    setExtracting(true);
+    setError(null);
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("이미지 로드 실패"));
+        img.src = `/api/images/${layer.generationId}`;
+      });
+
+      const { w, h } = inpaintNat;
+
+      // Step 1 — 원본 구멍 내기 (선택 영역 투명화)
+      const holeCanvas = document.createElement("canvas");
+      holeCanvas.width = w; holeCanvas.height = h;
+      const hctx = holeCanvas.getContext("2d")!;
+      hctx.drawImage(img, 0, 0, w, h);
+      hctx.globalCompositeOperation = "destination-out";
+      hctx.fillStyle = "#000";
+      hctx.beginPath();
+      hctx.moveTo(imagePts[0].x, imagePts[0].y);
+      imagePts.slice(1).forEach(p => hctx.lineTo(p.x, p.y));
+      hctx.closePath();
+      hctx.fill();
+      const holeResult = await uploadImage({ dataUrl: holeCanvas.toDataURL("image/png"), sessionId });
+
+      // Step 2 — 이동된 픽셀 새 레이어
+      const cropCanvas = document.createElement("canvas");
+      cropCanvas.width = w; cropCanvas.height = h;
+      const cctx = cropCanvas.getContext("2d")!;
+      cctx.drawImage(img, 0, 0, w, h);
+      cctx.globalCompositeOperation = "destination-in";
+      cctx.fillStyle = "#000";
+      cctx.beginPath();
+      cctx.moveTo(imagePts[0].x, imagePts[0].y);
+      imagePts.slice(1).forEach(p => cctx.lineTo(p.x, p.y));
+      cctx.closePath();
+      cctx.fill();
+      const cropResult = await uploadImage({ dataUrl: cropCanvas.toDataURL("image/png"), sessionId });
+
+      pushUndo();
+      patchLayer(layer.id, { generationId: holeResult.generationId });
+      const nl: Layer = {
+        ...makeLayer(cropResult.generationId),
+        x: layer.x + lassoMoveOffset.dx,
+        y: layer.y + lassoMoveOffset.dy,
+        scale: layer.scale,
+        stretchW: layer.stretchW,
+        stretchH: layer.stretchH,
+        rotation: layer.rotation,
+        flipH: layer.flipH,
+      };
+      setLayers(prev => [...prev, nl]);
+      setSelectedLayerId(nl.id);
+
+      // Step 3 — AI 복원 (선택적): 구멍을 inpaint로 채움
+      if (lassoAiRestore) {
+        const bc = brushCanvasRef.current;
+        if (bc) {
+          const out = document.createElement("canvas");
+          out.width = bc.width; out.height = bc.height;
+          const octx = out.getContext("2d")!;
+          octx.fillStyle = "#000";
+          octx.fillRect(0, 0, out.width, out.height);
+          octx.drawImage(bc, 0, 0);
+          const maskDataUrl = out.toDataURL("image/png");
+          const restoreResult = await onInpaint(holeResult.generationId, maskDataUrl, "background fill");
+          if (restoreResult) {
+            patchLayer(layer.id, { generationId: restoreResult.generationId });
+          }
+        }
+      }
+
+      closeTool();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExtracting(false);
+    }
+  }, [layers, selectedLayerId, inpaintNat, lassoMoveOffset, extracting, lassoAiRestore,
+      sessionId, brushCanvasRef, onInpaint, pushUndo, patchLayer,
+      setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
 
   const handleLassoMoveCancel = useCallback(() => {
     setLassoMoveOffset(null);
@@ -2350,7 +2437,7 @@ export function CanvasEditor({
                         : lassoMoveOffset !== null ? onMoveDown : undefined
                       }
                       onClick={lassoType !== "free" && lassoMoveOffset === null ? onLassoOverlayClick : undefined}
-                      onPointerMove={e => { onLassoOverlayMove(e); if (lassoDraggingMove) onMoveMove(e); }}
+                      onPointerMove={e => { if (lassoDraggingMove) { onMoveMove(e); } else { onLassoOverlayMove(e); } }}
                       onPointerUp={e => { if (lassoDraggingMove) onMoveUp(e); }}
                       onDoubleClick={onLassoOverlayDblClick}
                     />
