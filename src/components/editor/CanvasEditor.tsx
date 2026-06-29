@@ -910,7 +910,7 @@ export function CanvasEditor({
 
   // 오버레이 경로 그리기 — 흰선 base + 검정 점선(포토샵 marching-ants 느낌). extraPt=고무줄/포인터 끝.
   const redrawLassoOverlay = useCallback(
-    (extraPt?: { lx: number; ly: number }, closedFill?: boolean) => {
+    (extraPt?: { lx: number; ly: number }, closedFill?: boolean, moveOff?: { dx: number; dy: number }) => {
       const canvas = lassoOverlayRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
@@ -926,7 +926,8 @@ export function CanvasEditor({
 
       // ── 커밋 완료 상태: 파란 fill 영구 표시 ──────────────────────────────────
       if (lassoCommittedRef.current && pts.length >= 3) {
-        const all = pts.map(p => clientToOverlay(p.lx, p.ly));
+        const off = moveOff ?? { dx: 0, dy: 0 };
+        const all = pts.map(p => clientToOverlay(p.lx + off.dx, p.ly + off.dy));
         ctx.beginPath();
         ctx.moveTo(all[0].x, all[0].y);
         all.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
@@ -1473,11 +1474,55 @@ export function CanvasEditor({
     }
   }, [layers, selectedLayerId, inpaintNat, extracting,
       sessionId, pushUndo, setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
-  // TODO: Task 5
-  const handleLassoMoveStart = useCallback(() => {}, []);
+  const lassoDragStartRef = useRef<{ lx: number; ly: number } | null>(null);
+
+  const handleLassoMoveStart = useCallback(() => {
+    setLassoMoveOffset({ dx: 0, dy: 0 });
+    // 드래그 대기 상태 — onMoveDown 에서 실제 드래그 시작
+  }, [setLassoMoveOffset]);
+
+  const onMoveDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!lassoCommittedRef.current || lassoMoveOffset === null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      lassoDragStartRef.current = clientToLocal(e.clientX, e.clientY);
+      setLassoDraggingMove(true);
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    },
+    [clientToLocal, lassoMoveOffset],
+  );
+
+  const onMoveMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!lassoDragStartRef.current) return;
+      const cur = clientToLocal(e.clientX, e.clientY);
+      const dx = cur.lx - lassoDragStartRef.current.lx;
+      const dy = cur.ly - lassoDragStartRef.current.ly;
+      setLassoMoveOffset({ dx, dy });
+      redrawLassoOverlay(undefined, true, { dx, dy });
+    },
+    [clientToLocal, redrawLassoOverlay],
+  );
+
+  const onMoveUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      setLassoDraggingMove(false);
+      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+      lassoDragStartRef.current = null;
+    },
+    [],
+  );
+
   // TODO: Task 6
   const handleLassoMoveConfirm = useCallback(async () => {}, []);
-  const handleLassoMoveCancel = useCallback(() => { setLassoMoveOffset(null); }, [setLassoMoveOffset]);
+
+  const handleLassoMoveCancel = useCallback(() => {
+    setLassoMoveOffset(null);
+    setLassoDraggingMove(false);
+    lassoDragStartRef.current = null;
+    redrawLassoOverlay(undefined, true); // offset 없이 원위치 파란 선택 영역 복원
+  }, [redrawLassoOverlay, setLassoMoveOffset]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -2267,15 +2312,18 @@ export function CanvasEditor({
                                 ? "none"
                                 : "auto",
                           }}
-                          onPointerDown={e =>
-                            isLassoActive ? onLassoDown(e) : onBrushDown(e, layer)
-                          }
-                          onPointerMove={e =>
-                            isLassoActive ? onLassoMove(e) : onBrushMove(e, layer)
-                          }
-                          onPointerUp={e =>
-                            isLassoActive ? onLassoUp(e) : onBrushUp(e)
-                          }
+                          onPointerDown={e => {
+                            if (lassoMoveOffset !== null) { onMoveDown(e); return; }
+                            isLassoActive ? onLassoDown(e) : onBrushDown(e, layer);
+                          }}
+                          onPointerMove={e => {
+                            if (lassoDraggingMove) { onMoveMove(e); return; }
+                            isLassoActive ? onLassoMove(e) : onBrushMove(e, layer);
+                          }}
+                          onPointerUp={e => {
+                            if (lassoDraggingMove) { onMoveUp(e); return; }
+                            isLassoActive ? onLassoUp(e) : onBrushUp(e);
+                          }}
                         />
                       )}
                     </div>
@@ -2290,16 +2338,20 @@ export function CanvasEditor({
                       style={{
                         width: "100%",
                         height: "100%",
-                        pointerEvents: lassoType === "free" ? "none" : "auto",
-                        cursor: "crosshair",
+                        pointerEvents: lassoMoveOffset !== null ? "auto" : lassoType === "free" ? "none" : "auto",
+                        cursor: lassoMoveOffset !== null ? "move" : "crosshair",
                         touchAction: "none",
                       }}
                       // poly/magnetic 의 첫 클릭이 부모 data-canvas-frame 의 onPointerDown(레이어 선택 해제)으로
                       // 버블링되면 selectedLayerId=null → 하단 바·brushCanvas 가 사라지고 commit/snap 이 무력화된다.
                       // free 가 onLassoDown 에서 stopPropagation 하는 것과 동일하게, 여기서 차단한다.
-                      onPointerDown={lassoType !== "free" ? e => e.stopPropagation() : undefined}
-                      onClick={lassoType !== "free" ? onLassoOverlayClick : undefined}
-                      onPointerMove={onLassoOverlayMove}
+                      onPointerDown={lassoType !== "free"
+                        ? e => { if (lassoMoveOffset !== null) { onMoveDown(e); } else { e.stopPropagation(); } }
+                        : lassoMoveOffset !== null ? onMoveDown : undefined
+                      }
+                      onClick={lassoType !== "free" && lassoMoveOffset === null ? onLassoOverlayClick : undefined}
+                      onPointerMove={e => { onLassoOverlayMove(e); if (lassoDraggingMove) onMoveMove(e); }}
+                      onPointerUp={e => { if (lassoDraggingMove) onMoveUp(e); }}
                       onDoubleClick={onLassoOverlayDblClick}
                     />
                   )}
