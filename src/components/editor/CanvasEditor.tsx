@@ -304,8 +304,15 @@ export function CanvasEditor({
   const lassoMagLastClientRef = useRef<{ x: number; y: number } | null>(null); // magnetic: 직전 pointer 위치
   const lassoEdgeSizeRef = useRef<{ w: number; h: number } | null>(null); // magnetic: edge 이미지 크기
   const lassoCommittedRef = useRef(false); // 마스크 커밋 완료 — 파란 선택 영역 오버레이 유지 플래그
+  // --- 신규 추가 ---
+  const lassoImagePtsRef = useRef<{ x: number; y: number }[]>([]); // 커밋된 원본 픽셀 좌표(SSOT)
   // poly/magnetic "완료" 버튼 가드 — ref 는 렌더를 안 깨우므로 정점 수를 state 로 미러(brushUndoCount 패턴).
   const [lassoPtCount, setLassoPtCount] = useState(0);
+  // --- 신규 추가 ---
+  const [lassoMoveOffset, setLassoMoveOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const [lassoDraggingMove, setLassoDraggingMove] = useState(false);
+  const [lassoAiCutout, setLassoAiCutout] = useState(false);
+  const [lassoAiRestore, setLassoAiRestore] = useState(false);
   // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
   const [extractAutoRestore, setExtractAutoRestore] = useState(true);
   const isCodex = useIsCodex();
@@ -640,7 +647,10 @@ export function CanvasEditor({
     lassoMagPrevSnapRef.current = null;
     lassoMagAccDistRef.current = 0;
     lassoMagLastClientRef.current = null;
+    lassoImagePtsRef.current = [];      // ← 추가
     setLassoPtCount(0);
+    setLassoMoveOffset(null);           // ← 추가
+    setLassoDraggingMove(false);        // ← 추가
     const overlay = lassoOverlayRef.current;
     overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
   }, []);
@@ -1029,6 +1039,7 @@ export function CanvasEditor({
         layer,
       ),
     );
+    lassoImagePtsRef.current = imagePts; // ← 커밋된 원본 픽셀 좌표 저장
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
