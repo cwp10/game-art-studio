@@ -309,10 +309,7 @@ export function CanvasEditor({
   // poly/magnetic "완료" 버튼 가드 — ref 는 렌더를 안 깨우므로 정점 수를 state 로 미러(brushUndoCount 패턴).
   const [lassoPtCount, setLassoPtCount] = useState(0);
   // --- 신규 추가 ---
-  const [lassoMoveOffset, setLassoMoveOffset] = useState<{ dx: number; dy: number } | null>(null);
-  const [lassoDraggingMove, setLassoDraggingMove] = useState(false);
   const [lassoAiCutout, setLassoAiCutout] = useState(false);
-  const [lassoAiRestore, setLassoAiRestore] = useState(false);
   // 텍스트 추출 시 가려진 부위 복원 여부(기본 on). off 면 [no-restore] → 보이는 픽셀만 추출.
   const [extractAutoRestore, setExtractAutoRestore] = useState(true);
   const isCodex = useIsCodex();
@@ -573,7 +570,37 @@ export function CanvasEditor({
               : await filterImage({ generationId: layer.generationId, filter: "trim" });
         if (r) {
           pushUndo();
-          patchLayer(id, { generationId: r.generationId });
+          if (op === "trim" && layer.naturalW > 0 && "trimOffsetLeft" in r && "trimOffsetTop" in r) {
+            const frameW = stageRef.current?.querySelector<HTMLElement>("[data-canvas-frame]")?.offsetWidth ?? 640;
+            const natW = layer.naturalW;
+            const natH = layer.naturalH > 0 ? layer.naturalH : natW;
+            const displayW = Math.min(natW, frameW);
+            const newDisplayW = Math.min(r.width, frameW);
+            // trim 전 원본에서 내용이 차지하던 CSS px 비율 → scale 줄여서 동일 크기 유지
+            const originalPartW = displayW * r.width / natW;
+            const scaleAdj = newDisplayW > 0 ? originalPartW / newDisplayW : 1;
+            // trim 내용 중심 → 원본 이미지 중심 기준 오프셋 (이미지 px)
+            const offsetLeft = r.trimOffsetLeft ?? 0;
+            const offsetTop  = r.trimOffsetTop  ?? 0;
+            const dx_img = (-offsetLeft + r.width  / 2) - natW / 2;
+            const dy_img = (-offsetTop  + r.height / 2) - natH / 2;
+            // 이미지 px → canvas CSS px (rotation + flipH 반영)
+            const pxPerPx = displayW / natW;
+            const rad = (layer.rotation * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            const flip = layer.flipH ? -1 : 1;
+            const dx_canvas = (dx_img * flip * cos - dy_img * sin) * pxPerPx;
+            const dy_canvas = (dx_img * flip * sin + dy_img * cos) * pxPerPx;
+            patchLayer(id, {
+              generationId: r.generationId,
+              scale: layer.scale * scaleAdj,
+              x: layer.x + dx_canvas,
+              y: layer.y + dy_canvas,
+            });
+          } else {
+            patchLayer(id, { generationId: r.generationId });
+          }
         }
       } catch (e) {
         setError((e as Error).message);
@@ -649,10 +676,7 @@ export function CanvasEditor({
     lassoMagLastClientRef.current = null;
     lassoImagePtsRef.current = [];      // ← 추가
     setLassoPtCount(0);
-    setLassoMoveOffset(null);           // ← 추가
-    setLassoDraggingMove(false);        // ← 추가
     setLassoAiCutout(false);
-    setLassoAiRestore(false);
     setBrushPainted(false);
     const overlay = lassoOverlayRef.current;
     overlay?.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
@@ -1492,142 +1516,6 @@ export function CanvasEditor({
     }
   }, [layers, selectedLayerId, inpaintNat, extracting,
       sessionId, pushUndo, setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
-  const lassoDragStartRef = useRef<{ lx: number; ly: number } | null>(null);
-
-  const handleLassoMoveStart = useCallback(() => {
-    setLassoMoveOffset({ dx: 0, dy: 0 });
-    // 드래그 대기 상태 — onMoveDown 에서 실제 드래그 시작
-  }, [setLassoMoveOffset]);
-
-  const onMoveDown = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!lassoCommittedRef.current || lassoMoveOffset === null) return;
-      e.preventDefault();
-      e.stopPropagation();
-      lassoDragStartRef.current = clientToLocal(e.clientX, e.clientY);
-      setLassoDraggingMove(true);
-      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-    },
-    [clientToLocal, lassoMoveOffset],
-  );
-
-  const onMoveMove = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!lassoDragStartRef.current) return;
-      const cur = clientToLocal(e.clientX, e.clientY);
-      const dx = cur.lx - lassoDragStartRef.current.lx;
-      const dy = cur.ly - lassoDragStartRef.current.ly;
-      setLassoMoveOffset({ dx, dy });
-      redrawLassoOverlay(undefined, true, { dx, dy });
-    },
-    [clientToLocal, redrawLassoOverlay],
-  );
-
-  const onMoveUp = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      setLassoDraggingMove(false);
-      try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
-      lassoDragStartRef.current = null;
-    },
-    [],
-  );
-
-  const handleLassoMoveConfirm = useCallback(async () => {
-    const layer = layers.find(l => l.id === selectedLayerId);
-    if (!layer || !inpaintNat || !lassoMoveOffset || extracting) return;
-    const imagePts = lassoImagePtsRef.current;
-    if (imagePts.length < 3) return;
-
-    setExtracting(true);
-    setError(null);
-    try {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("이미지 로드 실패"));
-        img.src = `/api/images/${layer.generationId}`;
-      });
-
-      const { w, h } = inpaintNat;
-
-      // Step 1 — 원본 구멍 내기 (선택 영역 투명화)
-      const holeCanvas = document.createElement("canvas");
-      holeCanvas.width = w; holeCanvas.height = h;
-      const hctx = holeCanvas.getContext("2d")!;
-      hctx.drawImage(img, 0, 0, w, h);
-      hctx.globalCompositeOperation = "destination-out";
-      hctx.fillStyle = "#000";
-      hctx.beginPath();
-      hctx.moveTo(imagePts[0].x, imagePts[0].y);
-      imagePts.slice(1).forEach(p => hctx.lineTo(p.x, p.y));
-      hctx.closePath();
-      hctx.fill();
-      const holeResult = await uploadImage({ dataUrl: holeCanvas.toDataURL("image/png"), sessionId });
-
-      // Step 2 — 이동된 픽셀 새 레이어
-      const cropCanvas = document.createElement("canvas");
-      cropCanvas.width = w; cropCanvas.height = h;
-      const cctx = cropCanvas.getContext("2d")!;
-      cctx.drawImage(img, 0, 0, w, h);
-      cctx.globalCompositeOperation = "destination-in";
-      cctx.fillStyle = "#000";
-      cctx.beginPath();
-      cctx.moveTo(imagePts[0].x, imagePts[0].y);
-      imagePts.slice(1).forEach(p => cctx.lineTo(p.x, p.y));
-      cctx.closePath();
-      cctx.fill();
-      const cropResult = await uploadImage({ dataUrl: cropCanvas.toDataURL("image/png"), sessionId });
-
-      pushUndo();
-      patchLayer(layer.id, { generationId: holeResult.generationId });
-      const nl: Layer = {
-        ...makeLayer(cropResult.generationId),
-        x: layer.x + lassoMoveOffset.dx,
-        y: layer.y + lassoMoveOffset.dy,
-        scale: layer.scale,
-        stretchW: layer.stretchW,
-        stretchH: layer.stretchH,
-        rotation: layer.rotation,
-        flipH: layer.flipH,
-      };
-      setLayers(prev => [...prev, nl]);
-      setSelectedLayerId(nl.id);
-
-      // Step 3 — AI 복원 (선택적): 구멍을 inpaint로 채움
-      if (lassoAiRestore) {
-        const bc = brushCanvasRef.current;
-        if (bc) {
-          const out = document.createElement("canvas");
-          out.width = bc.width; out.height = bc.height;
-          const octx = out.getContext("2d")!;
-          octx.fillStyle = "#000";
-          octx.fillRect(0, 0, out.width, out.height);
-          octx.drawImage(bc, 0, 0);
-          const maskDataUrl = out.toDataURL("image/png");
-          const restoreResult = await onInpaint(holeResult.generationId, maskDataUrl, "background fill");
-          if (restoreResult) {
-            patchLayer(layer.id, { generationId: restoreResult.generationId });
-          }
-        }
-      }
-
-      closeTool();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setExtracting(false);
-    }
-  }, [layers, selectedLayerId, inpaintNat, lassoMoveOffset, extracting, lassoAiRestore,
-      sessionId, brushCanvasRef, onInpaint, pushUndo, patchLayer,
-      setLayers, setSelectedLayerId, closeTool, setExtracting, setError]);
-
-  const handleLassoMoveCancel = useCallback(() => {
-    setLassoMoveOffset(null);
-    setLassoDraggingMove(false);
-    lassoDragStartRef.current = null;
-    redrawLassoOverlay(undefined, true); // offset 없이 원위치 파란 선택 영역 복원
-  }, [redrawLassoOverlay, setLassoMoveOffset]);
 
   // ── 레이어 레일 드래그 정렬 → 배열 순서(z) 동기화 ────────────────────────────────
   const reorderDragRef = useRef<string | null>(null);
@@ -2418,15 +2306,12 @@ export function CanvasEditor({
                                 : "auto",
                           }}
                           onPointerDown={e => {
-                            if (lassoMoveOffset !== null) { onMoveDown(e); return; }
                             isLassoActive ? onLassoDown(e) : onBrushDown(e, layer);
                           }}
                           onPointerMove={e => {
-                            if (lassoDraggingMove) { onMoveMove(e); return; }
                             isLassoActive ? onLassoMove(e) : onBrushMove(e, layer);
                           }}
                           onPointerUp={e => {
-                            if (lassoDraggingMove) { onMoveUp(e); return; }
                             isLassoActive ? onLassoUp(e) : onBrushUp(e);
                           }}
                         />
@@ -2443,20 +2328,17 @@ export function CanvasEditor({
                       style={{
                         width: "100%",
                         height: "100%",
-                        pointerEvents: lassoMoveOffset !== null ? "auto" : lassoType === "free" ? "none" : "auto",
-                        cursor: lassoMoveOffset !== null ? "move" : "crosshair",
+                        pointerEvents: lassoType === "free" ? "none" : "auto",
+                        cursor: "crosshair",
                         touchAction: "none",
                       }}
                       // poly/magnetic 의 첫 클릭이 부모 data-canvas-frame 의 onPointerDown(레이어 선택 해제)으로
                       // 버블링되면 selectedLayerId=null → 하단 바·brushCanvas 가 사라지고 commit/snap 이 무력화된다.
                       // free 가 onLassoDown 에서 stopPropagation 하는 것과 동일하게, 여기서 차단한다.
-                      onPointerDown={lassoType !== "free"
-                        ? e => { if (lassoMoveOffset !== null) { onMoveDown(e); } else { e.stopPropagation(); } }
-                        : lassoMoveOffset !== null ? onMoveDown : undefined
-                      }
-                      onClick={lassoType !== "free" && lassoMoveOffset === null ? onLassoOverlayClick : undefined}
-                      onPointerMove={e => { if (lassoDraggingMove) { onMoveMove(e); } else { onLassoOverlayMove(e); } }}
-                      onPointerUp={e => { if (lassoDraggingMove) onMoveUp(e); }}
+                      onPointerDown={lassoType !== "free" ? e => e.stopPropagation() : undefined}
+                      onClick={lassoType !== "free" ? onLassoOverlayClick : undefined}
+                      onPointerMove={onLassoOverlayMove}
+                      onPointerUp={undefined}
                       onDoubleClick={onLassoOverlayDblClick}
                     />
                   )}
@@ -3077,30 +2959,6 @@ export function CanvasEditor({
                               <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary">완료 (Enter)</button>
                             )}
                           </>
-                        ) : lassoDraggingMove || lassoMoveOffset ? (
-                          /* ── 이동 모드 ── */
-                          <>
-                            <span className="text-[11px] text-text-muted">드래그로 이동하세요</span>
-                            <button
-                              onClick={handleLassoMoveConfirm}
-                              disabled={extracting}
-                              className="flex h-6 items-center gap-1 rounded-lg bg-[color:var(--accent)] px-3 text-[11px] font-medium text-white disabled:opacity-40"
-                            >
-                              {extracting ? <><Loader2 size={12} className="animate-spin" /> 처리 중…</> : "확정"}
-                            </button>
-                            <button
-                              onClick={handleLassoMoveCancel}
-                              className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary"
-                            >
-                              취소
-                            </button>
-                            <button
-                              onClick={() => setLassoAiRestore(v => !v)}
-                              className={`flex h-6 items-center gap-1 rounded-md border px-2 text-[11px] ${lassoAiRestore ? "border-[color:var(--accent)] bg-[color:var(--accent)]/15 text-text-primary" : "border-border text-text-muted hover:text-text-primary"}`}
-                            >
-                              AI 복원 {lassoAiRestore ? "ON" : "OFF"}
-                            </button>
-                          </>
                         ) : (
                           /* ── 액션 선택 모드 ── */
                           <>
@@ -3125,12 +2983,6 @@ export function CanvasEditor({
                               className="flex h-6 items-center rounded-lg border border-border px-2 text-[11px] text-text-muted hover:text-text-primary disabled:opacity-40"
                             >
                               복제
-                            </button>
-                            <button
-                              onClick={handleLassoMoveStart}
-                              className="flex h-6 items-center rounded-lg border border-border px-2 text-[11px] text-text-muted hover:text-text-primary"
-                            >
-                              이동
                             </button>
                             <button
                               onClick={() => { clearLassoState(); setBrushPainted(false); }}

@@ -170,10 +170,10 @@ export async function filterImage(args: {
   generationId: string;
   filter: string;
   param?: number;
-}): Promise<{ generationId: string; width: number; height: number }> {
+}): Promise<{ generationId: string; width: number; height: number; trimOffsetLeft?: number; trimOffsetTop?: number }> {
   const r = await jsonFetch("/api/filter", "POST", args);
   if (!r.ok) throw new Error(`filterImage failed: ${await extractError(r)}`);
-  return (await r.json()) as { generationId: string; width: number; height: number };
+  return (await r.json()) as { generationId: string; width: number; height: number; trimOffsetLeft?: number; trimOffsetTop?: number };
 }
 
 export type Suggestion = { label: string; body: string };
