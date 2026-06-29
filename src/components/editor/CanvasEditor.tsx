@@ -2914,39 +2914,7 @@ export function CanvasEditor({
                     <div className="flex flex-1 flex-wrap items-center gap-2">
                     <Wand2 size={14} className="text-[color:var(--accent)]" />
                     <span className="text-[11px] font-medium text-text-primary">영역 편집</span>
-                    <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                      <button
-                        onClick={() => { if (inpaintMode !== "brush") { setInpaintMode("brush"); clearLassoState(); } }}
-                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${inpaintMode === "brush" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-                      >
-                        <Brush size={12} /> 브러시
-                      </button>
-                      <button
-                        onClick={() => { if (inpaintMode !== "lasso") { setInpaintMode("lasso"); clearBrush(); } }}
-                        className={`flex h-6 items-center gap-1 rounded px-2 text-[11px] ${inpaintMode === "lasso" ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-                      >
-                        <Lasso size={12} /> 올가미
-                      </button>
-                    </div>
-                    {inpaintMode === "brush" && brushControls}
-                    {inpaintMode === "lasso" && (
-                      <>
-                        <div className="flex gap-0.5 rounded-md border border-border bg-bg-panel p-0.5">
-                          {(["free", "poly", "magnetic"] as const).map(t => (
-                            <button key={t} onClick={() => { setLassoType(t); clearLassoState(); }}
-                              className={`flex h-6 items-center rounded px-2 text-[11px] ${lassoType === t ? "bg-[color:var(--accent)]/20 text-text-primary" : "text-text-muted hover:text-text-primary"}`}
-                              title={t === "free" ? "자유 드래그" : t === "poly" ? "다각형" : "자석"}
-                            >
-                              {t === "free" ? "자유" : t === "poly" ? "다각형" : "자석"}
-                            </button>
-                          ))}
-                        </div>
-                        <button onClick={clearBrush} className="rounded-md border border-border px-2 py-1 text-[11px] text-text-muted hover:text-text-primary">전체지우기</button>
-                        {lassoType !== "free" && lassoPtCount >= 3 && (
-                          <button onClick={commitLassoPoints} className="rounded-md border border-[color:var(--accent)] px-2 py-1 text-[11px] text-text-primary">완료 (Enter)</button>
-                        )}
-                      </>
-                    )}
+                    {brushControls}
                     </div>
                     <button onClick={closeTool} className="flex-none rounded p-1 text-text-muted hover:text-text-primary"><X size={14} /></button>
                   </div>
