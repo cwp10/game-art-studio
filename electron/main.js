@@ -69,7 +69,7 @@ const PNPM = IS_WIN ? "pnpm.cmd" : "pnpm";
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { cwd: PROJECT_DIR, stdio: "ignore", shell: IS_WIN });
+    const p = spawn(cmd, args, { cwd: PROJECT_DIR, stdio: "ignore", shell: IS_WIN, windowsHide: true });
     p.on("error", reject);
     p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
   });
@@ -102,6 +102,7 @@ async function ensureServer() {
       cwd: appRoot,
       detached: true,
       shell: false,
+      windowsHide: true,
       env: spawnEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -115,6 +116,7 @@ async function ensureServer() {
       cwd: appRoot,
       detached: true,
       shell: IS_WIN,
+      windowsHide: true,
       env: spawnEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
