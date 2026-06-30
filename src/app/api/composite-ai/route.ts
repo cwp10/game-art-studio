@@ -48,6 +48,7 @@ type CompositeLayerFilters = {
   hue?: number;
   contrast?: number;
   blur?: number;
+  pixelate?: number;
 };
 type CompositeLayerInput = {
   generationId?: string;

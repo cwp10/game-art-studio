@@ -20,18 +20,20 @@ export interface LayerFilters {
   hue?: number;
   contrast?: number;
   blur?: number;
+  pixelate?: number; // cell px, 0=없음
 }
 
 /** 필터가 모두 중립(또는 미지정)이면 true — 적용 시 화면이 바뀌지 않는다. */
 function isNeutralFilters(f?: LayerFilters): boolean {
   if (!f) return true;
-  const { brightness, saturation, hue, contrast, blur } = f;
+  const { brightness, saturation, hue, contrast, blur, pixelate } = f;
   return (
     (brightness === undefined || brightness === 100) &&
     (saturation === undefined || saturation === 100) &&
     (hue === undefined || hue === 0) &&
     (contrast === undefined || contrast === 100) &&
-    (blur === undefined || blur === 0)
+    (blur === undefined || blur === 0) &&
+    (pixelate === undefined || pixelate === 0)
   );
 }
 
@@ -48,6 +50,7 @@ async function applyFilters(chain: sharp.Sharp, f: LayerFilters): Promise<sharp.
   const hue = f.hue ?? 0;
   const contrast = f.contrast ?? 100;
   const blur = f.blur ?? 0;
+  const pixelate = f.pixelate ?? 0;
 
   if (brightness !== 100 || saturation !== 100 || hue !== 0) {
     chain.modulate({ brightness: brightness / 100, saturation: saturation / 100, hue });
@@ -63,6 +66,39 @@ async function applyFilters(chain: sharp.Sharp, f: LayerFilters): Promise<sharp.
   const sigma = blur / 2;
   if (sigma >= 0.3) {
     chain.blur(sigma);
+  }
+  if (pixelate > 0) {
+    // 축소(nearest) → 수동 raw 확대 → 정확한 블록 픽셀 효과.
+    // sharp 의 resize kernel:'nearest' 는 축소에만 적용되므로, 확대는 raw 픽셀 직접 조작으로 처리.
+    const buf = await chain.ensureAlpha().png().toBuffer();
+    const meta = await sharp(buf).metadata();
+    const w = meta.width ?? 1;
+    const h = meta.height ?? 1;
+    const smallW = Math.max(1, Math.round(w / pixelate));
+    const smallH = Math.max(1, Math.round(h / pixelate));
+    const { data: small, info } = await sharp(buf)
+      .resize(smallW, smallH, { kernel: "nearest" })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const out = Buffer.alloc(w * h * 4);
+    for (let sy = 0; sy < info.height; sy++) {
+      for (let sx = 0; sx < info.width; sx++) {
+        const si = (sy * info.width + sx) * 4;
+        const r = small[si], g = small[si + 1], b = small[si + 2], a = small[si + 3];
+        const px0 = Math.round(sx * w / info.width);
+        const px1 = Math.round((sx + 1) * w / info.width);
+        const py0 = Math.round(sy * h / info.height);
+        const py1 = Math.round((sy + 1) * h / info.height);
+        for (let py = py0; py < py1; py++) {
+          for (let px = px0; px < px1; px++) {
+            const di = (py * w + px) * 4;
+            out[di] = r; out[di + 1] = g; out[di + 2] = b; out[di + 3] = a;
+          }
+        }
+      }
+    }
+    chain = sharp(out, { raw: { width: w, height: h, channels: 4 } });
   }
   return chain;
 }

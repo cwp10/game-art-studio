@@ -71,6 +71,7 @@ type LayerFilters = {
   saturation: number; // % (100=중립)
   hue: number; // ° (0=중립)
   blur: number; // px (0=없음)
+  pixelate: number; // cell px (0=없음, 8/16/32/64/128)
 };
 
 const FILTER_DEFAULT: LayerFilters = {
@@ -79,6 +80,7 @@ const FILTER_DEFAULT: LayerFilters = {
   saturation: 100,
   hue: 0,
   blur: 0,
+  pixelate: 0,
 };
 
 type Layer = {
@@ -176,7 +178,8 @@ function isPristineSeedLayer(l: Layer, seedId: string): boolean {
     l.scale === 1 && l.stretchW === 1 && l.stretchH === 1 &&
     l.rotation === 0 && !l.flipH && l.opacity === 100 && l.visible &&
     l.filters.brightness === 100 && l.filters.contrast === 100 &&
-    l.filters.saturation === 100 && l.filters.hue === 0 && l.filters.blur === 0
+    l.filters.saturation === 100 && l.filters.hue === 0 && l.filters.blur === 0 &&
+    l.filters.pixelate === 0
   );
 }
 
@@ -552,6 +555,38 @@ export function CanvasEditor({
     },
     [pushUndo, patchLayer],
   );
+
+  // ── 픽셀화 실시간 미리보기 — 레이어별 data URL 캐시(generationId-cellSize 키). ──
+  const [pixelatedUrls, setPixelatedUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    // 아직 캐시에 없는 키만 Image 로드 → canvas 픽셀화 → state 업데이트.
+    layers
+      .filter(l => l.filters.pixelate > 0 && !pixelatedUrls[`${l.generationId}-${l.filters.pixelate}`])
+      .forEach(layer => {
+        const cell = layer.filters.pixelate;
+        const key = `${layer.generationId}-${cell}`;
+        const img = new Image();
+        img.src = `/api/images/${layer.generationId}`;
+        img.onload = () => {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          const smallW = Math.max(1, Math.round(w / cell));
+          const smallH = Math.max(1, Math.round(h / cell));
+          const off = document.createElement("canvas");
+          off.width = smallW; off.height = smallH;
+          const offCtx = off.getContext("2d")!;
+          offCtx.imageSmoothingEnabled = false;
+          offCtx.drawImage(img, 0, 0, smallW, smallH);
+          const full = document.createElement("canvas");
+          full.width = w; full.height = h;
+          const ctx = full.getContext("2d")!;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(off, 0, 0, w, h);
+          setPixelatedUrls(prev => prev[key] ? prev : { ...prev, [key]: full.toDataURL() });
+        };
+      });
+  }, [layers, pixelatedUrls]);
 
   // ── 선택 레이어 단일 작업(배경제거·업스케일·여백제거) — 반환 id 로 generationId 교체. 슬롯 id 유지. ──
   // 배경제거/업스케일은 AI(콜백, 채팅 경유), 여백제거는 결정적(sharp /api/filter). 모두 결과로 레이어 교체.
@@ -1875,6 +1910,7 @@ export function CanvasEditor({
               hue: l.filters.hue,
               contrast: l.filters.contrast,
               blur: l.filters.blur,
+              pixelate: l.filters.pixelate,
             },
           };
         }),
@@ -1927,6 +1963,7 @@ export function CanvasEditor({
               hue: l.filters.hue,
               contrast: l.filters.contrast,
               blur: l.filters.blur,
+              pixelate: l.filters.pixelate,
             },
           };
         }),
@@ -2269,7 +2306,11 @@ export function CanvasEditor({
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={`/api/images/${layer.generationId}`}
+                        src={
+                          layer.filters.pixelate > 0
+                            ? (pixelatedUrls[`${layer.generationId}-${layer.filters.pixelate}`] ?? `/api/images/${layer.generationId}`)
+                            : `/api/images/${layer.generationId}`
+                        }
                         alt={layer.generationId}
                         className="block max-w-[min(56vw,640px)]"
                         style={{ filter: cssFilter(layer.filters), pointerEvents: "none" }}
@@ -2735,6 +2776,21 @@ export function CanvasEditor({
                     </b>
                   </div>
                 ))}
+                <div className="flex items-center gap-2">
+                  <label className="w-8 text-[11px] text-text-muted">픽셀화</label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={7}
+                    step={1}
+                    value={[0, 2, 4, 8, 16, 32, 64, 128].indexOf(selected.filters.pixelate) < 0 ? 0 : [0, 2, 4, 8, 16, 32, 64, 128].indexOf(selected.filters.pixelate)}
+                    onChange={e => setFilter(selected.id, "pixelate", [0, 2, 4, 8, 16, 32, 64, 128][Number(e.target.value)])}
+                    className="flex-1 accent-[color:var(--accent)]"
+                  />
+                  <b className="w-11 text-right font-mono text-[10px] font-medium text-text-muted">
+                    {selected.filters.pixelate === 0 ? "원본" : `${selected.filters.pixelate}px`}
+                  </b>
+                </div>
                 <p className="mt-1.5 text-[10px] text-text-muted">
                   실시간 미리보기 · 합치기 시 sharp 로 확정
                 </p>
