@@ -102,6 +102,7 @@ export function spawnClaude(opts: ClaudeSpawnOptions): ClaudeRunHandle {
     cwd: opts.cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env },
+    windowsHide: true,
   });
   const stdout = child.stdout as Readable;
   const stderr = child.stderr as Readable;
@@ -295,7 +296,7 @@ export async function checkClaudeAvailable(): Promise<boolean> {
     return _claudeAvailCache.v;
   }
   const v = await new Promise<boolean>(resolve => {
-    const c = spawn("claude", ["--version"], { stdio: "ignore" });
+    const c = spawn("claude", ["--version"], { stdio: "ignore", windowsHide: true });
     const t = setTimeout(() => { c.kill(); resolve(false); }, 5000);
     c.on("error", () => { clearTimeout(t); resolve(false); });
     c.on("exit", code => { clearTimeout(t); resolve(code === 0); });
@@ -333,6 +334,7 @@ export function claudeRunSimple(opts: {
       cwd: opts.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";

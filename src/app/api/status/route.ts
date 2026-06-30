@@ -12,7 +12,7 @@ function checkCLI(cmd: string, args: string[], timeoutMs = 5000): Promise<ToolSt
   return new Promise(resolve => {
     let out = "";
     let timedOut = false;
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], shell: IS_WIN });
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], shell: IS_WIN, windowsHide: true });
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -65,6 +65,7 @@ function checkMCP(timeoutMs = 8000): Promise<ToolStatus> {
       {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
         env: {
           ...process.env,
           IMAGEGEN_DATA_DIR: process.env.IMAGEGEN_DATA_DIR ?? path.join(cwd, "data"),

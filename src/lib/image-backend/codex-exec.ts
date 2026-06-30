@@ -509,6 +509,7 @@ export class CodexExecBackend implements ImageBackend {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
       shell: false,
+      windowsHide: true,
     });
     child.stdin!.end(naturalPrompt);
 
