@@ -3,8 +3,11 @@
   "configurations": [
     {
       "name": "Next.js dev",
+      "type": "pwa-node",
+      "request": "launch",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev"],
+      "cwd": "${workspaceFolder}",
       "port": 3000
     }
   ]

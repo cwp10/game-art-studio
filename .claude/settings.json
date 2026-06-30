@@ -1,5 +1,18 @@
 {
-  "enabledPlugins": {
-    "harness@harness-marketplace": true
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(pnpm build*)",
+            "command": "pnpm lint",
+            "timeout": 60,
+            "statusMessage": "ESLint 검사 중..."
+          }
+        ]
+      }
+    ]
   }
 }
