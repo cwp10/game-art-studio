@@ -118,6 +118,7 @@ export function ChatLayout() {
   const sessionItemsCacheRef = useRef<Map<string, typeof state.items>>(new Map());
   // 콜백에서 최신 state 에 접근하기 위한 ref (stale closure 방지, 렌더마다 동기화)
   const stateRef = useRef(state);
+  // eslint-disable-next-line react-hooks/refs
   stateRef.current = state;
   // drag-drop 상태 — child 위를 지나면서 enter/leave 가 번갈아 발화해 깜빡이는 것 방지하려고 counter 사용.
   const dragCounter = useRef(0);

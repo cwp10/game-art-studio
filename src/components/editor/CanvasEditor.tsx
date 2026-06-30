@@ -1040,7 +1040,7 @@ export function CanvasEditor({
         ctx.stroke();
       }
     },
-    [clientToOverlay, lassoType, zp.zoom],
+    [clientToOverlay, lassoType],
   );
 
   // 마스크 커밋(공통) — 누적 정점을 닫고 brushCanvasRef 에 빨강 폴리곤 채움 → handleExtractBrush 활성.
@@ -1241,7 +1241,7 @@ export function CanvasEditor({
       lassoRubberBandRef.current = pt;
       redrawLassoOverlay(pt); // 마지막 앵커 → 현재(스냅된) 점 고무줄 미리보기
     },
-    [lassoType, redrawLassoOverlay, snapToEdge, clientToLocal, zp.zoom],
+    [lassoType, redrawLassoOverlay, snapToEdge, clientToLocal],
   );
   const onLassoOverlayDblClick = useCallback(() => {
     if (lassoClientPtsRef.current.length >= 3) commitLassoPoints();
@@ -1310,7 +1310,7 @@ export function CanvasEditor({
       lassoEdgeGradRef.current = sobelGradient(data);
       lassoEdgeSizeRef.current = { w: c.width, h: c.height };
     };
-  }, [tool, extractMode, lassoType, selectedLayerId, layers]);
+  }, [isLassoActive, tool, extractMode, lassoType, selectedLayerId, layers]);
 
   // 칠한 마스크 + 프롬프트로 인페인트 실행 — 채우기(사용자 프롬프트+참조)와 오브젝트 지우기(고정 프롬프트)가 공유.
   const runInpaint = useCallback(
@@ -2306,13 +2306,13 @@ export function CanvasEditor({
                                 : "auto",
                           }}
                           onPointerDown={e => {
-                            isLassoActive ? onLassoDown(e) : onBrushDown(e, layer);
+                            if (isLassoActive) onLassoDown(e); else onBrushDown(e, layer);
                           }}
                           onPointerMove={e => {
-                            isLassoActive ? onLassoMove(e) : onBrushMove(e, layer);
+                            if (isLassoActive) onLassoMove(e); else onBrushMove(e, layer);
                           }}
                           onPointerUp={e => {
-                            isLassoActive ? onLassoUp(e) : onBrushUp(e);
+                            if (isLassoActive) onLassoUp(e); else onBrushUp(e);
                           }}
                         />
                       )}
