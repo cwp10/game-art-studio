@@ -33,7 +33,6 @@ import path from "node:path";
 import sharp from "sharp";
 // tsx 가 tsconfig paths 를 해석하지 않으므로 상대 경로 import.
 // 이 파일은 stdio 진입점이라 별도 빌드 없이 `node --import tsx` 로 실행된다.
-import { selectImageBackend, type ImageJob } from "../image-backend/index.js";
 import {
   chromaKeyFile,
   fallbackBgRemove,
@@ -54,14 +53,13 @@ import {
   LOGS_DIR,
   ensureDataDirs,
   imagePath as imagePathFor,
-  jobDir as jobDirFor,
   toRelative,
   TEMPLATES_DIR,
 } from "../util/paths.js";
-import type { GenerationKind } from "../../types/db.js";
 import { handleMakeSpritesheet } from "./handlers/spritesheet-handler.js";
 import { handleReskinImage } from "./handlers/reskin-handler.js";
 import { handleGenerateNormalMap } from "./handlers/normal-map-handler.js";
+import { runImageTool } from "./handlers/shared.js";
 import { runComposite } from "../image-backend/composite-runner.js";
 import { runSpriteEffect } from "../image-backend/sprite-effect-runner.js";
 import type { SpriteEffect } from "../image-backend/sprite-effect.js";
@@ -899,126 +897,6 @@ async function generateGridTemplate(
     .toFile(cachePath);
   log(`generateGridTemplate v3: ${cols}x${rows} cell=${cellW}x${cellH} saved → ${cachePath}`);
   return cachePath;
-}
-
-async function runImageTool(spec: {
-  name: string;
-  /** codex 프롬프트 선택용 kind (buildNaturalPrompt). */
-  kind: GenerationKind;
-  /** generation 행에 저장할 kind. 미지정 시 kind 와 동일. 프롬프트 kind 와 저장 kind 가
-   *  달라야 할 때 사용(예: reskin 으로 만든 시트는 프롬프트는 'reskin', 저장은 'spritesheet'). */
-  storeKind?: GenerationKind;
-  prompt: string;
-  inputGenerationIds: string[];
-  extraInputPaths?: string[];
-  /** Codex 에 실제로 전달할 이미지 경로 순서를 완전히 override.
-   *  설정하면 inputGenerationIds + extraInputPaths 자동 조합을 무시. */
-  overrideInputPaths?: string[];
-  /** reskin 모드(c): 스타일 참조 이미지 절대 경로. */
-  styleRefPath?: string;
-  /** reskin 모드(b): 색 팔레트만 교체. */
-  paletteOnly?: boolean;
-  params?: Record<string, unknown>;
-  signal?: AbortSignal;
-  sessionId: string | null;
-  /** 진행 보고 detail 에 붙일 접두사(예: 재시도 "attempt 2/3"). 사용자가 재시도 중임을 알게. */
-  progressPrefix?: string;
-}) {
-  const { name, kind, storeKind, prompt, inputGenerationIds, extraInputPaths, overrideInputPaths, styleRefPath, paletteOnly, params, signal, sessionId, progressPrefix } = spec;
-  const persistedKind = storeKind ?? kind;
-
-  // overrideInputPaths 가 있으면 그대로 사용 — 호출자가 순서를 직접 제어.
-  // 없으면 inputGenerationIds → 경로 변환 후 extraInputPaths 를 뒤에 추가.
-  let inputImagePaths: string[];
-  if (overrideInputPaths) {
-    inputImagePaths = overrideInputPaths;
-  } else {
-    inputImagePaths = [];
-    for (const gid of inputGenerationIds) {
-      const g = getGeneration(gid);
-      if (!g) throw new Error(`generation not found: ${gid}`);
-      inputImagePaths.push(path.join(DATA_DIR, g.image_path));
-    }
-    if (extraInputPaths?.length) {
-      inputImagePaths.push(...extraInputPaths);
-    }
-  }
-
-  const { generationId, jobId } = newImageIds();
-
-  log(
-    `${name} start job=${jobId} gen=${generationId} kind=${kind} ` +
-      `session=${sessionId} inputs=[${inputGenerationIds.join(",")}]`,
-  );
-  createJob({
-    id: jobId,
-    session_id: sessionId,
-    kind: "codex_image",
-    args: { tool: name, prompt, kind, generationId, inputGenerationIds, viaMcp: true },
-  });
-
-  // progress.jsonl 채널 — Next 의 progress-tail 헬퍼가 polling 으로 읽는다.
-  // 도구 시작 직전에 빈 파일을 만들어 두면 tail 이 stat 실패를 덜 겪는다.
-  const progressPath = path.join(jobDirFor(jobId), "progress.jsonl");
-  fs.mkdirSync(path.dirname(progressPath), { recursive: true });
-  fs.writeFileSync(progressPath, "");
-  function appendProgress(stage: string, detail?: string): void {
-    const line = JSON.stringify({ ts: Date.now(), stage, detail }) + "\n";
-    try {
-      fs.appendFileSync(progressPath, line);
-    } catch (e) {
-      log(`  ${jobId} progress append fail: ${(e as Error).message}`);
-    }
-  }
-
-  const backend = await selectImageBackend();
-  const job: ImageJob = { id: jobId, generationId, kind, prompt, inputImagePaths, styleRefPath, paletteOnly, params };
-  const result = await backend.execute(job, (stage, detail) => {
-    const d = progressPrefix ? `[${progressPrefix}]${detail ? " " + detail : ""}` : detail;
-    log(`  ${jobId} stage=${stage}${d ? " " + d : ""}`);
-    appendProgress(stage, d);
-  }, signal);
-
-  const gen = createGeneration({
-    id: generationId,
-    session_id: sessionId,
-    message_id: null, // Claude orchestration 경로에서는 message_id 사후 연결.
-    kind: persistedKind,
-    prompt,
-    input_image_ids: inputGenerationIds,
-    params, // 생성 메타(seamlessLoop / reskin mode·styleReferenceId 등) 영속화.
-    image_path: toRelative(result.imagePath),
-    width: result.width,
-    height: result.height,
-    backend: "codex_exec",
-  });
-  updateJob(jobId, {
-    status: "succeeded",
-    result: { generationId: gen.id, elapsedMs: result.elapsedMs },
-    ended_at: Date.now(),
-  });
-
-  log(`${name} done job=${jobId} gen=${gen.id} ${result.width}x${result.height} ${result.elapsedMs}ms`);
-
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          `Generated image ${gen.id} (${result.width}×${result.height}, ` +
-          `${(result.elapsedMs / 1000).toFixed(1)}s). ` +
-          `Show it with image ref id "${gen.id}".`,
-      },
-    ],
-    structuredContent: {
-      generationId: gen.id,
-      imagePath: `/api/images/${gen.id}`,
-      width: result.width,
-      height: result.height,
-      kind: persistedKind,
-      elapsedMs: result.elapsedMs,
-    },
-  };
 }
 
 /**
