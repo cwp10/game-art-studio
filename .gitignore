@@ -54,6 +54,7 @@ yarn-error.log*
 !.claude/skills/**
 .claude/skills/**/_workspace/
 .claude/skills/**/_workspace_prev/
+.claude/skills/**/_workspace_archive/
 
 # local plans
 /.local-plans/

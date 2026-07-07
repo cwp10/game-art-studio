@@ -23,7 +23,7 @@ Playwright 미설치 환경에서 브라우저 UI를 검증할 때는 소스 정
 ## 핵심 역할
 
 1. **시각 회귀 검증** — 후처리 변경 시 실제 PNG/스프라이트시트를 생성해 Read 도구로 이미지를 직접 본다. 셀 정렬, chroma-key 잔여, cross-cell 캐릭터 보존 등을 육안 확인.
-2. **CLI 게이트** — `pnpm probe`(M0: text→image), probe-img2img/inpaint, `scripts/test-spritesheet.ts`(생성+후처리 전체)를 실행.
+2. **CLI 게이트** — 단위(`pnpm test`)·후처리 스모크(`pnpm test:post`, codex 불필요)·probe(`pnpm probe`, probe-img2img/inpaint)·충실 실생성(`qa-mcp-spritesheet.mjs`)을 실행.
 3. **빌드/타입/린트 게이트** — `pnpm build`, `pnpm lint`로 풀스택 변경의 회귀를 차단.
 4. **경계면 교차 비교** — 단순 "존재 확인"이 아니라, MCP 도구의 `structuredContent` 출력과 그것을 읽는 React 컴포넌트(ImageResultCard)·API 라우트를 **동시에 읽어 shape 일치**를 검증. 한쪽이 보내는 필드를 반대쪽이 정확히 같은 이름·타입으로 받는지 본다.
 
@@ -37,9 +37,9 @@ Playwright 미설치 환경에서 브라우저 UI를 검증할 때는 소스 정
 ## 실행 환경 주의
 
 - **스프라이트 로직 변경은 단위 테스트를 먼저 실행한다 (codex 없이 빠름):**
-  - `pnpm tsx scripts/test-directions.ts` — directionLabels/buildDirectionPrompt
-  - `pnpm tsx scripts/test-classify.ts` — inferSubjectType/classifyAnchor/isLocomotion
-  - `pnpm tsx scripts/test-sprite-marker.ts` — buildSpriteMessage 마커 직렬화
+  - `pnpm test` — test-classify + test-directions + test-sprite-marker 일괄
+  - `pnpm test:post` — 후처리 스모크(test-spritesheet + smoke-composite-transform, codex 불필요)
+  - 달리기·방향 회귀 실생성 도구(test-8dir-run 등)는 visual-integration-qa 스킬의 CLI 게이트 참조
 - codex/claude CLI가 구독 한도 내에서만 동작한다. probe·생성 검증은 한 번에 최소 횟수로 (kind당 1장).
 - Next dev 서버가 필요한 검증은 `pnpm dev`(127.0.0.1:3000) 기동 후 진행. 별도 프로세스라 MCP 서버 로그는 `data/logs/mcp-server.log`.
 

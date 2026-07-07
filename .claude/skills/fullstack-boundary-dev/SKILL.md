@@ -20,21 +20,19 @@ React(components) ⇄ lib/api/client.ts ⇄ app/api/* (Next)
 ## 핵심 파일 지도
 
 ### API 라우트 (`src/app/api/`)
-chat, composite, crop, describe, export, filter, generations/[id], generations, images/[id], images/[id]/opacity, layer-parts, layer-suggest, layers, logs, nine-slice, nine-slice-scale, normal-map, presets/[id], presets, prompts/[id], prompts, reskin/recolor, reskin-suggest, sessions/[id], sessions/[id]/gallery-insert, sessions/[id]/messages, sessions, sprite-effect, sprite-frame/regenerate, sprite-suggest, status, suggest, thumbnails/[id], upload, button-states, cleanup, config
+button-states, canvas-edit/[seedId], chat, cleanup, composite, composite-ai, config, describe, export, filter, generations, generations/[id], images/[id], images/[id]/opacity, layer-suggest, logs, nine-slice, nine-slice-scale, nine-slice-trim, normal-map, presets, presets/[id], prompts, prompts/[id], reskin/recolor, reskin-suggest, sessions, sessions/[id], sessions/[id]/gallery-insert, sessions/[id]/messages, sprite-effect, sprite-frame/regenerate, sprite-suggest, status, suggest, thumbnails/[id], upload
 
 ### React 컴포넌트 (`src/components/`)
-**chat:** ChatLayout, Composer, ImageResultCard, MessageList, SessionList, StatusButton, ToolCallBlock, chat-state.ts  
+**chat:** ChatLayout, Composer, ImageResultCard, MessageList, SessionList, StatusButton, ToolCallBlock, chat-state.ts, useStreamChat.ts(SSE 스트림 소비 훅)  
 **editor:**
-- `CanvasEditor.tsx` — 전체전환 레이어 캔버스 (~950줄). 자유변형(모서리=크기/노브=회전/변=비균일 늘이기), 레이어 레일+드래그정렬, 선택레이어 필터, undo/redo, 에셋피커, 합치기. **브라우저 전용**: 외부 변형 수학(local 좌표 투영). CSS filter로 라이브 미리보기 → composite API로 확정.
-- `SceneComposer.tsx` — 씬 합성 UI (레이어 스택, 드래그 배치, scale 슬라이더)
-- `SpriteCanvas.tsx` — 스프라이트시트 뷰어·셀 편집·어니언 스킨
+- `CanvasEditor.tsx` — 전체전환 레이어 캔버스 (~3,100줄). 자유변형(모서리=크기/노브=회전/변=비균일 늘이기), 레이어 레일+드래그정렬, 선택레이어 필터(픽셀화 포함), undo/redo, 에셋피커, 합치기, 인페인트 마스크(브러시 전용)·올가미 액션(누끼/복제/이동). 구 SceneComposer/LayerCanvas/MaskCanvas 역할을 흡수한 단일 캔버스. **브라우저 전용**: 외부 변형 수학(local 좌표 투영). CSS filter로 라이브 미리보기 → composite API로 확정.
+- `SpriteCanvas.tsx` — 스프라이트시트 뷰어·셀 편집·어니언 스킨·프레임 재생성 UI
 - `SpriteGenPanel.tsx` — 스프라이트 생성 패널 (`buildSpriteMessage` 포함)
-- `LayerCanvas.tsx` — 레이어 분리 캔버스 (16:10 뷰박스, 줌/팬)
-- `MaskCanvas.tsx` — 인페인트 마스크 캔버스
 - `NineSliceEditor.tsx` — 9-slice 슬라이스 라인 오버레이 UI
 - `ButtonStateEditor.tsx` — 버튼 상태 3슬롯 미리보기
 - `ReskinPanel.tsx` — 리스킨 파라미터 UI
 - `NormalMapPanel.tsx` — 노멀 맵 생성 UI
+- `useZoomPan.tsx` — 캔버스 줌/팬 공용 훅
 - `AiSuggestControls.tsx`, `ImageToolsPanel.tsx`, `PanelFooter.tsx`
 
 ### 클라이언트 래퍼 (`src/lib/api/client.ts`)
@@ -43,13 +41,16 @@ chat, composite, crop, describe, export, filter, generations/[id], generations, 
 ### CLI (`src/lib/cli/`)
 `claude-cli.ts` — Claude CLI spawn, `progress-tail.ts` — progress.jsonl tail
 
+### Electron 셸 (`electron/`)
+`main.js` — 데스크톱 창 관리·splash·spawn 창 숨김(Windows headless), `preload.js`. 패키징: `pnpm dist:mac` / `dist:win` (electron-builder → `dist/`, lint 제외 대상).
+
 ### DB (`src/lib/db/`)
 `client.ts`(싱글톤 WAL), `schema.sql`(IF NOT EXISTS 멱등), `migrate.ts`(v1~v10), repo 모듈들
 
 ## 깨지기 쉬운 계약 (한쪽 바꾸면 반대쪽도)
 
 1. **MCP `structuredContent` ↔ ImageResultCard**
-   `{generationId, imagePath:"/api/images/{id}", width, height, elapsedMs}`. 필드명/타입을 바꾸면 ImageResultCard와 chat-state 양쪽을 함께 수정.
+   `{generationId, imagePath:"/api/images/{id}", width, height, elapsedMs}` — 원천 타입은 `src/lib/mcp/handlers/shared.ts`의 `ToolResponse`. 필드명/타입을 바꾸면 ImageResultCard와 chat-state 양쪽을 함께 수정.
 2. **generations.kind CHECK enum ↔ upload/layers의 kindHint 우회**
    schema의 kind는 `text2img/img2img/upscale/remove_bg/inpaint/spritesheet`로 제한. upload(외부 이미지/마스크)·layers(색별 레이어)는 enum에 없는 종류라 `inpaint`/`text2img` + `params.kindHint`로 우회한다. 새 종류 추가 시 enum을 늘릴지 kindHint를 쓸지 일관되게 결정.
 3. **chat stream-json 이벤트 ↔ chat-state items 모델**

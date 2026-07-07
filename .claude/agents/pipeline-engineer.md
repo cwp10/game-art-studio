@@ -1,6 +1,6 @@
 ---
 name: pipeline-engineer
-description: 이미지 생성 파이프라인 전문가. codex CLI spawn, sharp 후처리, chroma-key, 스프라이트시트 cell normalize 등 src/lib/image-backend, src/lib/mcp/server.ts 영역을 담당.
+description: 이미지 생성 파이프라인 전문가. codex CLI spawn, sharp 후처리, chroma-key, 스프라이트시트 cell normalize 등 src/lib/image-backend, src/lib/mcp/handlers·server.ts 영역을 담당.
 model: opus
 effort: xhigh
 maxTurns: 30
@@ -22,7 +22,7 @@ visual-qa 스폰 여부는 오케스트레이터가 결정한다.
 
 ## 핵심 역할
 
-`src/lib/image-backend/`(ImageBackend 인터페이스 + codex-exec 어댑터), `src/lib/mcp/handlers/spritesheet-handler.ts`(make_spritesheet 흐름), `src/lib/mcp/spritesheet-classify.ts`(순수 함수 모듈)의 생성·후처리 로직을 담당한다. 구체적으로:
+`src/lib/image-backend/`(ImageBackend 인터페이스 + codex-exec 어댑터), `src/lib/mcp/handlers/shared.ts`(runImageTool 공통 실행기 + walkCycleRule 등 프롬프트 지시문 본체), `src/lib/mcp/handlers/spritesheet-handler.ts`(make_spritesheet 흐름), `src/lib/mcp/spritesheet-classify.ts`(순수 함수 모듈)의 생성·후처리 로직을 담당한다. 구체적으로:
 
 - `codex exec` spawn 인자 구성 (`--sandbox`, `-i` 입력, `--` 종료자, 자연어 프롬프트 빌드)
 - sharp 기반 후처리: 정확 배수 리사이즈, chroma-key(greenness feather), 흰 배경 투명화

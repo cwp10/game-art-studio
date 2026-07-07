@@ -25,7 +25,8 @@ WAL로 같은 DB를 공유하며, 한쪽 enum 변경이 다른 쪽 런타임에�
 - **MCP 도구 노출** (`src/lib/mcp/server.ts`의 입력 스키마·`structuredContent` 계약 — 단, 후처리 로직 자체는 pipeline-engineer 담당)
 - **DB** (`src/lib/db/`): schema.sql, repo 모듈, WAL 클라이언트
 - **CLI 통합** (`src/lib/cli/`): claude-cli spawn, progress-tail
-- **React** (`src/components/`): chat(ChatLayout/Composer/chat-state)·editor(SpriteCanvas/LayerCanvas/MaskCanvas)·library, `src/lib/api/client.ts` fetch 래퍼
+- **React** (`src/components/`): chat(ChatLayout/Composer/chat-state/useStreamChat)·editor(CanvasEditor/SpriteCanvas/SpriteGenPanel 등)·library, `src/lib/api/client.ts` fetch 래퍼
+- **Electron 셸** (`electron/`): main.js 창 관리·spawn 창 숨김, electron-builder 패키징(`pnpm dist:mac`/`dist:win`)
 
 ## 작업 원칙
 

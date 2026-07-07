@@ -7,12 +7,12 @@ description: image-generator 프로젝트에서 기능 개발·버그 수정·�
 
 요청을 영역별로 분해하고, `Agent` 도구로 전문 에이전트를 직접 스폰해 구현·검증을 조율한다.
 
-**실행 모드:** Agent 도구 기반 직접 스폰. pipeline-engineer·fullstack-engineer 호출은 `model: "opus"` 옵션 적용. visual-qa는 에이전트 정의(`model: sonnet`)를 따르므로 model 옵션 생략.
+**실행 모드:** Agent 도구 기반 직접 스폰. 모델은 에이전트 정의(frontmatter)를 따른다 — pipeline-engineer·fullstack-engineer=opus, visual-qa=sonnet. Agent 호출 시 model 옵션은 지정하지 않는다.
 
 **팀 구성:**
 | 에이전트 | subagent_type | 담당 |
 |---------|--------------|------|
-| pipeline-engineer | `pipeline-engineer` | image-backend, mcp/server.ts 후처리 (codex spawn, sharp, chroma-key, cell normalize) |
+| pipeline-engineer | `pipeline-engineer` | image-backend, mcp/handlers(shared·spritesheet 등)·server.ts 생성·후처리 (codex spawn, sharp, chroma-key, cell normalize) |
 | fullstack-engineer | `fullstack-engineer` | Next API, MCP 스키마, DB repo/schema, SSE, React |
 | visual-qa | `visual-qa` | 시각 회귀, probe/test-spritesheet/build/lint 게이트, 경계면 교차 비교 |
 
@@ -30,7 +30,7 @@ description: image-generator 프로젝트에서 기능 개발·버그 수정·�
 요청을 다음 축으로 분류한다:
 
 **경량 경로** (pipeline-engineer 단독 + visual-qa):
-- 스프라이트 프롬프트/facing 튜닝 (`spritesheet-handler.ts`, `spritesheet-classify.ts` 한두 파일)
+- 스프라이트 프롬프트/facing 튜닝 (`handlers/shared.ts`, `spritesheet-handler.ts`, `spritesheet-classify.ts` 한두 파일)
 - chroma-key 파라미터 조정
 - 단순 후처리 버그 수정
 
@@ -43,15 +43,6 @@ description: image-generator 프로젝트에서 기능 개발·버그 수정·�
 
 작업이 단일 영역·소규모면 해당 에이전트 1명 + visual-qa로 충분하다.
 
-## Phase 1.5: advisor 호출 (최소화)
-
-`advisor()`는 Opus 4.8을 사용해 타임아웃이 잦으므로 **최소한으로만** 호출한다.
-
-**호출 조건 (모두 해당할 때만):**
-- visual-qa FAIL이 **2회 이상 반복**되고 원인을 파악하지 못한 상태일 때
-
-**그 외 모든 경우 advisor를 호출하지 않는다.** 계약 설계, 영역 판별, 부분 재실행 등은 오케스트레이터가 직접 판단해 Phase 2로 진행한다.
-
 ## Phase 2: 에이전트 스폰 및 작업 할당
 
 `Agent` 도구로 필요한 에이전트를 직접 스폰한다:
@@ -59,7 +50,6 @@ description: image-generator 프로젝트에서 기능 개발·버그 수정·�
 ```
 Agent({
   subagent_type: "pipeline-engineer",  // or "fullstack-engineer" / "visual-qa"
-  model: "opus",
   prompt: "작업 명세 + 필요한 컨텍스트 (이전 _workspace/ 요약 포함)"
 })
 ```
@@ -76,7 +66,7 @@ Agent({
 - 각 구현 에이전트가 완료되면 즉시 visual-qa를 스폰한다(전체 끝나고 1회가 아니다).
 - 후처리 변경 → 시각 회귀(실제 PNG 생성 + Read 확인).
 - 풀스택 변경 → 경계면 교차 비교 + `pnpm build`/`pnpm lint`.
-- FAIL → visual-qa 결과에서 원인 후보를 추출해 해당 구현 에이전트를 재스폰. 1회 재시도 후 재실패 시 `advisor()`를 호출해 원인 분석과 재스폰 전략을 검토한다. 그래도 해결 안 되면 누락·원인을 명시하고 사용자에게 보고한다.
+- FAIL → visual-qa 결과에서 원인 후보를 추출해 해당 구현 에이전트를 재스폰. 1회 재시도 후에도 재실패하면 남은 FAIL 항목·원인 분석·시도한 수정을 명시하고 사용자에게 보고한다.
 
 ## Phase 4: 종합 및 정리
 
@@ -99,9 +89,9 @@ Agent({
 
 **정상 흐름 — "스프라이트시트 배경이 가끔 녹색 잔여가 남는다, 고쳐줘":**
 1. Phase 1: 이미지 파이프라인 영역으로 판별 → pipeline-engineer + visual-qa.
-2. `Agent(subagent_type="pipeline-engineer", model="opus")` 스폰: chroma-key feather 임계값 수정 요청.
+2. `Agent(subagent_type="pipeline-engineer")` 스폰: chroma-key feather 임계값 수정 요청.
 3. pipeline-engineer 결과를 받아 `_workspace/pipeline_summary.md` 확인.
-4. `Agent(subagent_type="visual-qa", model="opus")` 스폰: pipeline 요약 포함, 녹색 잔여·cross-cell 보존 확인 요청.
+4. `Agent(subagent_type="visual-qa")` 스폰: pipeline 요약 포함, 녹색 잔여·cross-cell 보존 확인 요청.
 5. PASS → 종합 보고.
 
 **에러 흐름 — 새 MCP 도구 추가 중 shape 불일치:**

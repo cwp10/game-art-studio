@@ -1,6 +1,6 @@
 ---
 name: image-pipeline-dev
-description: image-generator의 이미지 생성 파이프라인(codex CLI spawn, sharp 후처리, chroma-key, 스프라이트시트 cell normalize)을 구현·수정·디버깅할 때 사용. src/lib/image-backend/, src/lib/mcp/server.ts의 생성·후처리 로직을 다루거나, 스프라이트시트 셀 정렬/배경 투명화/seamless loop/그리드 템플릿을 손볼 때 반드시 사용. "후처리", "chroma-key", "cell 정렬", "codex 프롬프트", "스프라이트시트 생성 버그" 등의 작업에 적용.
+description: image-generator의 이미지 생성 파이프라인(codex CLI spawn, sharp 후처리, chroma-key, 스프라이트시트 cell normalize)을 구현·수정·디버깅할 때 사용. src/lib/image-backend/, src/lib/mcp/(server.ts·handlers/)의 생성·후처리 로직을 다루거나, 스프라이트시트 셀 정렬/배경 투명화/seamless loop/그리드 템플릿을 손볼 때 반드시 사용. "후처리", "chroma-key", "cell 정렬", "codex 프롬프트", "스프라이트시트 생성 버그" 등의 작업에 적용.
 ---
 
 # Image Pipeline Dev
@@ -10,7 +10,7 @@ description: image-generator의 이미지 생성 파이프라인(codex CLI spawn
 ## 파이프라인 지도
 
 ```
-MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
+MCP 도구(server.ts) → runImageTool()(handlers/shared.ts) → selectImageBackend().execute()
                                          → CodexExecBackend (codex-exec.ts)
                                             → codex exec spawn → output.png
                                             → sharp 후처리 → data/images/{genId}.png
@@ -26,10 +26,13 @@ MCP 도구(server.ts) → runImageTool() → selectImageBackend().execute()
 - `src/lib/image-backend/nine-slice.ts` — `makeNineSliceGrid()` / `scaleWithNineSlice()`
 - `src/lib/image-backend/button-states.ts` — `generateButtonState()` (normal/hover/pressed sharp 변환)
 - `src/lib/image-backend/recolor.ts` — 색상 재채색 처리
-- `src/lib/image-backend/spritesheet-postprocess.ts` — `normalizeSpritesheetCells()`, `chromaKeyFile()`, `fallbackBgRemove()`
-- `src/lib/image-backend/pose-reference.ts` — 포즈 참조 이미지 처리
-- `src/lib/mcp/server.ts` — 도구 라우팅 + 공통 생성 처리 (도구: generate_image / make_spritesheet / edit_image / upscale_image / resize_image / remove_background / inpaint_image / composite_scene / apply_sprite_effect)
-- `src/lib/mcp/handlers/spritesheet-handler.ts` — `make_spritesheet` 전체 흐름 (facing 결정, 그리드 검증, 다방향 stitch)
+- `src/lib/image-backend/spritesheet-postprocess.ts` — `normalizeSpritesheetCells()`, `fallbackBgRemove()`
+- `src/lib/image-backend/chroma-key.ts` — `chromaKeyFile()`(greenness feather), `lumaKeyFile()`(VFX용 루미넌스 키), `stripBgHints()`, `VFX_EFFECT_RE`/`GREEN_SUBJECT_RE`
+- `src/lib/image-backend/sprite-frame-patch.ts` — `patchSpritesheetFrame()` 셀 단위 재생성 패치 (sprite-frame/regenerate 라우트가 사용)
+- `src/lib/image-backend/pose-reference.ts` — 포즈 참조 이미지 처리 (`getCachedPoseRow`, `computeFrameAngles`)
+- `src/lib/mcp/server.ts` — 도구 스키마·라우팅 (도구 13종: generate_image / make_spritesheet / make_emote_sheet / make_tileset / generate_normal_map / edit_image / upscale_image / resize_image / remove_background / inpaint_image / reskin_image / composite_scene / apply_sprite_effect)
+- `src/lib/mcp/handlers/shared.ts` — **공통 실행기 `runImageTool()`** (생성→DB 기록→progress.jsonl→`structuredContent` 반환의 단일 경로 — server.ts도 여기서 import, 사본 두지 말 것) + 프롬프트 지시문 본체(walkCycleRule 등 gait·방향·프레임 연속성 규칙) + `ToolResponse` 타입·`newImageIds`·`loadGenerationWithPath`. 최근 프롬프트 튜닝 커밋 대부분이 이 파일이다.
+- `src/lib/mcp/handlers/spritesheet-handler.ts` — `make_spritesheet` 전체 흐름 (facing 결정, 그리드 검증, 행별 개별 codex 호출, 다방향 stitch)
 - `src/lib/mcp/handlers/normal-map-handler.ts` — 노멀 맵 생성 처리
 - `src/lib/mcp/handlers/reskin-handler.ts` — 리스킨 처리
 - `src/lib/mcp/spritesheet-classify.ts` — 순수 함수 모듈: `inferSubjectType`, `classifyAnchor`, `isLocomotion`, `isRunning`, `directionLabels`, `buildDirectionPrompt`
