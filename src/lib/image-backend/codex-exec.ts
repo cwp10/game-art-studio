@@ -481,9 +481,6 @@ export class CodexExecBackend implements ImageBackend {
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
-      // 전역 ~/.codex/config.toml 의 model 값에 의존하지 않도록 프로젝트에서 모델을 핀 고정.
-      // gpt-5.6-sol 등 사라진 변형으로 config 가 바뀌어도 이미지 생성이 깨지지 않게 한다.
-      "-c", `model="gpt-5.5"`,
       "-c", `model_reasoning_effort="high"`,
       ...attachedImages.flatMap(p => ["-i", p]),
       ...(attachedImages.length > 0 ? ["--"] : []),
