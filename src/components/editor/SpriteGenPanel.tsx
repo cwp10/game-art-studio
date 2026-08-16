@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeft, Lightbulb, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Lightbulb, Loader2, Lock, LockOpen, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
+import { BaseLockGate } from "@/components/editor/BaseLockGate";
 import { jsonFetch } from "@/lib/api/client";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
 import { ACTION_STATE_HINTS } from "@/lib/sprite/state-name";
@@ -249,6 +250,19 @@ export function SpriteGenPanel({
     }
   }, [actionPrompt, userSetFrames]);
 
+  // base 잠금 게이트 — 참조 이미지를 base 로 잠갔는지. 정본에서 BLOCKING 인 앞단이다.
+  const [gateOpen, setGateOpen] = useState(false);
+  const [baseLockedId, setBaseLockedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!referenceId) return;
+    void (async () => {
+      const res = await fetch(`/api/sprite/base-gate?generationId=${referenceId}`);
+      if (!res.ok) return;
+      const d = (await res.json()) as { locked?: { id: string } | null };
+      setBaseLockedId(d.locked?.id ?? null);
+    })();
+  }, [referenceId]);
+
   const [dirOpen, setDirOpen] = useState(false);
   const [frameOpen, setFrameOpen] = useState(false);
   const [exampleOpen, setExampleOpen] = useState(false);
@@ -339,7 +353,15 @@ export function SpriteGenPanel({
   }
 
   return (
-    <aside className="flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
+    <aside className="relative flex h-full min-w-[480px] flex-1 flex-col border-l border-border bg-bg-panel">
+      {gateOpen && referenceId && referenceImageUrl && (
+        <BaseLockGate
+          generationId={referenceId}
+          imageUrl={referenceImageUrl}
+          onClose={() => setGateOpen(false)}
+          onLocked={id => setBaseLockedId(id)}
+        />
+      )}
       <header className="flex h-[50px] flex-none items-center gap-3 border-b border-border px-3.5">
         <button
           onClick={onClose}
@@ -407,6 +429,22 @@ export function SpriteGenPanel({
               </div>
             ) : (
               <p className="px-4 text-center text-xs text-text-muted/50">참조 이미지 없음 — 아래 텍스트 설명으로 생성합니다</p>
+            )}
+
+            {/* base 잠금 상태. 약한 base 가 모든 행을 오염시키므로 행 생성 전에 잠근다. */}
+            {referenceId && subjectType === "character" && (
+              <button
+                onClick={() => setGateOpen(true)}
+                className={`absolute left-2 top-2 flex h-7 items-center gap-1.5 rounded-lg border px-2 text-[11px] ${
+                  baseLockedId === referenceId
+                    ? "border-[color:var(--accent)] text-[color:var(--accent)]"
+                    : "border-border bg-bg-panel/80 text-text-muted hover:text-text-primary"
+                }`}
+                title="base 잠금 게이트 — 약한 base 는 모든 행의 비율·스타일·정체성을 오염시킵니다"
+              >
+                {baseLockedId === referenceId ? <Lock size={12} /> : <LockOpen size={12} />}
+                {baseLockedId === referenceId ? "base 잠김" : "base 잠금 필요"}
+              </button>
             )}
           </div>
 
