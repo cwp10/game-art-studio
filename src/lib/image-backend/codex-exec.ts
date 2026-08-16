@@ -406,7 +406,16 @@ function buildNaturalPrompt(job: ImageJob): string {
  *
  * 과거에는 stderr 의 `generated_images` + `find`/`cp ` 문자열을 봤다. 그건 모델이
  * 파일을 복사하는 부가 동작의 부산물이었고, 그 지시를 프롬프트에서 제거하면서
- * 근거가 사라졌다. 이제 프로토콜 이벤트를 직접 읽는다.
+ * 근거가 사라졌다.
+ *
+ * 실측(2026-08-16)으로 확인한 stdout 이벤트는 thread.started → turn.started →
+ * item.started/item.completed(agent_message · command_execution) → turn.completed
+ * 다. **이미지 생성 자체는 stdout 에 노출되지 않는다** — image_generation_* 레코드는
+ * rollout jsonl 에만 있다. 그래서 "생성 중"은 첫 item 이 시작됐다는 신호로 대신한다.
+ * 정확히 "지금 픽셀을 그리는 중"이라는 뜻은 아니고, codex 가 작업에 착수했다는 뜻이다.
+ *
+ * image_generation_* 매칭은 남겨둔다 — codex 버전이 이 이벤트를 stdout 으로 올리면
+ * 그때는 더 정확한 신호가 되고, 없어도 해가 없다.
  */
 function inferStage(
   line: string,
@@ -420,7 +429,7 @@ function inferStage(
     return null;
   }
   const type = typeof event?.type === "string" ? event.type : "";
-  if (type === "image_generation_call" || type === "image_generation.started") {
+  if (type === "image_generation_call" || type === "item.started") {
     return "image_generating";
   }
   if (type === "image_generation_end" || type === "turn.completed") {

@@ -15,17 +15,24 @@ async function main() {
   const args = process.argv.slice(2);
   const prompt = args.find(a => !a.startsWith("--"));
   if (!prompt) {
-    console.error('usage: pnpm tsx scripts/gen.ts "<prompt>" [--kind=text2img]');
+    console.error(
+      'usage: pnpm tsx scripts/gen.ts "<prompt>" [--kind=text2img] [--input=<path>]',
+    );
     process.exit(2);
   }
   const kind = (args.find(a => a.startsWith("--kind="))?.split("=")[1] ??
     "text2img") as ImageJob["kind"];
+  // img2img/inpaint 등 참조 이미지가 필요한 경로를 단독 검증하려면 첨부가 있어야 한다.
+  const inputImagePaths = args
+    .filter(a => a.startsWith("--input="))
+    .map(a => a.slice("--input=".length));
 
   const job: ImageJob = {
     id: newJobId(),
     generationId: newGenerationId(),
     kind,
     prompt,
+    ...(inputImagePaths.length > 0 ? { inputImagePaths } : {}),
   };
 
   console.log(`[gen] job=${job.id} generation=${job.generationId} kind=${kind}`);
