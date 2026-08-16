@@ -13,7 +13,7 @@
     "cleanup": "tsx scripts/cleanup.ts",
     "gen:poses": "tsx scripts/gen-pose-guides.ts",
     "probe": "node scripts/probe-codex-imagegen.mjs",
-    "test": "tsx scripts/test-classify.ts && tsx scripts/test-directions.ts && tsx scripts/test-sprite-marker.ts && tsx scripts/test-codex-rollout.ts && tsx scripts/test-base-gate.ts && tsx scripts/test-sprite-request.ts && tsx scripts/test-chroma-key.ts && tsx scripts/test-layout-guide.ts",
+    "test": "tsx scripts/test-classify.ts && tsx scripts/test-directions.ts && tsx scripts/test-sprite-marker.ts && tsx scripts/test-codex-rollout.ts && tsx scripts/test-base-gate.ts && tsx scripts/test-sprite-request.ts && tsx scripts/test-chroma-key.ts && tsx scripts/test-layout-guide.ts && tsx scripts/test-row-prompt.ts",
     "test:e2e": "playwright test",
     "test:post": "tsx scripts/test-spritesheet.ts && tsx scripts/smoke-composite-transform.mts",
     "postinstall": "node scripts/postinstall.mjs",
