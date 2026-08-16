@@ -21,6 +21,8 @@ import {
   type SubjectType,
 } from "../../image-backend/spritesheet-postprocess.js";
 import { extractPoseGuideGrid, getCachedPoseRow, getMultiDirPoseGuide, DIR_NAMES, DIR_INDEX, type FrameAngle } from "../../image-backend/pose-reference.js";
+import { lumaKeyFile } from "../../image-backend/chroma-key.js";
+import { verifyLumaBackground, type BackgroundDecision } from "../../sprite/background-mode.js";
 import {
   buildDirectionPrompt,
   isLocomotion,
@@ -93,13 +95,29 @@ export type ToolResponse = {
  * 투명 배경 후처리: chromaKeyFile → keyedOut=0이면 fallbackBgRemove 로 폴백.
  * generate_image / make_spritesheet / reskin_image 세 경로 공통 시퀀스.
  * cellArea 미지정 시 이미지 전체를 단일 셀로 간주(단일 이미지 경로).
+ *
+ * `background` 를 주면 그 **결정 레코드**를 따른다 — 프롬프트가 요구한 배경과 여기서
+ * 거는 키어가 어긋나지 않게 하는 것이 요점이다(`background-mode.ts`). 주지 않으면
+ * 기존대로 크로마다.
  */
 export async function applyTransparentPostProcess(
   filePath: string,
   chromaKey: ChromaKeyColor,
   cellArea?: number,
   aggressivePockets?: boolean,
+  background?: BackgroundDecision,
 ): Promise<number> {
+  if (background?.mode === "luma") {
+    // 오분류가 파괴적이라 키를 걸기 전에 막는다 — 배경이 검정이 아니면 luma 는 배경을
+    // 불투명하게 남기고 어두운 소재의 알파를 깎는다.
+    const verdict = await verifyLumaBackground(filePath);
+    if (!verdict.ok) {
+      log(`applyTransparentPostProcess: luma 취소 — ${verdict.reason}. 크로마로 처리한다`);
+    } else {
+      log(`applyTransparentPostProcess: luma (${verdict.reason})`);
+      return await lumaKeyFile(filePath, log);
+    }
+  }
   const keyedOut = await chromaKeyFile(filePath, chromaKey, log, cellArea, aggressivePockets);
   if (keyedOut === 0) return await fallbackBgRemove(filePath, log);
   return keyedOut;
@@ -115,6 +133,11 @@ export type SpritePromptInput = {
   canvasH: number;
   wantsTransparent: boolean;
   chromaKeyColor: ChromaKeyColor;
+  /**
+   * 배경 방식 결정 레코드. 없으면 크로마다(기존 동작). 있으면 배경 지시와 후처리 키어가
+   * **같은 값**을 읽는다 — 어긋나면 초록이 불투명으로 남거나 배경이 안 지워진다.
+   */
+  background?: BackgroundDecision;
   seamlessLoop: boolean;
   subjectType: SubjectType;
   resolvedAnchor: Exclude<AnchorStrategy, "auto">;
@@ -218,7 +241,7 @@ export async function buildSpritePrompt(
   p: SpritePromptInput,
 ): Promise<{ decorated: string; overrideInputPaths: string[] }> {
   const { userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
-    wantsTransparent, chromaKeyColor, seamlessLoop,
+    wantsTransparent, chromaKeyColor, background, seamlessLoop,
     subjectType, resolvedAnchor, directions, refPath, gridTemplatePath, viewpoint, facing,
     refHandDescription, startFrame, totalCycle, rowIndex, totalRows } = p;
   const normalizedViewpoint = viewpoint ?? "side";
@@ -248,7 +271,11 @@ export async function buildSpritePrompt(
   const singleDirWalkDir = (parsedWalkDir === "LEFT" || parsedWalkDir === "RIGHT") ? parsedWalkDir : null;
 
   // ── 배경·루프 지시 ──────────────────────────────────────────────────────
-  const bgInstruction = wantsTransparent
+  // luma 런은 **검정 배경**을 요구해야 한다. 여기서 크로마를 요구하고 후처리에서 luma 를
+  // 걸면 초록이 전부 불투명으로 남는다 — 결정 레코드를 양쪽이 같이 읽는 이유다.
+  const bgInstruction = wantsTransparent && background?.mode === "luma"
+    ? "CRITICAL background: Use a SOLID FLAT pure black (#000000) background filling every pixel that is NOT the effect — no gradients, no glow bleed onto the background, no colored ambient light. The post-processing pipeline applies luminance keying, so background brightness becomes transparency: anything you paint dark will become transparent."
+    : wantsTransparent
     ? chromaKeyColor === "magenta"
       ? "CRITICAL background: Use a SOLID FLAT pure magenta (#ff00ff) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the magenta to produce true transparency."
       : "CRITICAL background: Use a SOLID FLAT pure green (#00ff00) chroma-key background filling every pixel that is NOT the subject — no gradients, no shadows, no anti-aliasing fringe, crisp subject silhouette. The post-processing pipeline will key out the green to produce true transparency."
@@ -745,6 +772,8 @@ export type SpritesheetAttemptsSpec = {
   retryEnabled: boolean;
   wantsTransparent: boolean;
   chromaKeyColor: ChromaKeyColor;
+  /** 배경 방식 결정 레코드 — 후처리 키어가 이걸 따른다. 없으면 크로마. */
+  background?: BackgroundDecision;
   rows: number;
   cols: number;
   canvasW: number;
@@ -768,7 +797,7 @@ export async function runSpritesheetAttempts(
 ): Promise<{ best: Awaited<ReturnType<typeof runImageTool>> | null; cumulativeMs: number }> {
   const {
     name, decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
-    wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
+    wantsTransparent, chromaKeyColor, background, rows, cols, canvasW, canvasH,
     anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId, signal,
   } = spec;
   const MAX_RETRIES = retryEnabled ? 2 : 0;
@@ -829,7 +858,7 @@ export async function runSpritesheetAttempts(
         fs.renameSync(resizeTmp, filePath);
         log(`make_spritesheet resized gen=${genId} to ${canvasW}x${canvasH}`);
         if (wantsTransparent) {
-          await applyTransparentPostProcess(filePath, chromaKeyColor, cellArea);
+          await applyTransparentPostProcess(filePath, chromaKeyColor, cellArea, undefined, background);
           log(`make_spritesheet chroma-keyed gen=${genId} key=${chromaKeyColor}`);
         }
         if (retryEnabled) {
@@ -902,6 +931,8 @@ export type DirectionalSheetSpec = {
   spritesheetParams: Record<string, unknown>;
   wantsTransparent: boolean;
   chromaKeyColor: ChromaKeyColor;
+  /** 배경 방식 결정 레코드 — 후처리 키어가 이걸 따른다. 없으면 크로마. */
+  background?: BackgroundDecision;
   rows: number;
   cols: number;
   /** 단일 행(rows=1) 생성 캔버스. canvasW = cols*cellPx, rowCanvasH = cellPx. */
@@ -931,7 +962,7 @@ export async function runDirectionalSpritesheet(
 ): Promise<{ best: Awaited<ReturnType<typeof runImageTool>> | null; cumulativeMs: number }> {
   const {
     rowDecorated, dirList, refId, spritesheetParams,
-    wantsTransparent, chromaKeyColor, rows, cols, canvasW, rowCanvasH,
+    wantsTransparent, chromaKeyColor, background, rows, cols, canvasW, rowCanvasH,
     anchorStrategy, subjectType, resolvedAnchor, finalCellPx, sessionId, signal,
   } = spec;
 
@@ -1004,7 +1035,7 @@ export async function runDirectionalSpritesheet(
   // 후처리 1회: chroma-key → normalize → 업스케일 (stitch 된 최종 시트에만).
   try {
     if (wantsTransparent) {
-      await applyTransparentPostProcess(finalPath, chromaKeyColor, cellArea);
+      await applyTransparentPostProcess(finalPath, chromaKeyColor, cellArea, undefined, background);
       log(`make_spritesheet directional chroma-keyed gen=${finalGenId} key=${chromaKeyColor}`);
     }
     await normalizeSpritesheetCells(finalPath, rows, cols, wantsTransparent, {

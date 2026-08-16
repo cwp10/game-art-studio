@@ -17,6 +17,7 @@ import {
   type SubjectType,
 } from "../../image-backend/spritesheet-postprocess.js";
 import { GREEN_SUBJECT_RE } from "../../image-backend/chroma-key.js";
+import { decideBackgroundMode } from "../../sprite/background-mode.js";
 import { inferSubjectType, isLocomotion, type Directions } from "../spritesheet-classify.js";
 import { canUsePlanDrivenPath, runPlanDrivenSpritesheet } from "./plan-driven-spritesheet.js";
 import {
@@ -212,6 +213,26 @@ export async function handleMakeSpritesheet(
   const subjectType: SubjectType =
     (args.subjectType as SubjectType | undefined) ?? inferSubjectType(userPrompt, !!refId);
   const anchorStrategy: AnchorStrategy = (args.anchorStrategy as AnchorStrategy | undefined) ?? "auto";
+
+  // ── 배경 방식 결정 (한 번) ──────────────────────────────────────────────
+  // 프롬프트가 요구할 배경과 후처리가 걸 키어를 **같은 레코드**에서 읽는다. 이전에는
+  // 시트 경로가 피사체 종류와 무관하게 크로마를 걸어서, 넓은 반투명이 있는 VFX 는
+  // 부분 알파를 하나도 못 받았다(실측: 11개 표본 전부 0 또는 1). 상세는
+  // `src/lib/sprite/background-mode.ts`.
+  const background = decideBackgroundMode({
+    prompt: userPrompt,
+    subjectType,
+    greenSubject,
+    refIsGreen,
+    keyColorOverride: chromaKeyColor,
+    override:
+      (args as { backgroundMode?: string }).backgroundMode === "luma"
+        ? "luma"
+        : (args as { backgroundMode?: string }).backgroundMode === "chroma"
+          ? "chroma"
+          : undefined,
+  });
+  log(`make_spritesheet 배경: ${background.mode} (${background.selection}) — ${background.reason}`);
   // auto → 구체 전략(normalize 의 resolveAnchor 와 동일 규칙). 프롬프트/피벗 산출용.
   const resolvedAnchor: Exclude<AnchorStrategy, "auto"> =
     anchorStrategy !== "auto" ? anchorStrategy : (subjectType === "effect" || subjectType === "object") ? "center" : "feet";
@@ -283,7 +304,7 @@ export async function handleMakeSpritesheet(
       dirList.map(dir =>
         buildSpritePrompt({
           userPrompt, rows: 1, cols, cellW, cellH, canvasW, canvasH: cellH,
-          wantsTransparent, chromaKeyColor, seamlessLoop,
+          wantsTransparent, chromaKeyColor, background, seamlessLoop,
           subjectType, resolvedAnchor, directions: 1,
           refPath, gridTemplatePath: rowGridTemplatePath, viewpoint, facing: dir,
           refHandDescription,
@@ -292,7 +313,7 @@ export async function handleMakeSpritesheet(
     );
     ({ best, cumulativeMs } = await runDirectionalSpritesheet({
       rowDecorated, dirList, refId, spritesheetParams,
-      wantsTransparent, chromaKeyColor, rows, cols,
+      wantsTransparent, chromaKeyColor, background, rows, cols,
       canvasW, rowCanvasH: cellH,
       anchorStrategy, subjectType, resolvedAnchor,
       finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
@@ -306,7 +327,7 @@ export async function handleMakeSpritesheet(
       Array.from({ length: rows }, (_, r) =>
         buildSpritePrompt({
           userPrompt, rows: 1, cols, cellW, cellH, canvasW, canvasH: cellH,
-          wantsTransparent, chromaKeyColor, seamlessLoop,
+          wantsTransparent, chromaKeyColor, background, seamlessLoop,
           subjectType, resolvedAnchor, directions: null,
           refPath, gridTemplatePath: rowGridTemplatePath, viewpoint, facing,
           refHandDescription,
@@ -318,7 +339,7 @@ export async function handleMakeSpritesheet(
       rowDecorated,
       dirList: Array.from({ length: rows }, (_, r) => `row${r + 1}`),
       refId, spritesheetParams,
-      wantsTransparent, chromaKeyColor, rows, cols, canvasW, rowCanvasH: cellH,
+      wantsTransparent, chromaKeyColor, background, rows, cols, canvasW, rowCanvasH: cellH,
       anchorStrategy, subjectType, resolvedAnchor,
       finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
     }));
@@ -326,14 +347,14 @@ export async function handleMakeSpritesheet(
     // directions=1(단일 방향) — 기존 단일 호출 흐름 그대로.
     const { decorated, overrideInputPaths } = await buildSpritePrompt({
       userPrompt, rows, cols, cellW, cellH, canvasW, canvasH,
-      wantsTransparent, chromaKeyColor, seamlessLoop,
+      wantsTransparent, chromaKeyColor, background, seamlessLoop,
       subjectType, resolvedAnchor, directions,
       refPath, gridTemplatePath, viewpoint, facing,
       refHandDescription,
     });
     ({ best, cumulativeMs } = await runSpritesheetAttempts({
       name: "make_spritesheet", decorated, overrideInputPaths, refId, spritesheetParams, retryEnabled,
-      wantsTransparent, chromaKeyColor, rows, cols, canvasW, canvasH,
+      wantsTransparent, chromaKeyColor, background, rows, cols, canvasW, canvasH,
       anchorStrategy, subjectType, resolvedAnchor,
       finalCellPx: FINAL_CELL_PX, sessionId, signal: extra.signal,
     }));
