@@ -243,6 +243,28 @@ void (async () => {
     aaOff.checks.find(c => c.id === "pixelArt")?.ok === true,
   );
 
+  // 알파 채널이 없는 원본 — AA 를 측정할 수 없으므로 unmeasured 로 드러나야 한다.
+  // (실측: codex 가 만든 PNG 는 channels=3, hasAlpha=false 다.)
+  const noAlphaPath = join(tmp, "no-alpha.png");
+  await sharp(
+    makeRaw(64, 64, (x, y) =>
+      x >= 20 && x <= 43 && y >= 20 && y <= 43 ? [20, 40, 200, 255] : [255, 0, 255, 255],
+    ).raw,
+    { raw: { width: 64, height: 64, channels: 4 } },
+  )
+    .removeAlpha()
+    .png()
+    .toFile(noAlphaPath);
+
+  const noAlpha = await inspectBaseImage(noAlphaPath, { pixelArt: true });
+  const noAlphaCheck = noAlpha.checks.find(c => c.id === "pixelArt");
+  check(
+    "알파 없는 원본은 unmeasured 로 표시",
+    noAlphaCheck?.unmeasured === true,
+    JSON.stringify(noAlphaCheck),
+  );
+  check("unmeasured 여도 ok 는 true (차단하지 않음)", noAlphaCheck?.ok === true);
+
   // ── base 잠금 저장·조회 ─────────────────────────────────────────
   const { createGeneration, getLockedBase, lockBaseGeneration } = await import(
     "../src/lib/db/repo/generations"

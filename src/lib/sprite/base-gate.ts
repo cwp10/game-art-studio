@@ -200,6 +200,8 @@ const PIXEL_ART_SOFT_ALPHA_MAX = 0.02;
 export type BaseCheck = {
   id: "background" | "fullBody" | "pixelArt";
   ok: boolean;
+  /** 판정할 근거가 없어 통과로 친 경우. autoPass 에는 들어가지만 신뢰하면 안 된다. */
+  unmeasured?: boolean;
   detail: string;
 };
 
@@ -225,6 +227,11 @@ export async function inspectBaseImage(
   filePath: string,
   opts?: { pixelArt?: boolean },
 ): Promise<BaseInspection> {
+  // 원본에 알파가 있는지 먼저 본다. ensureAlpha() 뒤에는 항상 4채널이 되므로
+  // 그 시점에는 구분할 수 없다.
+  const sourceMeta = await sharp(filePath).metadata();
+  const sourceHasAlpha = sourceMeta.hasAlpha === true;
+
   const { data, info } = await sharp(filePath)
     .toColorspace("srgb")
     .ensureAlpha()
@@ -263,14 +270,29 @@ export async function inspectBaseImage(
   });
 
   // 기준 3 — 픽셀아트 런일 때만 강제. 균일 블록 피치 실측은 ⑤ 에서 추가한다.
-  const pixelArtOk = !opts?.pixelArt || softAlpha <= PIXEL_ART_SOFT_ALPHA_MAX;
-  checks.push({
-    id: "pixelArt",
-    ok: pixelArtOk,
-    detail: opts?.pixelArt
-      ? `AA 반투명 ${(softAlpha * 100).toFixed(2)}% (상한 ${PIXEL_ART_SOFT_ALPHA_MAX * 100}%)`
-      : `픽셀아트 런 아님 — 검사 생략 (AA ${(softAlpha * 100).toFixed(2)}%)`,
-  });
+  //
+  // 알파 채널이 없는 원본에서는 이 검사를 할 수 없다. AA 가장자리가 알파가 아니라
+  // 색 블렌딩으로 나타나기 때문이다(크로마 배경 위 이미지가 그렇다). 그런 경우
+  // softAlpha 는 항상 0 이라 조용히 통과해버리므로 unmeasured 로 드러낸다.
+  // 실측(2026-08-16): codex 가 만든 PNG 는 channels=3, hasAlpha=false 였다.
+  if (opts?.pixelArt && !sourceHasAlpha) {
+    checks.push({
+      id: "pixelArt",
+      ok: true,
+      unmeasured: true,
+      detail:
+        "원본에 알파 채널이 없어 AA 를 측정할 수 없음 — 통과로 쳤지만 근거가 없다. " +
+        "픽셀 격자 실측(⑤)이 붙기 전까지는 사람이 확인해야 한다",
+    });
+  } else {
+    checks.push({
+      id: "pixelArt",
+      ok: !opts?.pixelArt || softAlpha <= PIXEL_ART_SOFT_ALPHA_MAX,
+      detail: opts?.pixelArt
+        ? `AA 반투명 ${(softAlpha * 100).toFixed(2)}% (상한 ${PIXEL_ART_SOFT_ALPHA_MAX * 100}%)`
+        : `픽셀아트 런 아님 — 검사 생략`,
+    });
+  }
 
   return {
     checks,
