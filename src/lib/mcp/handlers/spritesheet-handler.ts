@@ -18,6 +18,7 @@ import {
 } from "../../image-backend/spritesheet-postprocess.js";
 import { GREEN_SUBJECT_RE } from "../../image-backend/chroma-key.js";
 import { inferSubjectType, isLocomotion, type Directions } from "../spritesheet-classify.js";
+import { canUsePlanDrivenPath, runPlanDrivenSpritesheet } from "./plan-driven-spritesheet.js";
 import {
   analyzeRefFacing,
   analyzeRefHandObjects,
@@ -55,6 +56,36 @@ export async function handleMakeSpritesheet(
   const refId = typeof args.inputGenerationId === "string" && args.inputGenerationId
     ? args.inputGenerationId
     : null;
+
+  // ── 플랜 구동 경로 라우팅 (sprite-gen component-row 엔진) ───────────────
+  // 적용 조건을 만족하면 base 잠금 → 방향 앵커 → 액션 행 → 컴포넌트 추출 → 아틀라스로
+  // 간다. 아니면 아래 기존 경로가 그대로 처리한다 — 이펙트·오브젝트·다방향 시트는
+  // component-row 엔진의 범위가 아니다.
+  {
+    const st =
+      (args.subjectType as string | undefined) ?? inferSubjectType(userPrompt, !!refId);
+    const dirs = (args.directions as number | undefined) ?? null;
+    if (canUsePlanDrivenPath({ subjectType: st, directions: dirs, refId })) {
+      const uiFacing =
+        typeof args.facing === "string" && FACING_ENUM.has(args.facing.toUpperCase())
+          ? args.facing.toUpperCase()
+          : "DOWN";
+      log(`make_spritesheet → 플랜 구동 경로 (facing=${uiFacing}, frames=${cols * rows})`);
+      return await runPlanDrivenSpritesheet(
+        {
+          baseGenerationId: refId as string,
+          characterId: "sprite",
+          description: userPrompt,
+          uiDirection: uiFacing,
+          frames: cols * rows,
+          loop: seamlessLoop,
+          actionPrompt: userPrompt,
+        },
+        extra,
+        ctx,
+      );
+    }
+  }
 
   // ② 방향 시트: directions > 1 이면 rows=directions 로 강제(각 행=한 방향).
   // directions=1(단일 방향)은 rows 를 레이아웃 행 수로 그대로 유지 — SpriteGenPanel
