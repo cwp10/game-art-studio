@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/components/editor/AiSuggestControls";
 import { jsonFetch } from "@/lib/api/client";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
+import { ACTION_STATE_HINTS } from "@/lib/sprite/state-name";
 
 
 /**
@@ -110,17 +111,15 @@ const EFFECT_TYPES: Array<{ value: EffectType; label: string; phrase: string }> 
   { value: "ambient",   label: "주변",  phrase: "subtle ambient particles, gentle drifting environmental effect" },
 ];
 
-// 동작 텍스트 키워드 → 프레임·루프 자동 추천 (애니메이션 드롭다운 대체)
-const ACTION_FRAME_HINTS: Array<{ pattern: RegExp; frames: FrameCount; loop: boolean }> = [
-  { pattern: /걷기|보행|walk(ing)?/, frames: 8, loop: true },
-  { pattern: /달리기|뛰기|run(ning)?|sprint/, frames: 8, loop: true },
-  { pattern: /대기|idle|호흡|breath(ing)?|서있/, frames: 4, loop: true },
-  { pattern: /공격|attack|slash|swing|때리|strike/, frames: 6, loop: false },
-  { pattern: /점프|jump|도약|leap/, frames: 6, loop: false },
-  { pattern: /사망|죽음|die|death|fall(ing)? down/, frames: 6, loop: false },
-  { pattern: /시전|cast(ing)?|마법|magic|spell|스킬|skill/, frames: 8, loop: false },
-  { pattern: /피격|움찔|경직|hurt|flinch|knockback/, frames: 4, loop: false },
-];
+// 동작 텍스트 키워드 → 프레임·루프 자동 추천 (애니메이션 드롭다운 대체).
+// 표는 src/lib/sprite/state-name.ts 가 소유한다 — 서버가 같은 표에서 정본 상태명을
+// 뽑으므로 여기 숫자를 따로 들면 패널과 생성이 갈린다.
+//
+// 정본 프레임 대역에는 FRAME_OPTS 에 없는 값(5)도 있으므로, 드롭다운이 표시할 수 있는
+// 값일 때만 반영한다 — 없는 값을 setFrames 하면 그리드가 조용히 폴백된다.
+function hintFrameCount(frames: number): FrameCount | null {
+  return FRAME_OPTS.find(f => f.value === frames)?.value ?? null;
+}
 
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
 // 실측 built-in tool 한계: 한 변 최대 1536px(CELL_PX=384 × 4). MCP server.ts 검증과 동일.
@@ -212,8 +211,11 @@ export function SpriteGenPanel({
 }: Props) {
   const [subjectType, setSubjectType] = useState<SubjectType>(initialSubjectMode ?? "character");
   const [direction, setDirection] = useState<Direction>(referenceImageUrl ? "REF" : "DOWN");
-  const [frames, setFrames] = useState<FrameCount>(8);
-  const [seamlessLoop, setSeamlessLoop] = useState(true);
+  // 정본 프레임 대역(states-and-frames.md): 4 가 단순 동작의 기본 안정 범위이고 8 은
+  // 로코모션 행·명시적 실험 전용이다. 루프도 정본 simple 상태 넷 중 idle 만 참이다.
+  // 동작 텍스트가 들어오면 ACTION_FRAME_HINTS 가 상태별 값으로 덮는다.
+  const [frames, setFrames] = useState<FrameCount>(4);
+  const [seamlessLoop, setSeamlessLoop] = useState(false);
   const [effectType, setEffectType] = useState<EffectType>("explosion");
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
@@ -235,11 +237,12 @@ export function SpriteGenPanel({
   useEffect(() => {
     if (userSetFrames || !actionPrompt.trim()) return;
     const lower = actionPrompt.toLowerCase();
-    for (const hint of ACTION_FRAME_HINTS) {
+    for (const hint of ACTION_STATE_HINTS) {
       if (hint.pattern.test(lower)) {
+        const count = hintFrameCount(hint.frames);
         // 동작 텍스트(외부 입력) 변화에 맞춘 프레임·루프 자동 추천 동기화.
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setFrames(hint.frames);
+        if (count !== null) setFrames(count);
         setSeamlessLoop(hint.loop);
         break;
       }

@@ -194,6 +194,24 @@ export function classifyState(state: string): StateClass {
   return "unknown";
 }
 
+/**
+ * 주기적 이동인가 — `prepare.py:state_motion_phases()` 의 멤버십 판정 이식.
+ *
+ * 정본 체크리스트 3번이 여기에 걸린다: 로코모션 행에는 단일 피크 포즈 상태 앵커를
+ * **넣지 않는다**. 한 접지 포즈가 모든 프레임의 다리 위상을 그 하나로 고정하기
+ * 때문이다. 로코모션에는 양쪽 접지가 다 보이는 모션 위상 참조(접촉 시트·선택 사이클·
+ * 레이아웃 페이즈 가이드)가 필요하다.
+ *
+ * 인자는 **방향 접두사를 뗀 상태명**이다(`down_run` 이 아니라 `run`).
+ */
+const LOCOMOTION_STATES = new Set(["running-right", "running-left", "run", "walk"]);
+const LOCOMOTION_PREFIXES = ["running-front-", "running-back-", "walking-front-", "walking-back-"];
+
+export function isLocomotionState(state: string): boolean {
+  if (LOCOMOTION_STATES.has(state)) return true;
+  return LOCOMOTION_PREFIXES.some(p => state.startsWith(p));
+}
+
 export type FrameBand =
   | "default"
   | "return-to-idle"

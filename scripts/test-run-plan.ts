@@ -90,7 +90,7 @@ void (async () => {
     console.log("=== 생성 순서 ===");
     check("두 번 생성한다 (앵커 1 + 행 1)", calls.length === 2, `${calls.length}`);
     check("앵커가 먼저", calls[0].state === "down_idle" && calls[0].role === "direction-anchor");
-    check("행이 나중", calls[1].state === "down_action" && calls[1].role === "action-row");
+    check("행이 나중", calls[1].state === "down_walk" && calls[1].role === "action-row");
 
     console.log("=== ref 계약 ===");
     check("앵커 행에 base 가 붙는다", calls[0].inputPaths.includes(basePath));
@@ -111,9 +111,9 @@ void (async () => {
 
     console.log("=== 결과 ===");
     check("행 두 개가 기록된다", Object.keys(result.rows).length === 2);
-    check("프레임 수가 기록된다", result.rows.down_action.frameCount === 4);
-    check("components 로 추출된다", result.rows.down_action.method === "components");
-    check("프레임 파일이 4개", result.rows.down_action.framePaths.length === 4);
+    check("프레임 수가 기록된다", result.rows.down_walk.frameCount === 4);
+    check("components 로 추출된다", result.rows.down_walk.method === "components");
+    check("프레임 파일이 4개", result.rows.down_walk.framePaths.length === 4);
     check("앵커가 기록된다", result.anchors.down !== undefined);
     check("앵커 source 는 default", result.anchors.down.source === "default");
     check("앵커 index 는 0 (큐레이션 없음)", result.anchors.down.index === 0);
@@ -221,9 +221,9 @@ void (async () => {
         lockedBasePath: basePath,
         log: () => {},
       });
-      check("단일 행만 생성", fcalls.length === 1 && fcalls[0] === "action", fcalls.join(","));
+      check("단일 행만 생성", fcalls.length === 1 && fcalls[0] === "walk", fcalls.join(","));
       check("앵커 없음", Object.keys(r.anchors).length === 0);
-      check("행이 기록된다", r.rows.action !== undefined);
+      check("행이 기록된다", r.rows.walk !== undefined);
       check("REF 모드임이 경고로 남는다", r.warnings.some(w => w.includes("REF")));
     }
 

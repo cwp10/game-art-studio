@@ -195,6 +195,12 @@ export function buildRowPrompt(request: SpriteRequest, state: string, entry: Sta
   const runtimeSize = `${cell.width}x${cell.height}`;
 
   // 합성 순서는 원본과 같다 (prepare.py:859-863): 접두사 → 접미사 → STATE_REQUIREMENTS.
+  //
+  // 뒤 둘은 전체 상태명으로 조회한다 — **원본 그대로다.** 그 결과 방향 계약 런
+  // (`down_walk`)에서는 둘 다 빈손으로 돌아온다. 원본도 그렇다(실측 확인:
+  // `STATE_REQUIREMENTS.get("down_walk")` → 없음, `directional_requirements` → []).
+  // 방향 계약 스캐폴딩(2026-07-14)이 STATE_REQUIREMENTS 보다 나중에 붙어 둘이 만나지
+  // 않는 것이며, 우리 쪽에서 고치지 않는다.
   const stateRequirements = [
     ...directionPrefixRequirements(request, state),
     ...directionalRequirements(state),

@@ -7,8 +7,10 @@ import {
   normalizeStates,
   classifyState,
   frameCountAdvice,
+  isLocomotionState,
   DEFAULT_SAFE_MARGIN_RATIO,
 } from "../src/lib/sprite/request";
+import { inferActionHint } from "../src/lib/sprite/state-name";
 
 let passed = 0;
 let failed = 0;
@@ -127,6 +129,41 @@ check("9 는 not-default", frameCountAdvice(9).band === "not-default");
 check("12 는 not-default", frameCountAdvice(12).band === "not-default");
 check("7 은 unspecified (정본이 다루지 않는다)", frameCountAdvice(7).band === "unspecified");
 check("not-default 는 실패 모드를 근거로 남긴다", frameCountAdvice(12).note.includes("duplicate"));
+
+console.log("=== isLocomotionState (prepare.py:state_motion_phases 멤버십) ===");
+check("run", isLocomotionState("run"));
+check("walk", isLocomotionState("walk"));
+check("running-right", isLocomotionState("running-right"));
+check("running-left", isLocomotionState("running-left"));
+check("running-front-right", isLocomotionState("running-front-right"));
+check("walking-back-left", isLocomotionState("walking-back-left"));
+check("idle 은 아니다", !isLocomotionState("idle"));
+check("attack 은 아니다", !isLocomotionState("attack"));
+// 정본 멤버십에 없다 — frontwalk 은 classifyState 에서 experimental 이지만
+// state_motion_phases 의 집합에는 들어 있지 않다. 없는 근거를 지어내지 않는다.
+check("frontwalk 은 정본 멤버십에 없다", !isLocomotionState("frontwalk"));
+check("방향 접두사가 붙은 채로는 안 잡힌다 — bareState 를 먼저 써야 한다", !isLocomotionState("down_run"));
+
+console.log("=== inferActionHint — 동작 텍스트 → 정본 상태명 ===");
+check("걷기 → walk", inferActionHint("걷기 애니메이션")?.state === "walk");
+check("달리기 → run", inferActionHint("달리기 사이클")?.state === "run");
+check("running → run", inferActionHint("a running cycle")?.state === "run");
+check("대기 → idle", inferActionHint("대기 호흡")?.state === "idle");
+check("공격 → attack", inferActionHint("칼로 공격")?.state === "attack");
+check("점프 → jump", inferActionHint("점프 동작")?.state === "jump");
+check("인사 → wave", inferActionHint("손 흔들며 인사")?.state === "wave");
+check("피격 → hurt", inferActionHint("피격 경직")?.state === "hurt");
+check("시전 → magic_cast", inferActionHint("마법 시전")?.state === "magic_cast");
+check("정본에 없는 사망은 상태명 없음", inferActionHint("사망 연출")?.state === null);
+check("매칭 없으면 null", inferActionHint("지팡이를 빙글빙글 돌린다") === null);
+
+console.log("=== 힌트의 프레임·루프가 정본 대역 안이다 ===");
+check("idle 은 4프레임 루프", inferActionHint("idle")?.frames === 4 && inferActionHint("idle")?.loop === true);
+check("attack 은 4프레임 비루프", inferActionHint("attack")?.frames === 4 && inferActionHint("attack")?.loop === false);
+check("jump 는 4프레임 비루프", inferActionHint("jump")?.frames === 4);
+check("wave 는 4프레임 비루프", inferActionHint("wave")?.frames === 4 && inferActionHint("wave")?.loop === false);
+check("로코모션만 8프레임(정본 로코모션 행 대역)", inferActionHint("run")?.frames === 8);
+check("magic_cast 는 상한 6 이하", (inferActionHint("magic")?.frames ?? 99) <= 6);
 
 console.log(`\n${passed} passed / ${failed} failed`);
 if (failed > 0) process.exit(1);

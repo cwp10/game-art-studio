@@ -4,6 +4,7 @@
  */
 import {
   DIRECTION_FACING,
+  bareState,
   directionAnchorStates,
   ensureDirectionAnchors,
   normalizeDirections,
@@ -138,6 +139,19 @@ check("UP-RIGHT → back-right", toSpriteGenDirection("UP-RIGHT") === "back-righ
 check("UP-LEFT → back-left", toSpriteGenDirection("UP-LEFT") === "back-left");
 check("REF 는 방향 계약 없음", toSpriteGenDirection("REF") === null);
 check("모르는 값도 null", toSpriteGenDirection("SIDEWAYS") === null);
+
+console.log("=== bareState — 방향 접두사 제거 ===");
+{
+  const dirs = normalizeDirections({ set: ["down", "front-right"] }, {
+    down_run: { frames: 8, fps: 8, loop: true, action: "a" },
+    down_idle: { frames: 4, fps: 4, loop: true, action: "a" },
+    "front-right_walk": { frames: 8, fps: 6, loop: true, action: "a" },
+  })!;
+  check("down_run → run", bareState("down_run", dirs) === "run");
+  check("front-right_walk → walk", bareState("front-right_walk", dirs) === "walk");
+  check("방향 계약 없으면 그대로", bareState("down_run", null) === "down_run");
+  check("set 에 없는 방향은 그대로", bareState("up_run", dirs) === "up_run");
+}
 
 console.log(`\n${passed} passed / ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -106,6 +106,19 @@ export function stateDirection(state: string, directions: DirectionsSpec | null)
 }
 
 /**
+ * 방향 접두사를 뗀 상태명 — `down_run` → `run`.
+ *
+ * 정본은 상태명 자체가 `running-right` 처럼 방향을 품고 있어 이 함수가 없다. 우리는
+ * `<direction>_<state>` 로 분리해 두었으므로(③ normalizeDirections), 정본의 상태 어휘를
+ * 보는 판정(`classifyState`·`isLocomotionState`·`STATE_REQUIREMENTS`)에 넘기기 전에
+ * 접두사를 떼어야 한다.
+ */
+export function bareState(state: string, directions: DirectionsSpec | null): string {
+  const direction = stateDirection(state, directions);
+  return direction === null ? state : state.slice(direction.length + 1);
+}
+
+/**
  * UI 방향 어휘 → sprite-gen 토큰. **이식이 아니라 신규 코드다** — 우리 패널의
  * DOWN/UP/LEFT/RIGHT/대각선 8종을 정본 어휘로 옮긴다. 내부를 정본 어휘로 통일해야
  * 이식한 두 요구사항 함수(접두사 계약·45도 접미사 규약)가 문구 수정 없이 돈다.

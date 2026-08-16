@@ -28,7 +28,8 @@ void (async () => {
     uiDirection: "DOWN",
     frames: 4,
     loop: true,
-    actionPrompt: "subtle breathing idle",
+    // 정본 어휘로 매핑되지 않는 동작 — 상태명이 기본값 `action` 으로 떨어진다.
+    actionPrompt: "spin the staff overhead",
   };
 
   console.log("=== 방향 계약이 붙는다 ===");
@@ -45,9 +46,41 @@ void (async () => {
     check("앵커 상태가 앞에 온다", Object.keys(request.states)[0] === "down_idle");
     check("요청 프레임 수가 반영된다", request.states.down_action.frames === 4);
     check("요청 loop 이 반영된다", request.states.down_action.loop === true);
-    check("action 은 패널 문구", request.states.down_action.action === "subtle breathing idle");
+    check("action 은 패널 문구", request.states.down_action.action === "spin the staff overhead");
     check("미지 상태의 fps 는 6", request.states.down_action.fps === 6);
     check("합성 앵커의 fps 는 4", request.states.down_idle.fps === 4);
+  }
+
+  console.log("=== 동작 텍스트에서 정본 상태명을 뽑는다 ===");
+  {
+    const { request } = await buildSpriteRequest({ ...base, actionPrompt: "칼로 공격" });
+    check("공격 → attack", "down_attack" in request.states, Object.keys(request.states).join(","));
+    // fps 는 그래도 6 이다 — normalize_states 가 DEFAULT_STATES 를 **전체 상태명**으로
+    // 조회하므로 `down_attack` 은 원본에서도 빗나간다. 방향 계약 런에서 상태별 fps 가
+    // 붙지 않는 것은 원본 동작이고, 우리 쪽에서 고치지 않는다.
+    check("방향 계약 런의 fps 는 원본대로 6", request.states.down_attack.fps === 6);
+  }
+  {
+    const { request, warnings } = await buildSpriteRequest({ ...base, actionPrompt: "달리기 사이클" });
+    check("달리기 → run", "down_run" in request.states, Object.keys(request.states).join(","));
+    check(
+      "experimental 등급이 경고로 보고된다",
+      warnings.some(w => w.includes("experimental")),
+      warnings.join(" | "),
+    );
+    check(
+      "로코모션 모션 위상 참조 부재가 경고로 남는다",
+      warnings.some(w => w.includes("주기적 이동")),
+      warnings.join(" | "),
+    );
+  }
+  {
+    // idle 요청은 방향 앵커 행과 **같은 상태**가 된다. 정본 체인 그림에서 `<dir>_idle` 행은
+    // 앵커의 원천이자 "게임의 idle 로도 그대로 쓴다" 이므로 행을 따로 만들지 않는다.
+    const { request } = await buildSpriteRequest({ ...base, actionPrompt: "대기 호흡" });
+    check("대기 → idle", "down_idle" in request.states);
+    check("앵커 행과 합쳐져 상태가 하나", Object.keys(request.states).length === 1);
+    check("사용자 값이 합성 앵커를 이긴다", request.states.down_idle.action === "대기 호흡");
   }
 
   console.log("=== 45도 방향 ===");
