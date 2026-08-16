@@ -243,6 +243,52 @@ void (async () => {
     aaOff.checks.find(c => c.id === "pixelArt")?.ok === true,
   );
 
+  // ── base 잠금 저장·조회 ─────────────────────────────────────────
+  const { createGeneration, getLockedBase, lockBaseGeneration } = await import(
+    "../src/lib/db/repo/generations"
+  );
+  const { newGenerationId } = await import("../src/lib/util/ids");
+
+  const genId = newGenerationId();
+  createGeneration({
+    id: genId,
+    session_id: null,
+    message_id: null,
+    kind: "text2img",
+    prompt: "base idle candidate",
+    image_path: "data/images/dummy.png",
+    params: { source: "test" },
+  });
+
+  check("잠금 전에는 조회 결과 없음", getLockedBase(null) === null);
+
+  lockBaseGeneration(genId, null);
+  const locked = getLockedBase(null);
+  check("잠금 후 조회됨", locked?.id === genId, locked?.id ?? "null");
+  check(
+    "기존 params 를 보존",
+    (locked?.params as Record<string, unknown> | undefined)?.source === "test",
+    JSON.stringify(locked?.params),
+  );
+
+  // 두 번째 base 를 잠그면 그것이 현재 base 가 된다
+  const genId2 = newGenerationId();
+  createGeneration({
+    id: genId2,
+    session_id: null,
+    message_id: null,
+    kind: "text2img",
+    prompt: "second base",
+    image_path: "data/images/dummy2.png",
+  });
+  lockBaseGeneration(genId2, null);
+  check("가장 최근 잠금이 현재 base", getLockedBase(null)?.id === genId2);
+
+  // 정리 — 테스트가 남긴 행을 지운다
+  const { deleteGeneration } = await import("../src/lib/db/repo/generations");
+  deleteGeneration(genId);
+  deleteGeneration(genId2);
+
   rmSync(tmp, { recursive: true, force: true });
 
   console.log(`\n${pass} passed, ${fail} failed`);

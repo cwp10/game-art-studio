@@ -195,3 +195,70 @@ export function linkGeneration(
     .prepare(`UPDATE generations SET ${fields.join(", ")} WHERE id = ?`)
     .run(...values);
 }
+
+/**
+ * generation 을 base idle 로 잠근다.
+ *
+ * 새 DB kind 를 만들지 않고 params 에 역할 표식을 남긴다. base 는 text2img 로
+ * 생성된 평범한 generation 이고 "base 로 잠겼다"는 kind 를 대체하는 성질이 아니라
+ * 부가 역할이기 때문이다. 새 kind 는 migrate.ts + schema.sql + types/db.ts
+ * 3중 동기화 비용이 든다(CLAUDE.md).
+ *
+ * 폐기된 kindHint 우회와는 다르다 — 그건 CHECK enum 에 없는 kind 를 params 로
+ * 대체하던 것이고(migrate.ts v1 이 정식 enum 으로 정리), 여기서는 kind 가 이미 정확하다.
+ */
+export function lockBaseGeneration(generationId: string, sessionId: string | null): void {
+  const db = getDb();
+  const row = db.prepare("SELECT params FROM generations WHERE id = ?").get(generationId) as
+    | { params: string | null }
+    | undefined;
+  if (!row) throw new Error(`lockBaseGeneration: generation ${generationId} 이(가) 없습니다`);
+
+  // base 는 스코프당 딱 1장이다(정본 체인: "base — 딱 1장. identity 의 최초 truth").
+  // 새로 잠그면 같은 스코프의 기존 표식을 걷어낸다. 타임스탬프 정렬로 최신을 고르지
+  // 않는 이유는 Date.now() 가 밀리초라 연속 잠금이 동률이 되고, 그러면 어느 쪽이
+  // 현재 base 인지 불확정해지기 때문이다.
+  const prior = db
+    .prepare(
+      `SELECT id, params FROM generations
+        WHERE json_extract(params, '$.spriteRole') = 'base'
+          AND COALESCE(json_extract(params, '$.baseLockedSession'), '') = COALESCE(?, '')`,
+    )
+    .all(sessionId) as Array<{ id: string; params: string | null }>;
+  const clearStmt = db.prepare("UPDATE generations SET params = ? WHERE id = ?");
+  for (const p of prior) {
+    if (p.id === generationId) continue;
+    const pp = p.params ? (JSON.parse(p.params) as Record<string, unknown>) : {};
+    delete pp.spriteRole;
+    delete pp.baseLockedAt;
+    delete pp.baseLockedSession;
+    clearStmt.run(JSON.stringify(pp), p.id);
+  }
+
+  const params = row.params ? (JSON.parse(row.params) as Record<string, unknown>) : {};
+  params.spriteRole = "base";
+  params.baseLockedAt = Date.now();
+  if (sessionId !== null) params.baseLockedSession = sessionId;
+
+  db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
+    JSON.stringify(params),
+    generationId,
+  );
+}
+
+/**
+ * 현재 잠긴 base 를 돌려준다. 스코프당 1장이므로 정렬이 필요 없다.
+ * sessionId 가 null 이면 세션에 묶이지 않은 잠금을 본다(전부가 아니다).
+ */
+export function getLockedBase(sessionId: string | null): Generation | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT * FROM generations
+        WHERE json_extract(params, '$.spriteRole') = 'base'
+          AND COALESCE(json_extract(params, '$.baseLockedSession'), '') = COALESCE(?, '')
+        LIMIT 1`,
+    )
+    .get(sessionId) as GenerationRow | undefined;
+  return row ? rowToGeneration(row) : null;
+}
