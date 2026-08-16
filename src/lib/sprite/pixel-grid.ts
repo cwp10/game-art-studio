@@ -244,8 +244,10 @@ export function detectPixelGrid(
     return [bestPitch, bestPhase];
   };
 
-  let [pitchX, phaseX] = refine(colEdges);
-  let [pitchY, phaseY] = refine(rowEdges);
+  const [colPitch, phaseX] = refine(colEdges);
+  const [rowPitch, phaseY] = refine(rowEdges);
+  let pitchX = colPitch;
+  let pitchY = rowPitch;
 
   // 축별 피치는 서로 크게 다를 수 없다 — 비균등 리스케일이어도 실측 차이는 2% 수준이다.
   // 한 축이 다른 축의 1.5배를 넘게 벗어나면 그 축의 검출이 무너진 것이다(엣지가 적은

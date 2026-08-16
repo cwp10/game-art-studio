@@ -42,6 +42,9 @@ files below carry the port, each naming its upstream source in its header:
     src/lib/sprite/frame-qa.ts       <- sprite_gen/extract.py (inspect_frames)
     src/lib/sprite/segment.ts        <- sprite_gen/segment.py
     src/lib/sprite/interpolate.ts    <- sprite_gen/interpolate.py
+    src/lib/sprite/pixel-grid.ts     <- sprite_gen/extract.py (pixel unfake
+                                        grid detection)
+    src/lib/sprite/selected-cycle.ts <- sprite_gen/compose_cycle.py
     src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
     src/lib/sprite/preview.ts        <- sprite_gen/preview.py
     src/lib/sprite/gif.ts            <- sprite_gen/gif_utils.py
