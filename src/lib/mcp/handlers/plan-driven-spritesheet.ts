@@ -170,6 +170,9 @@ export async function runPlanDrivenSpritesheet(
         frameCount: request.states[state].frames,
         cell: request.cell,
         chromaKey: request.chromaKey.rgb,
+        // 이전 런이 구운 앵커 행을 다시 뽑는 자리다 — 그 행 이미지에 맞는 경로를
+        // 그때와 같이 재판정한다(판정은 이미지의 순수 함수).
+        chromaMode: "auto",
         chroma: {
           keyThreshold: request.chroma.keyThreshold,
           unmixReach: request.chroma.unmixReach,
@@ -183,6 +186,17 @@ export async function runPlanDrivenSpritesheet(
         const fp = path.join(dir, `frame-${i}.png`);
         await writeRaw(extracted.frames[i], fp);
         framePaths.push(fp);
+      }
+      // 재사용 행도 경로가 갈릴 수 있다 — 새로 굽는 행(run-plan)에서만 알리면
+      // 재사용 경로는 조용해진다.
+      if (extracted.chroma?.mode === "ycbcr") {
+        const w = `앵커 행 '${state}': ycbcr 크로마 경로 — ${extracted.chroma.reason}`;
+        gateWarnings.push(w);
+        log(`plan-driven 경고: ${w}`);
+      }
+      for (const w of extracted.chromaWarnings ?? []) {
+        gateWarnings.push(`앵커 행 '${state}': ${w}`);
+        log(`plan-driven 경고: 앵커 행 '${state}': ${w}`);
       }
       existingRows[state] = {
         generationId: rowId,

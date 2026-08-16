@@ -29,6 +29,13 @@ files below carry the port, each naming its upstream source in its header:
     src/lib/sprite/anchor-image.ts   <- sprite_gen/anchor.py (anchor_image)
     src/lib/sprite/chroma-clean.ts   <- sprite_gen/extract.py
                                         (remove_chroma_background)
+    src/lib/sprite/chroma-ycbcr.ts   <- sprite_gen/extract.py
+                                        (remove_chroma_background_ycbcr and its
+                                         helpers: rgb_to_ycc, smoothstep,
+                                         detect_background_key_ycc, _matte_ycc,
+                                         _flood_clear_background_ycc,
+                                         key_residue_fraction_ycc,
+                                         _cleanup_alpha_ycc)
     src/lib/sprite/extract.ts        <- sprite_gen/extract.py
                                         (connected components, fit_to_cell,
                                          extract_slot_frames)
@@ -55,6 +62,14 @@ internal/sprite/extract.go), Copyright Andrew Kim (gykim80), MIT License.
 This port uses it only in sprite-gen's own default `foot-centroid` mode; the
 `align_x: "alpha-centroid"` mode itself is not ported.
 
+The opt-in `chroma.mode: "ycbcr"` background matting (sprite_gen/extract.py,
+ported here as `src/lib/sprite/chroma-ycbcr.ts`) is a port of the
+chrominance-plane matting — CbCr border-mode key detection, Hermite soft matte,
+key-direction despill, border flood fill and the pure-key rematte
+self-diagnostic — from perfectpixel-studio
+(https://github.com/gykim80/perfectpixel-studio, internal/sprite/chroma.go),
+Copyright Andrew Kim (gykim80), MIT License.
+
 `sprite_gen/gen/codex_provider.py`, from which
 `src/lib/image-backend/codex-rollout.ts` derives its rollout parsing and output
 recovery, is itself a port of the standalone `image-gen` skill
@@ -64,6 +79,6 @@ recovery, is itself a port of the standalone `image-gen` skill
 
 These perfectpixel-studio derived parts of sprite-gen are NOT ported here, so
 their notices do not apply to this repository: `segmentation: "projection"`
-(sprite_gen/segment.py), `chroma.mode: "ycbcr"` background matting, and the
-`estimate_pixel_grid_runlen` pitch estimator. If any of them is ported later,
-the corresponding notice from sprite-gen's NOTICE must be added above.
+(sprite_gen/segment.py) and the `estimate_pixel_grid_runlen` pitch estimator.
+If either is ported later, the corresponding notice from sprite-gen's NOTICE
+must be added above.

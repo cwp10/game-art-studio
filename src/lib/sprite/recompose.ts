@@ -71,6 +71,12 @@ export async function recomposeCuratedAtlas(atlasGenerationId: string): Promise<
       frameCount: request.states[state]?.frames ?? 0,
       cell: request.cell,
       chromaKey: request.chromaKey.rgb,
+      // 재합성은 원래 굽던 것과 **같은 알파**를 내야 한다. 저장된
+      // `request.chroma.mode` 를 믿지 않고 다시 판정하는 이유: 그 필드는 런에 한
+      // 벌뿐이라 행마다 경로가 갈렸으면 마지막 값만 남는다. 판정은 이미지의 순수
+      // 함수라(`decideChromaMode`) 같은 행에는 같은 답이 나온다 — 재판정이 저장값
+      // 보다 정확하다.
+      chromaMode: "auto",
       chroma: {
         keyThreshold: request.chroma.keyThreshold,
         unmixReach: request.chroma.unmixReach,

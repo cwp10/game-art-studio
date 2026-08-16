@@ -54,7 +54,16 @@ export type ChromaKeySpec = {
 };
 
 export type ChromaTunables = {
-  mode: "rgb";
+  /**
+   * 알파 생성 경로. **정본이 허용하는 두 값만** 쓴다 — 정본은 셋째 값을 만나면
+   * `SystemExit("chroma.mode must be 'rgb' or 'ycbcr'")` 로 멈추므로, 여기에
+   * 우리만 아는 값을 넣으면 우리 run 기록을 정본 도구로 읽을 수 없다.
+   *
+   * 어느 쪽을 쓸지는 추출기가 배경을 재서 정하고(`chroma-mode.ts`), **결정된
+   * 값이 여기 되쓰인다**. 정본도 유효값을 request 에 되쓰는 구조라
+   * (`extract.py:2582` `effective_chroma`) 되쓰기 자체는 같은 패턴이다.
+   */
+  mode: "rgb" | "ycbcr";
   keyThreshold: number;
   unmixReach: number;
   spillMaxFraction: number;

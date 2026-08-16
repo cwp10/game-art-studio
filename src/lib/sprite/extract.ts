@@ -24,6 +24,8 @@
  */
 import sharp from "sharp";
 import { removeChromaBackground, type ChromaCleanOptions, type RGB } from "@/lib/sprite/chroma-clean";
+import { decideChromaMode, type ChromaMode, type ChromaModeDecision } from "@/lib/sprite/chroma-mode";
+import { removeChromaBackgroundYcbcr } from "@/lib/sprite/chroma-ycbcr";
 import type { CellSpec } from "@/lib/sprite/request";
 
 export type RawImage = { data: Buffer; width: number; height: number };
@@ -304,6 +306,10 @@ export type ExtractResult = {
   frames: RawImage[];
   method: "components" | "slots-explicit";
   dropped: number;
+  /** 어느 크로마 경로를 탔는지와 그 근거. `chromaMode: "auto"` 일 때만 채워진다. */
+  chroma?: ChromaModeDecision;
+  /** ycbcr 자가 진단이 선언 키로 재매팅했을 때의 사유. 조용한 폴백은 없다. */
+  chromaWarnings?: string[];
 };
 
 /**
@@ -318,6 +324,12 @@ export async function extractRowFrames(opts: {
   cell: CellSpec;
   chromaKey: RGB;
   chroma?: ChromaCleanOptions;
+  /**
+   * 알파 생성 경로. 정본과 같이 기본은 `"rgb"` 다 — ycbcr 은 깨끗한 평면 키에서
+   * 소프트 엣지에 옅은 헤일로를 남기므로 일반적인 업그레이드가 아니다.
+   * `"auto"` 는 배경을 재서 rgb 하드컷이 통하지 않을 때만 ycbcr 로 간다.
+   */
+  chromaMode?: ChromaMode | "auto";
   allowSlotFallback?: boolean;
 }): Promise<ExtractResult> {
   const { data, info } = await sharp(opts.sheetPath)
@@ -328,14 +340,29 @@ export async function extractRowFrames(opts: {
     throw new ExtractionFailed(`extractRowFrames: RGBA 가 아니다 (channels=${info.channels})`);
   }
 
-  removeChromaBackground(data, info.width, info.height, opts.chromaKey, opts.chroma);
+  const requested = opts.chromaMode ?? "rgb";
+  const decision =
+    requested === "auto"
+      ? decideChromaMode(data, info.width, info.height, opts.chromaKey, opts.chroma?.keyThreshold)
+      : null;
+  const mode: ChromaMode = decision ? decision.mode : (requested as ChromaMode);
+  const chromaWarnings: string[] = [];
+  if (mode === "ycbcr") {
+    removeChromaBackgroundYcbcr(data, info.width, info.height, opts.chromaKey, chromaWarnings);
+  } else {
+    removeChromaBackground(data, info.width, info.height, opts.chromaKey, opts.chroma);
+  }
   const strip: RawImage = { data, width: info.width, height: info.height };
+  const extra = {
+    ...(decision ? { chroma: decision } : {}),
+    ...(chromaWarnings.length > 0 ? { chromaWarnings } : {}),
+  };
 
   const grouped = extractComponentImages(strip, opts.frameCount);
   if (grouped) {
     const frames: RawImage[] = [];
     for (const image of grouped.images) frames.push(await fitToCell(image, opts.cell));
-    return { frames, method: "components", dropped: grouped.dropped };
+    return { frames, method: "components", dropped: grouped.dropped, ...extra };
   }
 
   if (!opts.allowSlotFallback) {
@@ -347,6 +374,7 @@ export async function extractRowFrames(opts: {
     frames: await extractSlotFrames(strip, opts.frameCount, opts.cell),
     method: "slots-explicit",
     dropped: 0,
+    ...extra,
   };
 }
 

@@ -212,7 +212,11 @@ void (async () => {
   console.log("=== 튜너블 기본값 ===");
   {
     const { request } = await buildSpriteRequest(base);
-    check("chroma.mode 는 rgb (ycbcr 은 옵트인)", request.chroma.mode === "rgb");
+    // 정본과 같은 값·같은 기본값이어야 한다. 정본은 rgb|ycbcr 외의 값을 만나면
+    // SystemExit 로 멈추므로, 우리 판정 결과("auto")를 여기에 넣으면 우리 run
+    // 기록을 정본 도구로 읽을 수 없다. 실제 경로는 추출기가 배경을 재서 정하고
+    // 결정된 값이 이 필드에 되쓰인다 (chroma-mode.ts / test-chroma-ycbcr.ts).
+    check("chroma.mode 는 rgb (ycbcr 은 옵트인 — 정본과 같은 값 집합)", request.chroma.mode === "rgb");
     check("keyThreshold 96", request.chroma.keyThreshold === 96);
   }
 

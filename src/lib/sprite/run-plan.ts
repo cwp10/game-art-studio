@@ -74,6 +74,8 @@ export type RunPlanResult = {
   anchors: Record<string, { path: string; state: string; index: number; source: string }>;
   skippedMirrors: MirroredDirection[];
   warnings: string[];
+  /** 상태별로 실제 탄 크로마 경로. `request.chroma.mode` 는 한 벌뿐이라 여기가 정확하다. */
+  chromaModes: Record<string, "rgb" | "ycbcr">;
 };
 
 /**
@@ -119,6 +121,9 @@ async function recordRow(
     frameCount,
     cell: request.cell,
     chromaKey: request.chromaKey.rgb,
+    // 새로 굽는 행은 배경을 재서 경로를 정하고(auto), 정해진 값을 아래에서
+    // request 에 되쓴다 — 기록에는 정본이 아는 rgb|ycbcr 만 남는다.
+    chromaMode: "auto",
     chroma: {
       keyThreshold: request.chroma.keyThreshold,
       unmixReach: request.chroma.unmixReach,
@@ -138,6 +143,30 @@ async function recordRow(
       `'${state}': 시드 근접 밖의 파편 ${extracted.dropped} 개를 버렸다`,
     );
   }
+  // 결정된 경로를 request 에 되쓴다 (정본 `effective_chroma` 와 같은 패턴).
+  // request.chroma 는 런 하나에 한 벌뿐인데 판정은 **행마다** 하므로, 행끼리
+  // 갈리면 되쓰기가 한 값으로 뭉갠다. 재현은 재판정이 맡으니(같은 이미지 →
+  // 같은 판정) 실제 피해는 없지만, 기록이 실제와 달라진 사실은 남겨야 한다.
+  if (extracted.chroma) {
+    if (result.chromaModes[state] === undefined) {
+      const prior = Object.entries(result.chromaModes);
+      if (prior.length > 0 && prior.some(([, m]) => m !== extracted.chroma!.mode)) {
+        result.warnings.push(
+          `크로마 경로가 행마다 갈립니다 (${prior.map(([s, m]) => `${s}=${m}`).join(", ")}, ` +
+            `${state}=${extracted.chroma.mode}) — request.chroma.mode 는 마지막 값만 담습니다`,
+        );
+      }
+    }
+    result.chromaModes[state] = extracted.chroma.mode;
+    request.chroma.mode = extracted.chroma.mode;
+    // 경로가 갈린 사실은 조용하면 안 된다 — 나중에 결과가 달라진 이유를 못 찾는다.
+    if (extracted.chroma.mode === "ycbcr") {
+      result.warnings.push(`'${state}': ycbcr 크로마 경로 — ${extracted.chroma.reason}`);
+    }
+  }
+  for (const w of extracted.chromaWarnings ?? []) {
+    result.warnings.push(`'${state}': ${w}`);
+  }
   result.rows[state] = {
     generationId: gen.generationId,
     imagePath: gen.imagePath,
@@ -151,7 +180,13 @@ export async function runSpritePlan(
   request: SpriteRequest,
   deps: RunPlanDeps,
 ): Promise<RunPlanResult> {
-  const result: RunPlanResult = { rows: {}, anchors: {}, skippedMirrors: [], warnings: [] };
+  const result: RunPlanResult = {
+    rows: {},
+    anchors: {},
+    skippedMirrors: [],
+    warnings: [],
+    chromaModes: {},
+  };
   const plan = buildGenerationPlan(request);
 
   // 방향 계약이 없으면(REF 런) 단일 행 경로 — base 를 그대로 identity 로 쓴다.
