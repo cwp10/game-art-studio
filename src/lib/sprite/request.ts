@@ -67,6 +67,17 @@ export const DEFAULT_CHROMA_TUNABLES: ChromaTunables = {
   spillMaxFraction: 0.005,
 };
 
+/**
+ * 방향 계약. `set` 의 각 방향마다 `<dir>_<anchorSuffix>` 앵커 상태가 존재해야 하고,
+ * `mirror` 에 오른 방향은 생성을 생략하고 런타임 미러로 커버한다.
+ * 정규화는 `directions.ts` 가 소유한다 — 여기 있는 것은 타입뿐이다(순환 방지).
+ */
+export type DirectionsSpec = {
+  set: string[];
+  mirror: Record<string, string>;
+  anchorSuffix: string;
+};
+
 export type SpriteRequest = {
   version: 1;
   character: { id: string; description: string; anchorGenerationId: string };
@@ -74,6 +85,8 @@ export type SpriteRequest = {
   chromaKey: ChromaKeySpec;
   chroma: ChromaTunables;
   states: Record<string, StateSpec>;
+  /** 없으면(undefined) 기존 flat 런 — 방향 계약을 걸지 않는다. */
+  directions?: DirectionsSpec;
 };
 
 export const DEFAULT_STATES: Record<string, StateSpec> = {
