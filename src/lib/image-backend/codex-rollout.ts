@@ -12,6 +12,11 @@
  * sprite-gen 과 다른 점: status 를 실패 판정에 쓰지 않는다. 로컬 실측
  * (2026-08-16)에서 status 가 "generating" 으로만 관측돼, sprite-gen 의
  * `status != "completed" → 에러` 를 그대로 쓰면 항상 실패한다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";

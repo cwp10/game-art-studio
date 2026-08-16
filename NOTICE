@@ -1,0 +1,69 @@
+game-art-studio
+
+This product includes software ported from sprite-gen
+(https://github.com/cwp10/sprite-gen), Copyright 2026 Alex Kim, licensed under
+the Apache License, Version 2.0. A copy of that license is included at
+`licenses/sprite-gen-Apache-2.0.txt`.
+
+The sprite extraction and row-generation pipeline under `src/lib/sprite/` is a
+TypeScript port of sprite-gen's Python implementation. No Python runtime is
+bundled; the algorithms, constants, and pipeline structure were ported. The
+files below carry the port, each naming its upstream source in its header:
+
+    src/lib/sprite/request.ts        <- sprite_gen/prepare.py
+                                        (normalize_cell, normalize_states,
+                                         DEFAULT_STATES, state grading,
+                                         state_motion_phases membership)
+    src/lib/sprite/chroma-key.ts     <- sprite_gen/prepare.py
+                                        (subject sampling, candidate scoring)
+    src/lib/sprite/layout-guide.ts   <- sprite_gen/prepare.py (draw_guide)
+    src/lib/sprite/row-prompt.ts     <- sprite_gen/prepare.py (row_prompt,
+                                        STYLE_DEFAULT, STATE_REQUIREMENTS,
+                                        TRANSPARENCY_ARTIFACT_RULES, anchor lock)
+    src/lib/sprite/directions.ts     <- sprite_gen/prepare.py (directions block)
+    src/lib/sprite/generation-plan.ts<- sprite_gen/prepare.py
+                                        (build_generation_plan)
+    src/lib/sprite/base-gate.ts      <- sprite_gen/prepare.py
+                                        (detect_reference_background)
+    src/lib/sprite/anchor.ts         <- sprite_gen/anchor.py
+    src/lib/sprite/anchor-image.ts   <- sprite_gen/anchor.py (anchor_image)
+    src/lib/sprite/chroma-clean.ts   <- sprite_gen/extract.py
+                                        (remove_chroma_background)
+    src/lib/sprite/extract.ts        <- sprite_gen/extract.py
+                                        (connected components, fit_to_cell,
+                                         extract_slot_frames)
+    src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
+    src/lib/sprite/preview.ts        <- sprite_gen/preview.py
+    src/lib/sprite/gif.ts            <- sprite_gen/gif_utils.py
+    src/lib/image-backend/codex-rollout.ts
+                                     <- sprite_gen/gen/codex_provider.py
+
+The following notices are inherited from sprite-gen's own NOTICE, for the parts
+of it that this port carries.
+
+--- inherited from sprite-gen ---
+
+sprite-gen is inspired by the Apache-2.0 licensed hatch-pet component-row
+workflow. It targets generic game sprite atlases and does not include Codex pet
+assets, pet packages, or hatch-pet visual assets.
+
+The alpha-weighted mass-centroid frame alignment (`_alpha_centroid_x` in
+sprite_gen/extract.py, ported here as `alphaCentroidX` in
+`src/lib/sprite/extract.ts`) is a port of the alignment from
+perfectpixel-studio (https://github.com/gykim80/perfectpixel-studio,
+internal/sprite/extract.go), Copyright Andrew Kim (gykim80), MIT License.
+This port uses it only in sprite-gen's own default `foot-centroid` mode; the
+`align_x: "alpha-centroid"` mode itself is not ported.
+
+`sprite_gen/gen/codex_provider.py`, from which
+`src/lib/image-backend/codex-rollout.ts` derives its rollout parsing and output
+recovery, is itself a port of the standalone `image-gen` skill
+(MIT, aldegad/image-gen).
+
+--- not ported ---
+
+These perfectpixel-studio derived parts of sprite-gen are NOT ported here, so
+their notices do not apply to this repository: `segmentation: "projection"`
+(sprite_gen/segment.py), `chroma.mode: "ycbcr"` background matting, and the
+`estimate_pixel_grid_runlen` pitch estimator. If any of them is ported later,
+the corresponding notice from sprite-gen's NOTICE must be added above.

@@ -330,3 +330,12 @@ CLI spawn 체인 (`/api/chat` → Claude CLI → MCP → Codex CLI) 은 SDK 직�
 3. latency 만 감수하면 됨
 
 `ImageBackend` 인터페이스로 분리되어 있어 SDK 직접 호출 경로로 언제든 교체 가능.
+
+
+## 서드파티 고지
+
+`src/lib/sprite/` 의 스프라이트 추출·행 생성 파이프라인은
+[sprite-gen](https://github.com/cwp10/sprite-gen)(Copyright 2026 Alex Kim,
+Apache-2.0)의 TypeScript 이식입니다. 이식 파일 목록과 승계한 고지(perfectpixel-studio
+MIT, image-gen MIT)는 [`NOTICE`](NOTICE) 에, Apache-2.0 원문은
+[`licenses/sprite-gen-Apache-2.0.txt`](licenses/sprite-gen-Apache-2.0.txt) 에 있습니다.

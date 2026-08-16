@@ -6,6 +6,11 @@
  *
  * 이 모듈은 순수하다 — sharp·fs·DB 를 import 하지 않는다. 크로마 키 자동 선택은
  * 이미지 IO 가 필요하므로 chroma-key.ts 가 맡는다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 /**

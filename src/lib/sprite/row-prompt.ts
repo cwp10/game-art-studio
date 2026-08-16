@@ -5,6 +5,11 @@
  * 체형·비율·아웃라인 굵기를 텍스트로 재기술하지 않는다 (sprite-gen docs/pixel-unfake.md).
  *
  * 여기 문자열은 sprite-gen 의 검증 런에서 굳어진 문구다. 임의로 다듬지 마라.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import { directionAnchorStates, facingOf, stateDirection } from "@/lib/sprite/directions";
 import type { SpriteRequest, StateSpec } from "@/lib/sprite/request";

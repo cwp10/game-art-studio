@@ -6,6 +6,11 @@
  *
  * refs 는 파일 경로가 아니라 태그 객체다(우리에게 run 디렉터리가 없다). `kind` 를
  * 남기는 목적은 ④에서 "액션 행에 base 를 붙였는지"를 기계적으로 검증하기 위해서다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import { directionAnchorStates, stateDirection } from "@/lib/sprite/directions";
 import type { SpriteRequest } from "@/lib/sprite/request";

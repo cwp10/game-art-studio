@@ -10,6 +10,11 @@
  *
  * 사라진 프레임을 가리키는 지정은 fail-loud 다 — 조용히 기본값으로 되돌리면
  * "지정했는데 왜 안 먹지"를 사용자가 영원히 못 본다 (No Silent Fallback).
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import { directionAnchorStates, stateDirection } from "@/lib/sprite/directions";
 import type { SpriteRequest } from "@/lib/sprite/request";

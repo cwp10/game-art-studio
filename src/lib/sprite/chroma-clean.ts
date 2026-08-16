@@ -16,6 +16,11 @@
  *      큰 키 틴트 영역은 의도된 소재이므로 건드리지 않는다.
  *
  * numpy 대신 타입드 배열 + 평면 루프. 값은 원본과 같은 정수 산술 위에서 계산한다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 /** 원본 CLI 기본값 (`extract.py:2197-2210`). */

@@ -16,6 +16,11 @@
  *
  * 이식 범위에서 뺀 것(전부 원본에서도 옵트인): ycbcr 매팅, projection 세그먼테이션,
  * pixel_unfake, kcentroid 리샘플, alpha-centroid 정렬, takes.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
 import { removeChromaBackground, type ChromaCleanOptions, type RGB } from "@/lib/sprite/chroma-clean";

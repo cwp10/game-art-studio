@@ -8,6 +8,11 @@
  * SVG 스트로크는 경로 중심 정렬이라 PIL 의 안쪽 정렬 사각형과 반픽셀씩 어긋나고
  * 래스터라이저 AA 가 경계에 회색을 남긴다. 도형이 축 정렬 사각형과 수직선뿐이라
  * SVG 로 얻을 이득도 없다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
 

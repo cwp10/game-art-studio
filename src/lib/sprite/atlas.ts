@@ -15,6 +15,11 @@
  * 이식 범위에서 뺀 것(전부 원본에서도 옵트인/후속): 호흡 후처리 위상, 큐레이션 변형·픽셀
  * 편집, 프레임 복제(clones)와 그에 따른 **아틀라스 칸 재사용**, pixel/plain 변이 선택,
  * recolor. 재사용이 없으므로 지금은 인스턴스마다 칸을 하나씩 쓴다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
 import type { RawImage } from "@/lib/sprite/extract";

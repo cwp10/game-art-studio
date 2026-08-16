@@ -9,6 +9,11 @@
  * 쓰지 못한다). 그래서 양자화·LZW·GIF89a 조립을 직접 한다. 알고리즘은 Pillow 경로를
  * 따른다 — `convert("P", palette=ADAPTIVE, colors=255)` 는 Pillow 내부에서
  * `im.quantize(colors)` 로 빠지므로 **디더링 없는 median cut** 이다(Image.py:1185).
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";

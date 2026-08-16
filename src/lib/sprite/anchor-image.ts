@@ -10,6 +10,11 @@
  *
  * **파생 캐시다** — 생성 직전마다 큐레이션 진실에서 다시 굽고 그 자리를 덮어쓴다.
  * 정적 스냅샷을 재사용하면 사용자가 프레임을 편집·제외한 순간 소리 없이 낡는다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
 import { AnchorUnavailable } from "@/lib/sprite/anchor";

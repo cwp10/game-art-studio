@@ -12,6 +12,11 @@
  * 정적 QA 로는 부족하다는 것이 이 도구의 존재 이유다 — 프레임 수가 맞고 알파가 깨끗하고
  * 정체성이 일관돼도 애니메이션이 쓰레기일 수 있다(`docs/qa-motion.md`, BLOCKING).
  * contact sheet 는 검사용 체커 배경을 쓰고, GIF 는 투명을 보존한다(공유용).
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";

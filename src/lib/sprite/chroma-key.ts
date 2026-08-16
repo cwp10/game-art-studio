@@ -3,6 +3,11 @@
  *
  * 목적은 전체의 1% 미만인 작지만 결정적인 특징(눈, 보석, 귀 램프)이 추출 시점에
  * **조용히 삭제되지 않게** 하는 것이다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
 import { colorDistance, detectBackgroundMode, type BackgroundInfo } from "@/lib/sprite/base-gate";

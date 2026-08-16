@@ -6,6 +6,11 @@
  * (sprite-gen docs/directional-anchor-workflow.md).
  *
  * 순수 모듈 — sharp·fs·DB 를 모른다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 import type { DirectionsSpec, StateSpec } from "@/lib/sprite/request";
 

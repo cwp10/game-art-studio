@@ -9,6 +9,11 @@
  * 배경 판정은 sprite-gen `sprite_gen/prepare.py` `detect_reference_background`
  * (Apache-2.0, Copyright 2026 Alex Kim) 의 이식이다. 상수와 판정 순서를 그대로
  * 따른다 — 값을 바꾸면 원본과 다른 결과가 나온다.
+ *
+ * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
+ * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
+ * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
+ * SPDX-License-Identifier: Apache-2.0
  */
 
 import sharp from "sharp";
