@@ -7,6 +7,7 @@ import { AiSuggestButton, AiSuggestDropdown, type AiSuggestion } from "@/compone
 import { BaseLockGate } from "@/components/editor/BaseLockGate";
 import { jsonFetch } from "@/lib/api/client";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
+import { planDrivenBlocker } from "@/lib/sprite/plan-driven-gate";
 import { ACTION_STATE_HINTS } from "@/lib/sprite/state-name";
 
 
@@ -279,6 +280,12 @@ export function SpriteGenPanel({
 
   const [submitting, setSubmitting] = useState(false);
 
+  // 이 설정이 component-row 엔진으로 가는가. 판정은 서버와 **같은 함수**를 쓴다 —
+  // 조건을 복제하면 갈린다(이 저장소에서 피사체 추론이 두 곳에 복제돼 실제로 갈렸다).
+  // 패널은 항상 단일 방향으로 보낸다.
+  const planDriven =
+    planDrivenBlocker({ subjectType, directions: 1, refId: referenceId ?? null }) === null;
+
   const grid = FRAME_OPTS.find(f => f.value === frames) ?? { rows: 2, cols: 4 };
   const canSubmit = actionPrompt.trim().length > 0 && !submitting && !busy;
 
@@ -543,10 +550,27 @@ export function SpriteGenPanel({
         {/* 우측 레일 — 생성 옵션(시점·방향·프레임·루프) + 하단 생성하기. */}
         <div className="flex w-[256px] flex-none flex-col border-l border-border bg-bg-panel">
           <div className="flex-1 space-y-3 overflow-y-auto p-3 text-xs">
-            {/* 시점 */}
+            {/* 시점 — 플랜 구동 경로에서는 **먹지 않는다**.
+                정본에는 viewpoint 라는 축이 아예 없다: 카메라를 방향 어휘로만 다룬다
+                (`"down": "facing the viewer (front view)"`, "Keep the body
+                three-quarter-front, not pure side view"). 이 옵션은 우리가 구 격자
+                경로용으로 만든 것이고 component-row 엔진 쪽으로는 전달되지도 않는다
+                — 눌러도 사이드뷰가 나온다. 안 먹는 버튼을 켜 두면 사용자가 헛클릭한다. */}
             <div className="space-y-1">
-              <span className="block text-text-muted">시점</span>
-              <div className="flex flex-wrap gap-0.5 rounded-lg border border-border bg-bg-card p-0.5">
+              <span className="block text-text-muted">
+                시점
+                {planDriven && <span className="ml-1 text-text-muted/60">— 이 경로에서는 적용 안 됨</span>}
+              </span>
+              <div
+                className={`flex flex-wrap gap-0.5 rounded-lg border border-border bg-bg-card p-0.5 ${
+                  planDriven ? "opacity-40" : ""
+                }`}
+                title={
+                  planDriven
+                    ? "참조를 붙인 캐릭터 시트는 component-row 엔진으로 갑니다. 그 엔진은 카메라를 방향으로만 다뤄서 시점 선택이 반영되지 않습니다."
+                    : undefined
+                }
+              >
                 {([
                   { value: "side", label: "사이드" },
                   { value: "topdown", label: "탑다운" },
@@ -555,8 +579,9 @@ export function SpriteGenPanel({
                 ] as { value: Perspective; label: string }[]).map(opt => (
                   <button
                     key={opt.value}
+                    disabled={planDriven}
                     onClick={() => setPerspective(opt.value)}
-                    className={`flex h-7 items-center rounded-md px-2.5 transition-colors ${
+                    className={`flex h-7 items-center rounded-md px-2.5 transition-colors disabled:cursor-not-allowed ${
                       perspective === opt.value
                         ? "bg-[color:var(--accent)]/20 text-text-primary"
                         : "text-text-muted hover:text-text-primary"
