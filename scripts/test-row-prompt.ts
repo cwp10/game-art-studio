@@ -127,5 +127,147 @@ check(
   /Do not use #00FF00, pure green, or chroma-adjacent colors/.test(p),
 );
 
+console.log("=== 방향 접두사 잠금 (directions 블록) ===");
+{
+  const directions = { set: ["down", "right"], mirror: { left: "right" }, anchorSuffix: "idle" };
+  const dirReq = { ...request, directions };
+  const anchorRow = buildRowPrompt(dirReq, "down_idle", {
+    frames: 4,
+    fps: 4,
+    loop: true,
+    action: "idle",
+  });
+  const actionRow = buildRowPrompt(dirReq, "down_walk", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "walk",
+  });
+
+  check("facing 잠금이 붙는다", /Lock the whole row to facing the viewer \(front view\)/.test(anchorRow));
+  check("평균화 금지 문구", /Do not average it into a different facing/.test(anchorRow));
+  check(
+    "앵커 행은 CANONICAL DIRECTION ANCHOR 로 선언된다",
+    /This row is the CANONICAL DIRECTION ANCHOR/.test(anchorRow),
+  );
+  check(
+    "앵커 행은 base 에서 identity 를 가져오라고 한다",
+    /derive identity from the attached base image/.test(anchorRow),
+  );
+  check("앵커 행은 포즈를 최소로 요구한다", /keep poses minimal/.test(anchorRow));
+  check(
+    "액션 행은 앵커에서 identity",
+    /Derive identity from the attached accepted direction anchor/.test(actionRow),
+  );
+  check("액션 행은 base 사용을 금지한다", /not from any base character image/.test(actionRow));
+  check("액션 행에 CANONICAL 선언이 없다", !/CANONICAL DIRECTION ANCHOR/.test(actionRow));
+  check("directions 없으면 접두사 블록도 없다", !/Lock the whole row to/.test(p));
+}
+
+console.log("=== 45도 접미사 잠금 (directions 블록 없이도 동작) ===");
+{
+  const fr = buildRowPrompt(request, "running-front-right", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "run",
+  });
+  check(
+    "3/4 정면 + camera-right 잠금",
+    /Lock the whole row to a 45-degree three-quarter-front view facing camera-right and slightly toward the viewer/.test(
+      fr,
+    ),
+  );
+  check(
+    "정면·후면·순수 측면으로 평균화 금지",
+    /Do not average this into a straight front, straight back, or pure side-view sprite/.test(fr),
+  );
+  check(
+    "타깃 방향 앵커가 최우선 facing 근거",
+    /its facing direction is authoritative and overrides any paired-row reference/.test(fr),
+  );
+  check("방향 시트는 facing 전용", /use it as the direction SSoT for facing only/.test(fr));
+  check("right 에는 basis 행 조항이 없다", !/basis row is attached/.test(fr));
+
+  const fl = buildRowPrompt(request, "running-front-left", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "run",
+  });
+  check("left 는 3/4 정면 camera-left", /facing camera-left and slightly toward the viewer/.test(fl));
+  check(
+    "left 에는 basis 행을 timing 전용으로 쓰라는 조항이 붙는다",
+    /use it only for timing, scale, and pose-family consistency; change the facing to camera-left/.test(
+      fl,
+    ),
+  );
+
+  const br = buildRowPrompt(request, "working-back-right", {
+    frames: 6,
+    fps: 6,
+    loop: true,
+    action: "work",
+  });
+  check(
+    "back 은 3/4 후면 + away from the viewer",
+    /three-quarter-back view facing camera-right and slightly away from the viewer/.test(br),
+  );
+
+  check("접미사가 없으면 블록도 없다", !/45-degree three-quarter/.test(p));
+}
+
+console.log("=== 합성 순서 — 접두사 → 접미사 → STATE_REQUIREMENTS ===");
+{
+  // 접미사 → STATE_REQUIREMENTS
+  const fl = buildRowPrompt(request, "running-front-left", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "run",
+  });
+  const iSuffix = fl.indexOf("Lock the whole row to a 45-degree");
+  const iState = fl.indexOf("Show 45-degree diagonal locomotion toward camera-left");
+  check(
+    "접미사 항목이 STATE_REQUIREMENTS 보다 앞",
+    iSuffix > -1 && iState > iSuffix,
+    `suffix=${iSuffix} state=${iState}`,
+  );
+}
+{
+  // 접두사 → 접미사
+  const directions = { set: ["down"], mirror: {}, anchorSuffix: "idle" };
+  const both = buildRowPrompt({ ...request, directions }, "down_running-front-left", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "run",
+  });
+  const iPrefix = both.indexOf("Lock the whole row to facing the viewer");
+  const iSuffix = both.indexOf("Lock the whole row to a 45-degree");
+  check(
+    "접두사 항목이 접미사보다 앞",
+    iPrefix > -1 && iSuffix > iPrefix,
+    `prefix=${iPrefix} suffix=${iSuffix}`,
+  );
+}
+{
+  // 원본과 동일한 성질: STATE_REQUIREMENTS 의 키는 맨 상태명(walk/run)이므로
+  // 방향 계약 런의 <dir>_<state> 에는 **절대 걸리지 않는다**. 실측으로 확인한 원본 동작이며
+  // (down_walk → STATE_REQ=0, suffix=0), 우리 구현도 같아야 한다.
+  const directions = { set: ["down"], mirror: {}, anchorSuffix: "idle" };
+  const dw = buildRowPrompt({ ...request, directions }, "down_walk", {
+    frames: 8,
+    fps: 8,
+    loop: true,
+    action: "walk",
+  });
+  check(
+    "방향 계약 런의 down_walk 에는 STATE_REQUIREMENTS 가 붙지 않는다 (원본과 동일)",
+    !dw.includes("Show locomotion through body, arm, leg"),
+  );
+  check("그래도 facing 잠금은 붙는다", dw.includes("Lock the whole row to facing the viewer"));
+}
+
 console.log(`\n${passed} passed / ${failed} failed`);
 if (failed > 0) process.exit(1);

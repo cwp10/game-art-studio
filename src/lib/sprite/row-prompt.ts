@@ -6,6 +6,7 @@
  *
  * 여기 문자열은 sprite-gen 의 검증 런에서 굳어진 문구다. 임의로 다듬지 마라.
  */
+import { directionAnchorStates, facingOf, stateDirection } from "@/lib/sprite/directions";
 import type { SpriteRequest, StateSpec } from "@/lib/sprite/request";
 
 /**
@@ -125,12 +126,80 @@ const ANCHOR_LOCK: readonly string[] = [
   "Prefer a subtler animation over any change that mutates the character identity.",
 ];
 
+/**
+ * 방향 계약 런의 방향 잠금 — 앵커 행은 base 기반, 일반 행은 앵커 기반.
+ * 판정 기준은 `directions` 블록 + 상태명 **접두사**(`down_walk`)다.
+ */
+export function directionPrefixRequirements(request: SpriteRequest, state: string): string[] {
+  const directions = request.directions ?? null;
+  const direction = stateDirection(state, directions);
+  if (direction === null || directions === null) return [];
+  const requirements = [
+    `Lock the whole row to ${facingOf(direction)}. Do not average it into a different facing.`,
+  ];
+  if (state === directionAnchorStates(directions)[direction]) {
+    requirements.push(
+      "This row is the CANONICAL DIRECTION ANCHOR for this facing: derive identity from the " +
+        "attached base image, change only the facing/orientation, and keep poses minimal " +
+        "(subtle breathing) so a single frame can be cropped as the anchor.",
+    );
+  } else {
+    requirements.push(
+      "Derive identity from the attached accepted direction anchor for this facing, " +
+        "not from any base character image.",
+    );
+  }
+  return requirements;
+}
+
+export function directionalParts(
+  state: string,
+): { depth: "front" | "back"; side: "left" | "right" } | null {
+  const m = /-(front|back)-(left|right)$/.exec(state);
+  if (!m) return null;
+  return { depth: m[1] as "front" | "back", side: m[2] as "left" | "right" };
+}
+
+/**
+ * 상태명 **접미사**(`-front-right` 등)로 판정하는 45도 잠금.
+ *
+ * 위의 접두사 경로와 중복이 아니다 — 이쪽은 `directions` 블록 없이도 동작하고,
+ * 3/4 뷰 잠금·방향 시트 우선순위·left 의 basis 행 취급을 담당한다.
+ */
+export function directionalRequirements(state: string): string[] {
+  const parts = directionalParts(state);
+  if (!parts) return [];
+  const { depth, side } = parts;
+  const toward = depth === "front" ? "toward the viewer" : "away from the viewer";
+  const bodyView = depth === "front" ? "three-quarter-front" : "three-quarter-back";
+  const cameraSide = `camera-${side}`;
+  const oppositeSide = side === "right" ? "left" : "right";
+  const requirements = [
+    `Lock the whole row to a 45-degree ${bodyView} view facing ${cameraSide} and slightly ${toward}.`,
+    "Do not average this into a straight front, straight back, or pure side-view sprite.",
+    `Make ${cameraSide} readable through face/body orientation, hair silhouette, shoulder overlap, hand/foot placement, and prop angle.`,
+    "If a 4-direction reference sheet is attached, use it as the direction SSoT for facing only; do not copy its pose or state.",
+    "If a single target-direction anchor is attached, its facing direction is authoritative and overrides any paired-row reference.",
+  ];
+  if (side === "left") {
+    requirements.push(
+      `If a generated ${depth}-${oppositeSide} basis row is attached, use it only for timing, scale, and pose-family consistency; change the facing to camera-left.`,
+    );
+  }
+  return requirements;
+}
+
 export function buildRowPrompt(request: SpriteRequest, state: string, entry: StateSpec): string {
   const { cell, chromaKey, character } = request;
   const frames = entry.frames;
   const runtimeSize = `${cell.width}x${cell.height}`;
 
-  const stateRequirements = STATE_REQUIREMENTS[state] ?? [];
+  // 합성 순서는 원본과 같다 (prepare.py:859-863): 접두사 → 접미사 → STATE_REQUIREMENTS.
+  const stateRequirements = [
+    ...directionPrefixRequirements(request, state),
+    ...directionalRequirements(state),
+    ...(STATE_REQUIREMENTS[state] ?? []),
+  ];
   const stateRequirementText = stateRequirements.length
     ? "\n\nState-specific requirements:\n" + stateRequirements.map(r => `- ${r}`).join("\n")
     : "";
