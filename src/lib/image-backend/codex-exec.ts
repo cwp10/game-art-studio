@@ -396,6 +396,15 @@ const promptBuilders: Partial<Record<string, (job: ImageJob) => string>> = {
 };
 
 function buildNaturalPrompt(job: ImageJob): string {
+  // rawPrompt: 호출자가 이미 완성된 사양을 보낸다 — 헤더만 붙이고 그대로 통과시킨다.
+  //
+  // 스프라이트 행 프롬프트(src/lib/sprite/row-prompt.ts)는 sprite-gen 의 Prompt Contract
+  // 7항목을 그대로 담은 완결된 사양이고 "Output only the sprite strip image." 로 끝난다.
+  // 여기서 buildSpritesheetPrompt 의 "I am attaching TWO images: (1)... (2) GRID TEMPLATE"
+  // 틀로 다시 감싸면 두 개의 상충하는 계약이 한 프롬프트에 들어간다.
+  //
+  // 기존 호출부는 이 플래그를 켜지 않으므로 동작이 바뀌지 않는다.
+  if (job.params?.rawPrompt === true) return PROMPT_HEADER + job.prompt;
   const builder = promptBuilders[job.kind];
   if (builder) return builder(job);
   throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);

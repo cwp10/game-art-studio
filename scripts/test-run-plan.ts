@@ -117,32 +117,53 @@ void (async () => {
       (await sharp(result.anchors.down.path).metadata()).width !== undefined,
     );
 
-    console.log("=== 실측 프레임 수를 쓴다 ===");
+    console.log("=== 가이드 치수를 안 따라도 동작한다 ===");
     {
-      // 4프레임을 요청했는데 모델이 3칸짜리를 냈다 — 요청값이 아니라 실측을 써야 한다.
-      const short = join(dir, "short.png");
-      await fakeSheet(short, 3, request.cell.width);
+      // codex 는 가이드의 픽셀 치수를 따르지 않는다(실측: 1024x256 요청 → 1774x887).
+      // 열 개수는 요청값을 쓰고 셀 폭은 실제 폭을 나눠 구해야 한다.
+      const wide = join(dir, "wide.png");
+      const W = 1774;
+      const H = 887;
+      await sharp({
+        create: { width: W, height: H, channels: 4, background: { r: 0, g: 255, b: 255, alpha: 255 } },
+      })
+        .composite([
+          {
+            input: await sharp({
+              create: { width: 200, height: 400, channels: 4, background: { r: 200, g: 100, b: 50, alpha: 255 } },
+            })
+              .png()
+              .toBuffer(),
+            left: 120,
+            top: 240,
+          },
+        ])
+        .png()
+        .toFile(wide);
       const r = await runSpritePlan(request, {
-        generate: async () => ({
-          generationId: "g",
-          imagePath: short,
-          width: 3 * request.cell.width,
-          height: request.cell.width,
-        }),
+        generate: async () => ({ generationId: "g", imagePath: wide, width: W, height: H }),
         workDir: dir,
         lockedBasePath: basePath,
         log: () => {},
       });
+      check("열 개수는 요청값 유지", r.rows.down_idle.frameCount === 4);
       check(
-        "실측 프레임 수가 기록된다",
-        r.rows.down_idle.frameCount === 3,
-        `${r.rows.down_idle.frameCount}`,
+        "셀 폭은 실제 폭 / 열 개수",
+        r.rows.down_idle.cell.width === Math.floor(W / 4),
+        `${r.rows.down_idle.cell.width}`,
       );
+      check("셀 높이는 실제 높이", r.rows.down_idle.cell.height === H);
       check(
-        "프레임 수 미달이 경고로 남는다",
-        r.warnings.some(w => w.includes("칸이 나왔다")),
+        "기하 불일치가 경고로 남는다",
+        r.warnings.some(w => w.includes("가이드는")),
         r.warnings.join(" | "),
       );
+      check(
+        "앵커가 첫 셀에서 나온다 (배경 조각이 아니다)",
+        r.anchors.down.index === 0 && r.anchors.down.source === "default",
+      );
+      const am = await sharp(r.anchors.down.path).metadata();
+      check("앵커가 과도하게 커지지 않는다", (am.width ?? 0) <= 4096, `${am.width}x${am.height}`);
     }
 
     console.log("=== 미러는 생성하지 않는다 ===");
