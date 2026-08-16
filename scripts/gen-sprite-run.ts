@@ -15,6 +15,8 @@ import { selectImageBackend, type ImageJob } from "@/lib/image-backend";
 import { createGeneration, getGeneration, getLockedBase, lockBaseGeneration } from "@/lib/db/repo/generations";
 import { createJob, updateJob } from "@/lib/db/repo/jobs";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
+import { bareState } from "@/lib/sprite/directions";
+import { stateMotionPhases } from "@/lib/sprite/motion-phase";
 import { runSpritePlan, type GenerateFn } from "@/lib/sprite/run-plan";
 import { newGenerationId, newJobId } from "@/lib/util/ids";
 import { DATA_DIR, toRelative } from "@/lib/util/paths";
@@ -41,6 +43,9 @@ void (async () => {
   const actionPrompt = arg("action");
   const characterId = arg("character", "run");
   const description = arg("description", "");
+  // 정본 `prepare_sprite_run.py --motion-phase-guides` 와 같은 위치의 옵트인.
+  // 명시적 로코모션 실험 전용이고, 8프레임 로코모션 상태가 아니면 아무것도 그리지 않는다.
+  const motionPhaseGuides = process.argv.includes("--motion-phase-guides");
 
   // ① base 잠금 — 잠겨 있지 않으면 잠근다.
   if (getLockedBase(null)?.id !== baseId) {
@@ -62,7 +67,18 @@ void (async () => {
     frames,
     loop: true,
     actionPrompt,
+    motionPhaseGuides,
   });
+  if (motionPhaseGuides) {
+    const drawn = Object.keys(request.states).filter(
+      s => stateMotionPhases(bareState(s, request.directions ?? null), request.states[s].frames).length > 0,
+    );
+    console.log(
+      drawn.length
+        ? `모션 위상 가이드: ${drawn.join(", ")} (실험용 — 모션 QA 는 여전히 BLOCKING)`
+        : "모션 위상 가이드: 해당 상태 없음 (8프레임 로코모션만 그린다)",
+    );
+  }
   for (const w of warnings) console.log(`  경고: ${w}`);
   console.log(
     `크로마 키: ${request.chromaKey.name} ${request.chromaKey.hex} (${request.chromaKey.selection})`,

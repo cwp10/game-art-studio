@@ -38,6 +38,11 @@ export type PanelInput = {
   cellSize?: number;
   /** 런타임 미러로 커버할 UI 방향. 생성하지 않고 계약으로만 기록한다. */
   mirrorFrom?: string;
+  /**
+   * 레이아웃 가이드에 스틱 포즈 모션 위상 힌트를 그린다. **명시적 로코모션 실험 전용**
+   * 옵트인이다(정본 `--motion-phase-guides`). 8프레임 로코모션이 아니면 무시된다.
+   */
+  motionPhaseGuides?: boolean;
 };
 
 const DEFAULT_STATE_NAME = "action";
@@ -122,6 +127,7 @@ export async function buildSpriteRequest(
       chroma: DEFAULT_CHROMA_TUNABLES,
       states,
       ...(directions ? { directions } : {}),
+      ...(input.motionPhaseGuides ? { motionPhaseGuides: true } : {}),
     },
     warnings,
   };
