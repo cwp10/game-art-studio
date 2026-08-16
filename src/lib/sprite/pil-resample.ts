@@ -26,6 +26,28 @@ function bilinearFilter(x: number): number {
   return a < 1.0 ? 1.0 - a : 0.0;
 }
 
+/** `sinc_filter` (Resample.c). */
+function sincFilter(x: number): number {
+  if (x === 0.0) return 1.0;
+  const p = x * Math.PI;
+  return Math.sin(p) / p;
+}
+
+/**
+ * `lanczos_filter` (Resample.c) — 잘린 sinc. support = 3.0.
+ *
+ * 삼각 필터와 달리 **계수가 음수가 될 수 있다.** 아래 고정소수점 변환의 음수 분기가
+ * 여기서 실제로 쓰인다 (PIL 은 음수를 -0.5, 양수를 +0.5 오프셋으로 반올림한다).
+ */
+function lanczosFilter(x: number): number {
+  if (x >= -3.0 && x < 3.0) return sincFilter(x) * sincFilter(x / 3);
+  return 0.0;
+}
+
+type FilterSpec = { fn: (x: number) => number; support: number };
+const BILINEAR: FilterSpec = { fn: bilinearFilter, support: 1.0 };
+const LANCZOS: FilterSpec = { fn: lanczosFilter, support: 3.0 };
+
 type Coeffs = {
   /** 출력 픽셀당 [xmin, xmax(길이)]. */
   bounds: Int32Array;
@@ -40,10 +62,10 @@ type Coeffs = {
  * 음수 계수의 반올림이 양수와 다르다(-0.5 vs +0.5 오프셋) — triangle 은 음수 계수가
  * 없지만 원본과 같은 식을 쓴다.
  */
-function precomputeCoeffs(inSize: number, outSize: number): Coeffs {
+function precomputeCoeffs(inSize: number, outSize: number, filter: FilterSpec): Coeffs {
   const scale = inSize / outSize;
   const filterscale = scale < 1.0 ? 1.0 : scale;
-  const support = 1.0 * filterscale; // BILINEAR.support = 1.0
+  const support = filter.support * filterscale;
   const ksize = Math.ceil(support) * 2 + 1;
   const bounds = new Int32Array(outSize * 2);
   const kk = new Int32Array(outSize * ksize);
@@ -60,7 +82,7 @@ function precomputeCoeffs(inSize: number, outSize: number): Coeffs {
     if (xmax > inSize) xmax = inSize;
     xmax -= xmin;
     for (let x = 0; x < xmax; x++) {
-      const w = bilinearFilter((x + xmin - center + 0.5) * ss);
+      const w = filter.fn((x + xmin - center + 0.5) * ss);
       k[x] = w;
       ww += w;
     }
@@ -97,8 +119,32 @@ export function pilResizeBilinear(
   dstH: number,
   channels: number,
 ): Uint8Array {
+  return pilResize(src, srcW, srcH, dstW, dstH, channels, BILINEAR);
+}
+
+/** 같은 리샘플러의 LANCZOS 경로 — 보간 tween 의 스케일 정규화가 쓴다. */
+export function pilResizeLanczos(
+  src: Uint8Array,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+  channels: number,
+): Uint8Array {
+  return pilResize(src, srcW, srcH, dstW, dstH, channels, LANCZOS);
+}
+
+function pilResize(
+  src: Uint8Array,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number,
+  channels: number,
+  filter: FilterSpec,
+): Uint8Array {
   // 가로 패스: srcW → dstW, 높이는 그대로.
-  const hc = precomputeCoeffs(srcW, dstW);
+  const hc = precomputeCoeffs(srcW, dstW, filter);
   const mid = new Uint8Array(dstW * srcH * channels);
   for (let yy = 0; yy < srcH; yy++) {
     for (let xx = 0; xx < dstW; xx++) {
@@ -115,7 +161,7 @@ export function pilResizeBilinear(
     }
   }
   // 세로 패스: srcH → dstH.
-  const vc = precomputeCoeffs(srcH, dstH);
+  const vc = precomputeCoeffs(srcH, dstH, filter);
   const out = new Uint8Array(dstW * dstH * channels);
   for (let yy = 0; yy < dstH; yy++) {
     const ymin = vc.bounds[yy * 2];

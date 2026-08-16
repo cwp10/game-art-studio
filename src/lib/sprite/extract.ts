@@ -27,6 +27,7 @@ import { removeChromaBackground, type ChromaCleanOptions, type RGB } from "@/lib
 import { decideChromaMode, type ChromaMode, type ChromaModeDecision } from "@/lib/sprite/chroma-mode";
 import { removeChromaBackgroundYcbcr } from "@/lib/sprite/chroma-ycbcr";
 import { inspectFrames, type FrameQaResult } from "@/lib/sprite/frame-qa";
+import { solidAlphaBBox } from "@/lib/sprite/silhouette";
 import type { CellSpec, FitSpec } from "@/lib/sprite/request";
 import {
   separateFusedPoses,
@@ -431,4 +432,161 @@ export async function writeRaw(img: RawImage, destPath: string): Promise<void> {
   await sharp(img.data, { raw: { width: img.width, height: img.height, channels: 4 } })
     .png()
     .toFile(destPath);
+}
+
+// ── 프레임 조이기와 행 정합 (보간이 쓰는 선행 부품) ──────────────────
+
+/**
+ * PIL `Image.getbbox()` — RGBA 에서는 **알파 채널만** 본다.
+ *
+ * Pillow 10 부터 `alpha_only=True` 가 기본이라, 알파 0 인데 RGB 가 남은 픽셀은
+ * 콘텐츠로 세지 **않는다**. 4채널 nonzero 로 구현하면 크로마를 지운 스트립에서
+ * 정본보다 넓은 박스가 나와 크롭이 어긋난다 (실측으로 확인).
+ */
+export function pilGetBBox(img: RawImage): [number, number, number, number] | null {
+  return alphaBBox(img);
+}
+
+const ALPHA_PRECISION_BITS = 7;
+
+/** `SHIFTFORDIV255` (Imaging.h) — a/255 의 PIL 정수 근사. */
+function shiftForDiv255(a: number): number {
+  return ((a >> 8) + a) >> 8;
+}
+
+/**
+ * PIL `Image.alpha_composite` 의 정수 구현 (`AlphaComposite.c`).
+ *
+ * 실수식을 그대로 옮기면 프린지에서 1 씩 어긋난다 (실측: 정합 쌍 51만 바이트 중
+ * 8591개). PIL 은 7비트 고정소수점 계수와 `+ (0x80 << 7)` 반올림 항을 쓴다.
+ */
+function pilAlphaComposite(dst: RawImage, src: RawImage, left: number, top: number): void {
+  const round = 0x80 << ALPHA_PRECISION_BITS;
+  for (let y = 0; y < src.height; y++) {
+    const dy = top + y;
+    if (dy < 0 || dy >= dst.height) continue;
+    for (let x = 0; x < src.width; x++) {
+      const dx = left + x;
+      if (dx < 0 || dx >= dst.width) continue;
+      const s = (y * src.width + x) * 4;
+      const d = (dy * dst.width + dx) * 4;
+      const sa = src.data[s + 3];
+      const da = dst.data[d + 3];
+      const blend = da * (255 - sa);
+      const outa255 = sa * 255 + blend;
+      if (outa255 === 0) {
+        dst.data[d] = 0; dst.data[d + 1] = 0; dst.data[d + 2] = 0; dst.data[d + 3] = 0;
+        continue;
+      }
+      const coef1 = Math.trunc((sa * 255 * 255 * (1 << ALPHA_PRECISION_BITS)) / outa255);
+      const coef2 = 255 * (1 << ALPHA_PRECISION_BITS) - coef1;
+      for (let c = 0; c < 3; c++) {
+        const tmp = src.data[s + c] * coef1 + dst.data[d + c] * coef2 + round;
+        dst.data[d + c] = shiftForDiv255(tmp) >> ALPHA_PRECISION_BITS;
+      }
+      dst.data[d + 3] = shiftForDiv255(outa255 + 0x80);
+    }
+  }
+}
+
+/**
+ * 컴포넌트를 실 콘텐츠(solid alpha) bbox 로 타이트하게 조인다.
+ *
+ * `componentGroupImage` 가 사방 4px 패딩을 두르므로, 패딩째 격자를 치면 위상 추정
+ * 노이즈가 lead-스냅 문턱 아래로 떨어지는 순간 격자 전체가 패딩만큼 밀린다 — 꼬리에
+ * 자투리 셀이 생기고 경계에서 쪼개진 바닥 블록이 유령 픽셀 한 줄로 태어난다.
+ *
+ * 크롭 기준이 `solidAlphaBBox` 인 이유도 같다 — any-alpha bbox 는 프린지째 격자를 쳐
+ * 같은 유령 픽셀을 사방에 만든다. 전부 프린지인 퇴화 컴포넌트만 any-alpha 로 폴백한다.
+ */
+export function tightenComponents(images: RawImage[]): RawImage[] {
+  return images.map(component => {
+    const box = solidAlphaBBox(component) ?? pilGetBBox(component);
+    return box ? cropRaw(component, box as [number, number, number, number]) : component;
+  });
+}
+
+/**
+ * 프레임 간 정합 — 안정 부위(상체 65%)의 알파 겹침을 최대화하는 정수 시프트.
+ *
+ * 로코모션에서 다리는 원래 움직이므로 전체를 맞추면 안 된다. 상체만 겹쳐 프레임마다
+ * 시프트를 찾고 공통 캔버스에 앉힌 뒤, 행 공통(union) bbox 로 한 번에 크롭한다 —
+ * 같은 박스로 자르므로 정합은 유지되고, 슬랙 여백이 셀보다 커져 발이 잘리는 것을 막는다.
+ *
+ * 동점이면 **먼저 만난 시프트**를 쓴다(원본의 `score > best_score`). 탐색 순서가
+ * 결과의 일부라 바꾸면 안 된다.
+ */
+export function registerRowFrames(frames: RawImage[], slackX = 8, slackY = 3): RawImage[] {
+  const cropped = frames.map(f => {
+    const bbox = pilGetBBox(f);
+    return bbox ? cropRaw(f, bbox) : f;
+  });
+  const canvasWidth = Math.max(...cropped.map(f => f.width)) + slackX * 2;
+  const canvasHeight = Math.max(...cropped.map(f => f.height)) + slackY * 2;
+  const basePos = (f: RawImage): [number, number] => [
+    Math.floor((canvasWidth - f.width) / 2),
+    canvasHeight - slackY - f.height,
+  ];
+
+  const reference = cropped[0];
+  const [refX, refY] = basePos(reference);
+  const upperLimit = refY + Math.trunc(reference.height * 0.65);
+  const refMask = new Set<number>();
+  for (let y = 0; y < reference.height; y++) {
+    if (refY + y >= upperLimit) break;
+    for (let x = 0; x < reference.width; x++) {
+      if (reference.data[(y * reference.width + x) * 4 + 3] >= 128) {
+        refMask.add((refY + y) * canvasWidth + (refX + x));
+      }
+    }
+  }
+
+  const registered: RawImage[] = [];
+  cropped.forEach((frame, index) => {
+    const [baseX, baseY] = basePos(frame);
+    let bestDx = 0, bestDy = 0;
+    if (index > 0 && refMask.size > 0) {
+      const points: number[] = [];
+      for (let y = 0; y < frame.height; y++) {
+        if (baseY + y >= upperLimit) continue;
+        for (let x = 0; x < frame.width; x++) {
+          if (frame.data[(y * frame.width + x) * 4 + 3] >= 128) points.push(y * frame.width + x);
+        }
+      }
+      let bestScore = -1;
+      for (let dy = -slackY; dy <= slackY; dy++) {
+        for (let dx = -slackX; dx <= slackX; dx++) {
+          let score = 0;
+          for (const p of points) {
+            const x = p % frame.width;
+            const y = (p - x) / frame.width;
+            if (refMask.has((baseY + y + dy) * canvasWidth + (baseX + x + dx))) score++;
+          }
+          if (score > bestScore) {
+            bestScore = score;
+            bestDx = dx;
+            bestDy = dy;
+          }
+        }
+      }
+    }
+    const canvas: RawImage = {
+      data: Buffer.alloc(canvasWidth * canvasHeight * 4),
+      width: canvasWidth,
+      height: canvasHeight,
+    };
+    const left = Math.min(Math.max(0, baseX + bestDx), canvasWidth - frame.width);
+    const top = Math.min(Math.max(0, baseY + bestDy), canvasHeight - frame.height);
+    pilAlphaComposite(canvas, frame, left, top);
+    registered.push(canvas);
+  });
+
+  const union: RawImage = {
+    data: Buffer.alloc(canvasWidth * canvasHeight * 4),
+    width: canvasWidth,
+    height: canvasHeight,
+  };
+  for (const canvas of registered) pilAlphaComposite(union, canvas, 0, 0);
+  const bbox = pilGetBBox(union);
+  return bbox ? registered.map(c => cropRaw(c, bbox)) : registered;
 }

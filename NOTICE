@@ -41,12 +41,14 @@ files below carry the port, each naming its upstream source in its header:
                                          extract_slot_frames)
     src/lib/sprite/frame-qa.ts       <- sprite_gen/extract.py (inspect_frames)
     src/lib/sprite/segment.ts        <- sprite_gen/segment.py
+    src/lib/sprite/interpolate.ts    <- sprite_gen/interpolate.py
     src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
     src/lib/sprite/preview.ts        <- sprite_gen/preview.py
     src/lib/sprite/gif.ts            <- sprite_gen/gif_utils.py
     src/lib/sprite/pil-resample.ts   <- Pillow resize semantics reproduced for
                                         parity (premultiplied RGBA round-trip,
-                                        RGB->L luma), used by inspect.ts
+                                        BILINEAR and LANCZOS coefficient tables,
+                                        RGB->L luma)
     src/lib/sprite/inspect.ts        <- sprite_gen/inspect.py
     src/lib/sprite/score.ts          <- sprite_gen/inspect.py (scoring, hints)
     src/lib/sprite/correction-loop.ts<- sprite_gen/inspect.py (correction loop)
