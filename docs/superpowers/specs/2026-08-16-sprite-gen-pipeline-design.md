@@ -1,8 +1,10 @@
 # 스프라이트 파이프라인을 sprite-gen 구조로 재구성
 
-> 상태: 설계 승인됨 (2026-08-16). ⓪ 구현 완료.
+> 상태: 설계 승인됨 (2026-08-16). **⓪①② 구현 완료 (배선은 ④, §8 참조).**
 > 2차 — 정본 계약(`SKILL.md`) 대조 후 순서 교정. 3차 — leaf 문서 전체 대조 후 기본/옵트인 정정.
 > 4차 — `directional-anchor-workflow.md` 대조 후 6단계로 재편(앵커 체인을 ③ 으로 독립).
+> 5차 — `states-and-frames.md` 대조 후 프레임 대역·상태 등급 추가(§6.1.1), ② 구현 실측으로
+> 렌더 방식(§6.2)과 통과 기준(§7) 갱신.
 > 이 문서는 전체 방향과 **①② 단계**의 상세를 담는다(⓪ 상세는 구현 근거로 §4 에 보존).
 > ③④⑤⑥ 은 개요만 두고 각자 별도 스펙으로 분리한다.
 
@@ -477,6 +479,46 @@ export type SpriteRequest = {
 `chroma` 튜너블을 request 가 소유하는 이유는 추출기가 유효값을 여기에 **되쓰기** 때문이다 —
 어떤 파라미터가 그 결과를 만들었는지 런마다 기록에 남는다.
 
+#### 6.1.1 상태 등급과 프레임 수 대역 (`states-and-frames.md` 대조 후 추가)
+
+②단계 구현 착수 전 `docs/states-and-frames.md` 를 읽고 확인한 것. 1~4차 개정 시점에는
+이 문서를 대조하지 않아 아래가 스펙에 없었다.
+
+**프레임 수 대역** — 프레임을 늘린다고 애니메이션이 부드러워지지 않는다:
+
+| 프레임 수 | 정본 분류 |
+|---|---|
+| 4 | 단순 동작의 **기본 안정 범위** |
+| 5 | 비루프 제스처가 대기 복귀 포즈를 필요로 할 때 허용 |
+| 6 | 인간형 one-shot 기본값의 **보수적 상한** |
+| 8 | hatch-pet 급 **고급 영역**. 컴팩트 마스코트·로코모션 행·명시적 실험에만 |
+| 9, 12 | **기본값이 아니다.** 검증 런에서 중복 몸통·빈 프레임·슬롯 붕괴·추출 실패가 늘었다 |
+
+사용자가 9 또는 12 를 요구하면 명시적 실험으로 돌리고 `duplicate-heavy`·`blur/merge`·
+`extract-fail` 을 정직하게 보고한다. 정상 통과처럼 다루지 않는다.
+
+**상태 등급**:
+
+- **simple 안정** — `idle`(4f, loop) · `jump`(4f, non-loop) · `attack`(4f, non-loop) ·
+  `wave`(4f, non-loop; 마지막 프레임이 의도적으로 1번으로 돌아갈 때만 5f)
+- **simple 후보** — `talk` `blink` `bounce` `hurt` `celebrate` `magic_cast`.
+  허용하지만 모션 QA 통과 전에는 pass 가 아니다
+- **experimental** — `walk` `run` `frontwalk` `45_frontwalk` 및 모든 주기적 이동,
+  정확한 발접지 교대·위상 대칭을 요구하는 방향 사이클
+
+약한 walk/run 행을 simple MVP 산출물과 **같은 등급으로 조용히 승격하지 않는다.**
+`classifyState`·`frameCountAdvice`(`request.ts`)가 이 판정을 수단으로 제공한다.
+
+**우리 패널 기본값이 이 대역과 어긋난다** — `SpriteGenPanel.tsx` 의 `frames` 초기값은
+8(정본 4), `seamlessLoop` 초기값은 true(정본은 idle 만), 동작 힌트는 걷기·달리기 8f
+loop(정본 experimental) · 공격 6f(정본 4) · 점프 6f(정본 4) · 시전 8f 다. **②에서
+고치지 않는다** — 실제 생성 결과 없이 바꿀 근거가 없으므로 §3.3 UI 체크포인트로 넘긴다.
+
+**`normalizeStates` 의 의도적 이탈 1건**: 원본 `prepare.py:509` 의 `loop` 폴백은 무조건
+`True` 라 `DEFAULT_STATES` 의 `attack`/`jump`/`wave`(`loop: false`)와 어긋난다. 우리는
+`fps`·`action` 과 같은 규칙으로 `DEFAULT_STATES` 에서 채운다. 미지 상태에서는 원본과
+동일하게 `true` 로 떨어진다.
+
 `character.anchorGenerationId` 는 ①에서 잠근 앵커를 가리킨다. 베이스 이미지 ID 가 아니다.
 
 **safe margin 기본값은 비례다.** 생략 시 축당 셀 치수의 **9.4% 내림**: 256→24, 128→12,
@@ -525,8 +567,17 @@ sprite-gen `draw_guide()` 의 이식. `frames × cellW` 캔버스에:
 | safe margin 사각형 | `#2f80ed` | 2px |
 | 셀 중앙 세로선 | `#b8c8e8` | 1px |
 
-SVG 문자열을 조립해 sharp 로 래스터화한다. 픽셀 연산이 필요 없고 기존 `pose-reference.ts` 의
-SVG 폴백 경로와 같은 기법이라 새 의존이 없다.
+**구현에서 SVG 를 버렸다(2026-08-16).** 초안은 "SVG 문자열을 조립해 sharp 로 래스터화"였다.
+통과 기준이 Python 출력과의 **픽셀 동일**인데 SVG 스트로크는 경로 중심 정렬이라 PIL 의
+안쪽 정렬 사각형과 반픽셀씩 어긋나고 래스터라이저 AA 가 경계에 회색을 남긴다. 도형이 축 정렬
+사각형과 수직선뿐이라 SVG 로 얻을 이득도 없다. **raw RGB 버퍼에 직접 채운다** — AA 자체가
+없어 픽셀 동일이 정의상 보장된다. 실측으로 4개 케이스 전부 바이트 단위 동일을 확인했다.
+
+재현해야 할 PIL 의미 3가지: `rectangle(outline, width)` 는 경계 **안쪽으로** width 픽셀 띠를
+그리고 좌표는 **양끝 포함**이다. 그리는 순서가 겹침 우선순위다(바깥 테두리 → safe → 중앙선).
+그리고 **원본의 비대칭 하나** — 중앙선 y 범위는 `marginY ~ height-marginY` 인데 safe 사각형의
+아래 변은 `height-1-marginY` 라 선이 1px 더 내려간다(`prepare.py:840`). 의도인지 오프바이원인지
+원본에 근거가 없으나 픽셀 동일이 기준이므로 그대로 재현한다.
 
 기존 `generateGridTemplate`(shared.ts)과 역할이 겹친다. safe margin·중앙선 개념이 없고 호출
 조건이 다르므로 **이 렌더러로 대체**하고 호출부를 옮긴다.
@@ -598,7 +649,7 @@ src/lib/sprite/
 | `states[s].frames` | 패널 `frames` |
 | `states[s].action` | 패널 `actionPrompt` |
 | `states[s].loop` | 패널 `seamlessLoop` |
-| `states[s].fps` | 기본값 (프레임 수에서 파생) |
+| `states[s].fps` | `DEFAULT_STATES` 의 상태별 값(idle 4 · attack/jump 8 · wave 6), 미지 상태는 6 |
 | `cell` | 기본값 — 정사각 256, safe margin 비례(24) |
 | `chromaKey` | 소재색 기반 선택 (§6.1) |
 | `character.anchorGenerationId` | ①에서 잠근 앵커 |
@@ -621,10 +672,16 @@ src/lib/sprite/
 |------|------|------|-----------|
 | ⓪ | 회수 경로 | §4.5 참조 | probe 성공 + 실패가 에러로 드러남 |
 | ① | 사전 검사 (피치·테두리 분산) | 알려진 픽셀아트/비픽셀아트 샘플 투입 | 분류 일치 |
-| ② | 레이아웃 가이드 | 같은 `cell`·`frames` 로 Python `draw_guide()` 와 TS 렌더러 각각 실행 | **PNG 픽셀 동일** (알파 포함) |
-| ② | `normalizeCell` (비례 margin 포함) | sprite-gen `normalize_cell()` 테스트 케이스 이식 | 출력 객체 동일 |
-| ② | row 프롬프트 | Python `row_prompt()` 출력과 대조 | Prompt Contract 7항목 누락 없음 (문자열 완전 일치는 요구하지 않음 — 언어·표현이 다르다) |
+| ② | 레이아웃 가이드 | 같은 `cell`·`frames` 로 Python `draw_guide()` 와 TS 렌더러 각각 실행 | **PNG 픽셀 동일** — raw RGB 버퍼 렌더 (§6.2). **실측 완료**: 4케이스 바이트 동일 |
+| ② | `normalizeCell` (비례 margin 포함) | Python `normalize_cell()` 에 같은 입력 투입 | **기하 필드 동일** — 정사각·동일 margin 일 때만 붙는 레거시 `size`·`safe_margin` 키는 이식하지 않는다(읽는 쪽이 없다). **실측 완료** |
+| ② | 크로마 키 자동 선택 | Python `choose_chroma_key()` 와 같은 PNG 로 대조 | 승자·`score`·`min_subject_distance`·후보 4종 전부 동일. **실측 완료** |
+| ② | row 프롬프트 | Python `row_prompt()` 출력과 `diff` | Prompt Contract 7항목 누락 없음. **실측 결과 공백 1줄 외 완전 일치** (그 1줄은 이식하지 않은 `motion_phase_guides` 슬롯) |
 | 전체 | 회귀 | 기존 경로가 깨지지 않는지 | `pnpm test` 통과 |
+
+**②의 미검증 항목 1건**: §6.5 의 "셀 치수 검증 실패(`frames × cellW` 가 codex 캔버스 한계
+초과) → 생성 전 throw" 는 넣지 않았다. 한계값을 모른다 — ⓪ 검증에서 codex **출력**이
+~1024px 급 고정으로 나왔을 뿐 입력 한계는 측정하지 않았다. ④에서 실측 후 넣는다.
+모르는 상수를 지어내지 않는다.
 
 Python 기준 출력 생성은 sprite-gen 의 `.venv` 를 그대로 쓴다(구성돼 있고 CLI 동작 확인함).
 이 의존은 **개발·검증 시점에만** 있고 런타임·배포에는 없다.
@@ -661,6 +718,22 @@ Python 기준 출력 생성은 sprite-gen 의 `.venv` 를 그대로 쓴다(구�
 안 된다.
 
 ## 8. 후속 단계 개요
+
+### ①②는 아직 배선되지 않았다
+
+`base-gate.ts`(①)와 `request.ts`·`chroma-key.ts`·`layout-guide.ts`·`row-prompt.ts`(②)는
+만들어져 있고 테스트를 통과하지만 **호출부에 연결되어 있지 않다.** ③앵커 체인·④row 생성이
+생성 흐름 자체를 교체하므로 지금 `spritesheet-handler.ts` 에 배선하면 ④에서 다시 뜯는다.
+
+같은 이유로 ②는 다음 셋도 건드리지 않았다 — 전부 ④의 몫이다:
+
+- 기존 `buildSpritePrompt` 의 거대 지시문(`walkCycleRule` 등) 제거 — 지금 지우면 현재
+  생성 경로가 즉시 깨진다
+- `generateGridTemplate` → 레이아웃 가이드 대체 (호출부가 함께 이동해야 한다)
+- 패널 기본값 8프레임 → 4 조정 (§6.1.1, §3.3)
+
+**이 결정의 리스크**: 미배선 코드가 ①②③에 걸쳐 누적되어 ④⑤ 전까지 사용자에게 보이는 변화가
+없다. ④ 통합 시점에 인터페이스 불일치가 드러날 수 있다.
 
 ### ③ stage 1 — 방향 앵커 체인
 
