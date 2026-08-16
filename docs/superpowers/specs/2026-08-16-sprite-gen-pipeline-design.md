@@ -41,7 +41,7 @@
 | `fit.resample` | **`lanczos`** | `kcentroid` 는 픽셀아트 대상, `nearest` 는 오프그리드 아웃라인 손실 |
 | `fit` 객체 자체 | **부재(legacy)** | 픽셀아트 타깃·지터 없는 locomotion 일 때만 선언 |
 
-따라서 이식의 1차 목표는 이 옵션들이 아니라 **기본 경로**다: 3패스 RGB 알파 정리, components
+따라서 이식의 1차 목표는 이 옵션들이 아니라 **기본 경로**다: 4패스 RGB 알파 정리, components
 분할, 프레임 수 미달 시 행 차단, 그리고 파이프라인 구조(베이스 잠금 → 가이드 → 행 생성 →
 내용 기반 추출) 자체.
 
@@ -1028,7 +1028,10 @@ sprite-gen 은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
 
 - `SKILL.md` 전체 — 필수 게이트, Base Lock Gate, SSoT, Prompt/Output/Runtime Contract, QA
 - `docs/architecture.md` §1~§5
-- `docs/chroma-alpha.md` — 키 선택 분기표, `auto` 거부 로직, 3패스 알파 정리, ycbcr 옵트인
+- `docs/chroma-alpha.md` — 키 선택 분기표, `auto` 거부 로직, 알파 정리 패스, ycbcr 옵트인
+- `docs/sheet-slicing.md` — 그리드 크롭 대신 centroid 배정, 병합 분리, 이웃 debris 규칙.
+  **알파 정리는 v1.13 4패스**(하드 키 컷 → key-depth in-band unmix → 소프트 알파 unmix →
+  갇힌 스필 despill) — 스펙이 3패스로 적었던 것을 정정
 - `docs/pixel-unfake.md` — `fit` 기본값, 역할 계약, 스타일 SSoT, 픽셀 밀도 규칙, 전/후 쌍둥이
 - `docs/qa-motion.md` — Motion Continuity 판정 기준 5가지
 - `docs/run-contract.md` §1(스테이지 표), §6~§7(실패 원자성, 동시성 경계)
