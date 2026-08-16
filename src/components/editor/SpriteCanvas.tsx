@@ -897,6 +897,14 @@ export function SpriteCanvas({
   const [curationMsg, setCurationMsg] = useState<string | null>(null);
   const [curationBusy, setCurationBusy] = useState(false);
   const [pinned, setPinned] = useState<Record<string, { generationId: string; index: number }>>({});
+  /**
+   * 호흡이 켜진 상태들. 호흡은 **미적 선택이라 자동 판정하지 않는다** — 크로마 모드나
+   * 모션 페이즈처럼 "맞는지 재서 정할" 수 있는 것이 아니다. 정본도 사람이 켠다.
+   *
+   * 저장된 값을 반드시 먼저 읽는다. UI 가 모르는 채로 큐레이션을 다시 저장하면
+   * 사이드카의 호흡이 조용히 지워진다.
+   */
+  const [breatheOn, setBreatheOn] = useState<Set<string>>(new Set());
 
   /** 프레임 인덱스 → 그 프레임이 속한 상태와 행 내 열 번호. */
   function frameState(origIdx: number): { state: string; col: number } | null {
@@ -933,6 +941,25 @@ export function SpriteCanvas({
     })();
   }, [isPlanDriven, sheetGenerationId]);
 
+  // 저장된 호흡 설정을 읽어 토글에 반영한다 (위 주석의 조용한 삭제 방지).
+  useEffect(() => {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    void (async () => {
+      const res = await fetch(
+        `/api/sprite/curation?atlasGenerationId=${encodeURIComponent(sheetGenerationId)}`,
+      );
+      if (!res.ok) return;
+      const body = (await res.json().catch(() => ({}))) as {
+        curation?: Record<string, { breathe?: unknown } | null>;
+      };
+      const on = new Set<string>();
+      for (const [state, rec] of Object.entries(body.curation ?? {})) {
+        if (rec?.breathe) on.add(state);
+      }
+      setBreatheOn(on);
+    })();
+  }, [isPlanDriven, sheetGenerationId]);
+
   /** 현재 표시 순서·제외를 상태별 selected 로 굽어 저장한다. */
   async function saveCurationSidecar() {
     if (!isPlanDriven || !sheetGenerationId || !params?.states) return;
@@ -943,8 +970,19 @@ export function SpriteCanvas({
         frameOrder.length === rows * cols
           ? frameOrder
           : Array.from({ length: rows * cols }, (_, i) => i);
-      const byState: Record<string, { selected: number[]; order: number[] }> = {};
-      for (const state of params.states) byState[state] = { selected: [], order: [] };
+      const byState: Record<
+        string,
+        { selected: number[]; order: number[]; breathe?: { depth: number; breaths: number } }
+      > = {};
+      for (const state of params.states) {
+        byState[state] = {
+          selected: [],
+          order: [],
+          // 껐으면 키를 아예 안 보낸다 — 저장 쪽이 그때 사이드카에서 지운다.
+          // 값은 정본 기본값 그대로다(몸통 높이 6%, 시퀀스당 1회).
+          ...(breatheOn.has(state) ? { breathe: { depth: 0.06, breaths: 1 } } : {}),
+        };
+      }
       // 표시 순서대로 훑으며 각 상태의 재생 시퀀스를 만든다 — selected 가 권위 필드다.
       for (const origIdx of ord) {
         const fs = frameState(origIdx);
@@ -1942,6 +1980,38 @@ export function SpriteCanvas({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+              {params?.states && (
+                <div className="mb-2 rounded-lg border border-border p-2">
+                  <div className="mb-1.5 text-[11px] font-medium text-text-muted">
+                    호흡 (정지 자세에 숨결을 넣습니다)
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {params.states.map(state => (
+                      <label
+                        key={state}
+                        className="flex cursor-pointer items-center gap-1 text-[11px] text-text-muted"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={breatheOn.has(state)}
+                          onChange={e => {
+                            setBreatheOn(prev => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(state);
+                              else next.delete(state);
+                              return next;
+                            });
+                          }}
+                        />
+                        {state}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-1 text-[10px] text-text-muted">
+                    원본 프레임은 그대로 두고 시트를 구울 때만 적용됩니다. 저장을 눌러야 반영됩니다.
+                  </div>
                 </div>
               )}
               <button
