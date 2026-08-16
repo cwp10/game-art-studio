@@ -312,6 +312,7 @@ void (async () => {
         JSON.stringify(r.contentSize),
       );
       check("×8 확대 = 64x64", r.width === 64 && r.height === 64);
+      check("알파 있는 원본은 sourceHasAlpha true", r.sourceHasAlpha === true);
       const meta = await sharp(dest).metadata();
       check("파일 치수가 일치", meta.width === 64 && meta.height === 64);
 
@@ -339,6 +340,29 @@ void (async () => {
         threw = true;
       }
       check("빈 셀은 empty-content 로 실패한다 (조용히 빈 이미지를 내지 않는다)", threw);
+
+      // 알파 없는 원본(= codex raw 생성물)에서는 콘텐츠 크롭이 아무 일도 하지 않는다.
+      // 실측 근거: 1254x1254 codex PNG 는 channels=3, hasAlpha=false 이고 bbox 가
+      // 정확히 셀 전체로 나왔다. 조용히 통과시키지 않고 플래그로 드러낸다.
+      const flat = join(dir, "flat.png");
+      await sharp(raw, { raw: { width: cols * cw, height: ch, channels: 4 } })
+        .removeAlpha()
+        .png()
+        .toFile(flat);
+      const rf = await bakeAnchorImage({
+        sheetPath: flat,
+        cell: normalizeCell({ size: 32 }),
+        cols,
+        index: 2,
+        destPath: join(dir, "flat-anchor.png"),
+        scale: 1,
+      });
+      check("알파 없는 원본은 sourceHasAlpha false", rf.sourceHasAlpha === false);
+      check(
+        "알파가 없으면 콘텐츠 크롭이 셀 전체가 된다 (크롭 무의미)",
+        rf.contentSize[0] === 32 && rf.contentSize[1] === 32,
+        JSON.stringify(rf.contentSize),
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -47,6 +47,22 @@ export function contentBBox(
   return x1 < 0 ? null : { x0, y0, x1, y1 };
 }
 
+export type BakeResult = {
+  contentSize: [number, number];
+  width: number;
+  height: number;
+  /**
+   * 원본에 알파 채널이 있었는지. **false 면 콘텐츠 크롭이 아무 일도 하지 않았다** —
+   * `ensureAlpha()` 가 전 픽셀을 255 로 채우므로 bbox 가 항상 셀 전체가 된다.
+   *
+   * 실측(2026-08-16): codex `image_gen` 결과 PNG 는 `channels: 3, hasAlpha: false` 이고
+   * 1254x1254 사과에서 bbox 가 정확히 셀 전체로 나왔다. 즉 raw 생성물에는 이 크롭이
+   * 무의미하며, 크로마 배경을 알파로 바꾼 뒤(추출 단계 이후)에만 유효하다. ①의 AA 검사가
+   * 같은 이유로 unmeasured 였던 것과 같은 함정이라 조용히 통과시키지 않고 드러낸다.
+   */
+  sourceHasAlpha: boolean;
+};
+
 export async function bakeAnchorImage(opts: {
   sheetPath: string;
   cell: CellSpec;
@@ -54,10 +70,13 @@ export async function bakeAnchorImage(opts: {
   index: number;
   destPath: string;
   scale?: number;
-}): Promise<{ contentSize: [number, number]; width: number; height: number }> {
+}): Promise<BakeResult> {
   const scale = opts.scale ?? ANCHOR_SCALE;
   const col = opts.index % opts.cols;
   const row = Math.floor(opts.index / opts.cols);
+
+  // ensureAlpha() 전에 원본을 봐야 한다 — 그 뒤에는 알파 유무를 구분할 수 없다.
+  const sourceHasAlpha = (await sharp(opts.sheetPath).metadata()).hasAlpha === true;
 
   const cellBuf = await sharp(opts.sheetPath)
     .extract({
@@ -97,5 +116,10 @@ export async function bakeAnchorImage(opts: {
     .png()
     .toFile(opts.destPath);
 
-  return { contentSize: [contentW, contentH], width: contentW * scale, height: contentH * scale };
+  return {
+    contentSize: [contentW, contentH],
+    width: contentW * scale,
+    height: contentH * scale,
+    sourceHasAlpha,
+  };
 }
