@@ -54,7 +54,9 @@ button-states, canvas-edit/[seedId], chat, cleanup, composite, composite-ai, con
 2. **generations.kind CHECK enum ↔ 새 kind 추가**
    schema.sql 의 kind CHECK 는 20종을 허용한다: `text2img/img2img/upscale/remove_bg/inpaint/spritesheet/mask/layer/external/reskin/resize/emote_sheet/tileset/normal_map/layer_extract/composite/sprite_effect/nine_slice/nine_slice_scaled/button_state`.
    **새 kind 는 enum 을 늘려서 추가한다.** 과거 `params.kindHint` 로 우회하던 패턴은 `migrate.ts` v1 이 정식 enum(mask/layer/external)으로 정리했으므로 되살리지 않는다 — 현재 `kindHint` 는 migrate.ts 의 과거 데이터 변환 코드에만 남아 있다.
-   SQLite 는 CHECK 를 ALTER 로 못 바꾼다. 새 kind 추가는 `migrate.ts` 에 테이블 재생성 마이그레이션(v2~v11 이 전부 이 패턴)을 더하고, `schema.sql` CHECK 와 `src/types/db.ts` 유니온도 **함께** 고친다. 세 곳 중 하나라도 빠지면 신규 DB 와 기존 DB 의 허용 kind 가 갈린다.
+   SQLite 는 CHECK 를 ALTER 로 못 바꾼다. 새 kind 추가는 `migrate.ts` 에 테이블 재생성 마이그레이션(v2~v11 이 전부 이 패턴)을 더한다.
+   **최종 CHECK 를 결정하는 것은 항상 migrate.ts 의 마지막 마이그레이션이다.** 신규 DB 도 `user_version` 0 에서 시작하므로 `client.ts` 의 `init()` 이 schema.sql 을 실행한 직후 v1~v11 을 전부 돌린다 — schema.sql 의 CHECK 는 그 직후 덮어써지는 초기 골격일 뿐이다.
+   따라서 필수는 `migrate.ts` + `src/types/db.ts` 유니온(타입 체크는 별도 경로) 두 곳이고, `schema.sql` 은 런타임에 영향이 없어도 **같이 맞춰라** — 안 맞으면 그 파일만 읽고 허용 kind 를 오해한다.
 3. **chat stream-json 이벤트 ↔ chat-state items 모델**
    chat/route가 Claude CLI의 stream-json을 ChatEvent(assistant_text / tool_call_started / tool_call_finished / message_completed)로 매핑하고, chat-state.ts의 단일 `items` 배열이 이를 소비한다. 이벤트를 추가하면 reducer도 함께.
 4. **progress.jsonl ↔ tailProgress()**
