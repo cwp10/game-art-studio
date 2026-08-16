@@ -14,6 +14,7 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
+import { buildPreviews } from "@/lib/sprite/preview";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
@@ -220,6 +221,20 @@ export async function runPlanDrivenSpritesheet(
     throw new Error(`아틀라스 합성 실패: ${composed.errors.join("; ")}`);
   }
 
+  // 모션 QA 계측기 — 정적 QA 로는 부족하다. 프레임 수가 맞고 알파가 깨끗하고 정체성이
+  // 일관돼도 애니메이션이 쓰레기일 수 있다(`qa-motion.md`, BLOCKING). 접촉 시트는 사람이
+  // 프레임을 훑고, GIF 는 루프 이음매를 본다. 런타임 에셋이 아니라 판정 도구다.
+  //
+  // 아틀라스 합성이 통과한 뒤에 만든다 — 합성이 실패한 런은 QA 할 대상이 아니다.
+  const preview = await buildPreviews({
+    request,
+    framesByState,
+    qaDir: path.join(workDir, "qa"),
+  });
+  if (!preview.ok) {
+    log(`plan-driven 경고: 모션 QA 프리뷰 일부 실패 — ${JSON.stringify(preview.states)}`);
+  }
+
   const atlasId = newGenerationId();
   const atlasPath = imagePath(atlasId);
   await writeAtlas(composed.atlas, atlasPath);
@@ -248,6 +263,14 @@ export async function runPlanDrivenSpritesheet(
       anchors: result.anchors,
       manifest: composed.manifest,
       warnings: result.warnings,
+      // 모션 QA 산출물 경로 — 판정은 사람이 한다. 여기 기록해 두면 어떤 런의 어떤
+      // 상태를 봤는지 사후에 짚을 수 있다.
+      motionQa: {
+        ok: preview.ok,
+        qaDir: preview.qaDir,
+        allContact: preview.allContactPath,
+        states: preview.states,
+      },
     },
     image_path: toRelative(atlasPath),
     width: composed.atlas.width,
