@@ -356,6 +356,87 @@ void (async () => {
     }
   }
 
+  console.log("=== 융착 포즈 분리 (fit.segmentation) ===");
+  {
+    const dir = await mkdtemp(join(tmpdir(), "segment-wire-"));
+    try {
+      const cell = normalizeCell({ size: 256 });
+
+      // 대조군: 거터가 있어 연결요소로 잘 갈리는 스트립.
+      const clean = canvas(400, 100, GREEN);
+      for (let f = 0; f < 4; f++) rect(clean, f * 100 + 20, 20, f * 100 + 80, 90, [153, 12, 40]);
+      const cleanPath = join(dir, "clean.png");
+      await sharp(clean.data, { raw: { width: 400, height: 100, channels: 4 } }).png().toFile(cleanPath);
+
+      const off = await extractRowFrames({ sheetPath: cleanPath, frameCount: 4, cell, chromaKey: GREEN });
+      const on = await extractRowFrames({
+        sheetPath: cleanPath, frameCount: 4, cell, chromaKey: GREEN,
+        fit: { segmentation: "projection" },
+      });
+      check("분리가 꺼져 있으면 보고도 없다", off.segmentation === undefined);
+      // 거터가 있는 스트립은 켜든 끄든 같은 프레임이 나와야 한다 — 분리는 자를
+      // 위치만 바꾸지 프레임 내용을 바꾸는 단계가 아니다.
+      check(
+        "거터 있는 스트립은 켜도 프레임이 같다",
+        off.frames.length === on.frames.length &&
+          off.frames.every((f, i) => f.data.equals(on.frames[i].data)),
+      );
+
+      // 본론: 포즈가 서로 닿아 연결요소가 한 덩어리로 합치는 스트립.
+      const fused = canvas(400, 100, GREEN);
+      for (let f = 0; f < 4; f++) rect(fused, f * 100, 20, f * 100 + 100, 90, [153, 12, 40]);
+      const fusedPath = join(dir, "fused.png");
+      await sharp(fused.data, { raw: { width: 400, height: 100, channels: 4 } }).png().toFile(fusedPath);
+
+      let threw = "";
+      try {
+        await extractRowFrames({ sheetPath: fusedPath, frameCount: 4, cell, chromaKey: GREEN });
+      } catch (e) { threw = (e as Error).message; }
+      check("융착 스트립은 기본 경로에서 실패한다", threw.length > 0, threw || "(실패하지 않음)");
+
+      const rescued = await extractRowFrames({
+        sheetPath: fusedPath, frameCount: 4, cell, chromaKey: GREEN,
+        fit: { segmentation: "projection" }, label: "fused_row",
+      });
+      check("projection 을 켜면 4프레임을 뽑는다", rescued.frames.length === 4);
+      check("분리를 실제로 적용했다고 보고한다", rescued.segmentation?.applied === true);
+      check("어디서 잘랐는지 남는다",
+        (rescued.segmentation?.boundaries?.length ?? 0) === 3,
+        JSON.stringify(rescued.segmentation?.boundaries));
+
+      // **켤 때 감수하는 대가**: 폭만 충분하면 DP 가 요구한 개수를 억지로 맞춘다.
+      // 실제 포즈가 4개인 스트립에 9를 요구해도 9칸이 나온다 — 정본의 "강제 복구"
+      // 설계다(AI 가 거터 없이 붙여 그리는 경우를 구제하려는 것). 즉 이 모드는
+      // frameCount 가 맞다는 전제를 신뢰하며, 틀린 frameCount 를 잡아주지 않는다.
+      const forced = await extractRowFrames({
+        sheetPath: fusedPath, frameCount: 9, cell, chromaKey: GREEN,
+        fit: { segmentation: "projection" }, label: "fused_row",
+      });
+      check("폭이 충분하면 요구한 개수를 억지로 맞춘다", forced.frames.length === 9);
+      check("억지 분할도 DP-forced 로 기록된다",
+        forced.segmentation?.note?.includes("DP-forced") === true, forced.segmentation?.note ?? "");
+
+      // 폭이 모자라면 강제 복구 조건(칸당 16px)을 못 넘어 스트립을 건드리지 않는다.
+      const narrow = canvas(60, 40, GREEN);
+      rect(narrow, 5, 5, 55, 35, [153, 12, 40]);
+      const narrowPath = join(dir, "narrow.png");
+      await sharp(narrow.data, { raw: { width: 60, height: 40, channels: 4 } }).png().toFile(narrowPath);
+      let threw2 = "";
+      let res: Awaited<ReturnType<typeof extractRowFrames>> | null = null;
+      try {
+        res = await extractRowFrames({
+          sheetPath: narrowPath, frameCount: 8, cell, chromaKey: GREEN,
+          fit: { segmentation: "projection" }, label: "narrow_row",
+        });
+      } catch (e) { threw2 = (e as Error).message; }
+      check("폭이 모자라면 조용히 넘어가지 않는다",
+        threw2.length > 0 || res?.segmentation?.applied === false,
+        threw2 || JSON.stringify(res?.segmentation));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
   console.log(`\n${passed} passed / ${failed} failed / ${skipped} skipped`);
   process.exit(failed === 0 ? 0 : 1);
 })();

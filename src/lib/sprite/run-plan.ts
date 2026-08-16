@@ -134,6 +134,9 @@ async function recordRow(
       unmixReach: request.chroma.unmixReach,
       spillMaxFraction: request.chroma.spillMaxFraction,
     },
+    // 분리 모드 SSoT 는 request `fit` 하나다 — 행마다 다르게 두지 않는다.
+    ...(request.fit ? { fit: request.fit } : {}),
+    label: state,
   });
   const dir = join(workDir, `frames-${state}`);
   await mkdir(dir, { recursive: true });

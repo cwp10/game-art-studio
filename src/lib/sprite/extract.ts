@@ -27,7 +27,12 @@ import { removeChromaBackground, type ChromaCleanOptions, type RGB } from "@/lib
 import { decideChromaMode, type ChromaMode, type ChromaModeDecision } from "@/lib/sprite/chroma-mode";
 import { removeChromaBackgroundYcbcr } from "@/lib/sprite/chroma-ycbcr";
 import { inspectFrames, type FrameQaResult } from "@/lib/sprite/frame-qa";
-import type { CellSpec } from "@/lib/sprite/request";
+import type { CellSpec, FitSpec } from "@/lib/sprite/request";
+import {
+  separateFusedPoses,
+  type SegmentationMode,
+  type SeparateResult,
+} from "@/lib/sprite/segment";
 
 export type RawImage = { data: Buffer; width: number; height: number };
 
@@ -313,6 +318,11 @@ export type ExtractResult = {
   chromaWarnings?: string[];
   /** 프레임별 QA (정본 `inspect_frames`) — 에러는 행을 차단한다. */
   frameQa?: FrameQaResult;
+  /**
+   * 투영 분리 결과. **옵트인이 켜졌을 때만** 채워진다. `applied: false` 인데 note 가
+   * 있으면 분리가 기대 개수를 못 내 스트립을 건드리지 않았다는 뜻이다.
+   */
+  segmentation?: SeparateResult;
 };
 
 /**
@@ -336,6 +346,12 @@ export async function extractRowFrames(opts: {
   allowSlotFallback?: boolean;
   /** 프레임 QA 에러로 차단하지 않는다 — 진단용. 경고·기록은 그대로 돌려준다. */
   allowFrameQaErrors?: boolean;
+  /** 분리 모드의 SSoT (`fit.segmentation`). 없으면 `"components"` 다. */
+  fit?: FitSpec;
+  /** 명시 override — CLI·진단용. 주면 `fit` 을 덮는다. */
+  segmentation?: SegmentationMode;
+  /** 분리 보고에 붙는 이름 (보통 상태명). */
+  label?: string;
 }): Promise<ExtractResult> {
   const { data, info } = await sharp(opts.sheetPath)
     .ensureAlpha()
@@ -357,10 +373,30 @@ export async function extractRowFrames(opts: {
   } else {
     removeChromaBackground(data, info.width, info.height, opts.chromaKey, opts.chroma);
   }
-  const strip: RawImage = { data, width: info.width, height: info.height };
+  let strip: RawImage = { data, width: info.width, height: info.height };
+
+  // 융착 포즈 분리 — 옵트인이고 기본은 꺼져 있다. 켜져 있을 때만 스트립을 갈라
+  // 거터를 넣어 재조립하고, 기대 개수를 못 내면 **건드리지 않고** 사유만 남긴다.
+  // 하류 연결요소 추출이 기존 에러로 관측 가능하게 실패하게 두는 것이다.
+  const separated = separateFusedPoses(strip, opts.frameCount, {
+    fit: opts.fit,
+    override: opts.segmentation,
+    label: opts.label,
+  });
+  if (separated.applied) {
+    const s = separated.strip;
+    // segment 는 Uint8Array 로 짓는다. 새로 할당한 버퍼라 복사 없이 뷰만 씌운다.
+    strip = {
+      data: Buffer.from(s.data.buffer, s.data.byteOffset, s.data.byteLength),
+      width: s.width,
+      height: s.height,
+    };
+  }
+
   const extra = {
     ...(decision ? { chroma: decision } : {}),
     ...(chromaWarnings.length > 0 ? { chromaWarnings } : {}),
+    ...(separated.note ? { segmentation: separated } : {}),
   };
 
   const grouped = extractComponentImages(strip, opts.frameCount);

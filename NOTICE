@@ -40,6 +40,7 @@ files below carry the port, each naming its upstream source in its header:
                                         (connected components, fit_to_cell,
                                          extract_slot_frames)
     src/lib/sprite/frame-qa.ts       <- sprite_gen/extract.py (inspect_frames)
+    src/lib/sprite/segment.ts        <- sprite_gen/segment.py
     src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
     src/lib/sprite/preview.ts        <- sprite_gen/preview.py
     src/lib/sprite/gif.ts            <- sprite_gen/gif_utils.py
@@ -76,6 +77,14 @@ internal/sprite/extract.go), Copyright Andrew Kim (gykim80), MIT License.
 This port uses it only in sprite-gen's own default `foot-centroid` mode; the
 `align_x: "alpha-centroid"` mode itself is not ported.
 
+The opt-in `fit.segmentation: "projection"` frame separation
+(sprite_gen/segment.py, ported here as `src/lib/sprite/segment.ts`) is a port of
+the projection-profile + DP optimal-cut segmentation from perfectpixel-studio
+(https://github.com/gykim80/perfectpixel-studio, internal/sprite/segment.go),
+Copyright Andrew Kim (gykim80), MIT License. The two helpers that sprite-gen
+keeps in that module but uses elsewhere (`mask_components`, `smooth_profile`,
+ported as `src/lib/sprite/silhouette.ts`) carry the same notice.
+
 The opt-in `chroma.mode: "ycbcr"` background matting (sprite_gen/extract.py,
 ported here as `src/lib/sprite/chroma-ycbcr.ts`) is a port of the
 chrominance-plane matting — CbCr border-mode key detection, Hermite soft matte,
@@ -92,7 +101,6 @@ recovery, is itself a port of the standalone `image-gen` skill
 --- not ported ---
 
 These perfectpixel-studio derived parts of sprite-gen are NOT ported here, so
-their notices do not apply to this repository: `segmentation: "projection"`
-(sprite_gen/segment.py) and the `estimate_pixel_grid_runlen` pitch estimator.
-If either is ported later, the corresponding notice from sprite-gen's NOTICE
-must be added above.
+their notices do not apply to this repository: the `estimate_pixel_grid_runlen`
+pitch estimator. If it is ported later, the corresponding notice from
+sprite-gen's NOTICE must be added above.

@@ -198,6 +198,9 @@ export async function runPlanDrivenSpritesheet(
           unmixReach: request.chroma.unmixReach,
           spillMaxFraction: request.chroma.spillMaxFraction,
         },
+        // 앵커 행 재추출도 같은 분리 모드를 타야 새로 굽는 행과 프레임이 맞는다.
+        ...(request.fit ? { fit: request.fit } : {}),
+        label: state,
       });
       const dir = path.join(workDir, `frames-${state}`);
       await mkdir(dir, { recursive: true });

@@ -107,6 +107,22 @@ export type SpriteRequest = {
    * 켜도 아무것도 그려지지 않는다 (`motion-phase.ts`).
    */
   motionPhaseGuides?: boolean;
+  /**
+   * 추출 튜닝. 정본 `request["fit"]` 에 대응한다 — 지금 쓰는 건 `segmentation` 뿐이다.
+   */
+  fit?: FitSpec;
+};
+
+/**
+ * 프레임 분리 방식. **기본은 `"components"`(연결요소)** 이고 정본도 같다.
+ *
+ * `"projection"` 은 컬럼 알파 질량의 골로 포즈를 세고, 골이 사라졌으면 DP 최소 컷으로
+ * 기대 개수를 강제 분할한다(`segment.ts`). 팔·소품이 이웃 프레임과 닿아 연결요소가
+ * 붙은 포즈를 한 덩어리로 합칠 때만 쓴다 — 켜면 기존 런의 결과가 달라질 수 있어
+ * 옵트인이다.
+ */
+export type FitSpec = {
+  segmentation?: "components" | "projection";
 };
 
 export const DEFAULT_STATES: Record<string, StateSpec> = {

@@ -82,6 +82,9 @@ export async function recomposeCuratedAtlas(atlasGenerationId: string): Promise<
         unmixReach: request.chroma.unmixReach,
         spillMaxFraction: request.chroma.spillMaxFraction,
       },
+      // 재합성은 처음 구울 때와 같은 프레임을 내야 한다 — 분리 모드도 같이 따라간다.
+      ...(request.fit ? { fit: request.fit } : {}),
+      label: state,
     });
     framesByState[state] = extracted.frames;
     curationByState[state] = getCuration(rowId);
