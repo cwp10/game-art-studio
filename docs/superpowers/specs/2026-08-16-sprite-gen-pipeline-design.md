@@ -224,8 +224,21 @@ sprite-gen 웹뷰와 역할이 겹치므로 뒷단은 신규 제작이 아니라
 
 ## 4. ⓪단계 상세 — provider 정합
 
-`codex-exec.ts` 한 파일의 변경이다. spawn 골격·로그 버퍼·`inferStage` 진행 추론은 그대로 두고,
-**호출 인자·프롬프트 헤더·출력 회수** 세 곳을 교체한다.
+`codex-exec.ts` 의 변경이다. spawn 골격·타임아웃·로그 버퍼·Windows 처리·후처리(chroma/luma key)는
+그대로 두고, **호출 인자·프롬프트 헤더·진행 단계 추론·출력 회수** 네 곳을 교체한다. 파싱 로직은
+`codex-rollout.ts` 로 분리해 codex 없이 테스트한다.
+
+**정정(계획 작성 중 확인)**: 2차 개정에서 "`inferStage` 진행 추론은 그대로 두고"라고 쓴 것은
+틀렸다. `inferStage`(`codex-exec.ts:404-405`)는 stderr 의 `generated_images` + `find`/`cp `
+문자열에 **전적으로 의존한다** — 모델이 파일을 복사하는 동작의 부산물이다. 프롬프트에서 파일
+저장 지시를 없애면 두 단계(`image_generating`·`recovering`)가 함께 사라져 진행 표시가
+"starting" 에서 "done" 으로 점프한다. `--json` 스트림의 `image_generation_*` 이벤트를 읽도록
+교체해야 한다.
+
+**status 판정은 sprite-gen 과 다르게 간다.** 로컬 `~/.codex/sessions` 실측(2026-08-16)에서
+`image_generation_*` 레코드의 `status` 가 `"generating"` 으로만 관측됐다. sprite-gen 의
+`status != "completed" → 에러` 를 그대로 이식하면 **항상 실패한다.** `result` 존재로 판정하고
+status 는 로그에만 남긴다.
 
 ### 4.1 호출 인자
 
@@ -240,9 +253,14 @@ codex exec --json
            -                      # 프롬프트는 stdin
 ```
 
-변경점: `--json`·`--color never`·`--add-dir` 추가, 프롬프트를 positional 에서 stdin 으로,
-`--cd` 를 `-C` 로. `--ephemeral` 은 **절대 쓰지 않는다** — rollout jsonl 이 디스크에 남아야
-회수가 된다.
+변경점: `--json`·`--color never`·`--add-dir` 추가. `--ephemeral` 은 **절대 쓰지 않는다** —
+rollout jsonl 이 디스크에 남아야 회수가 된다.
+
+**정정(계획 작성 중 확인, 2026-08-16)**: 프롬프트는 **이미 stdin 으로 전달하고 있다**
+(`codex-exec.ts:473-474`, `514` — `-` sentinel + `child.stdin.end(naturalPrompt)`). 2차 개정에서
+"positional → stdin 변경"이라고 쓴 것은 현행 코드를 잘못 읽은 것이다. `--cd` 도 그대로 둔다 —
+`-C` 로 바꿀 이유가 없다. 그리고 현행에는 sprite-gen 에 없는 `-c model_reasoning_effort="high"`
+가 있는데, 우리 고유 설정이므로 유지한다.
 
 **환경변수**: sprite-gen `provider_subprocess_env()` 를 그대로 따라 **prefix 블랙리스트**로
 간다 — 부모 환경에서 orchestrator 세션 env 계열만 제거한다. 화이트리스트는 codex 인증·PATH
