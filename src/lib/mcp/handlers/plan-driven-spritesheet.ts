@@ -12,11 +12,14 @@
  * base 가 아니라 **앵커**에서 정체성을 받는다.
  */
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { buildPreviews } from "@/lib/sprite/preview";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
 import { inspectBaseImage } from "@/lib/sprite/base-gate";
+import { formatHints } from "@/lib/sprite/correction-loop";
+import { inspectStates, type InspectReport } from "@/lib/sprite/inspect";
+import { scoreInspection, type ScoreReport } from "@/lib/sprite/score";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
@@ -262,6 +265,44 @@ export async function runPlanDrivenSpritesheet(
     framesByState[state] = frames;
   }
 
+  // 폐루프의 측정·판단 단계. **차단하지 않는다** — 정본도 inspect/score 는 신호를
+  // 낼 뿐이고 재생성 여부는 correction_loop 가 정한다. 여기서는 리포트를 남겨
+  // 모션 QA 화면이 읽게 하고, 힌트는 다음 재생성 때 프롬프트에 얹을 재료로 쓴다.
+  //
+  // 입력이 `framesByState` 인 이유: 이 맵은 새로 구운 행과 **재사용한 앵커 행**을 모두
+  // 담는다. 생성 단계에서만 모으면 재사용 런이 통째로 검사에서 빠진다 — 정본 inspect
+  // 도 frames/ 를 통째로 읽지 어느 행이 이번에 생성됐는지 가리지 않는다.
+  // 아직 큐레이션 이전이라 사람이 뺀 프레임이 신호에 섞이지 않는다.
+  let inspectReport: InspectReport | null = null;
+  let scoreReport: ScoreReport | null = null;
+  {
+    const inspectInput = stateOrder
+      .filter(s => framesByState[s]?.length)
+      .map(s => ({
+        state: s,
+        expected: request.states[s].frames,
+        frames: framesByState[s].map(f => ({ data: f.data, width: f.width, height: f.height })),
+      }));
+    if (inspectInput.length > 0) {
+      inspectReport = inspectStates(inspectInput);
+      scoreReport = scoreInspection(inspectReport);
+      log(
+        `plan-driven: 검사 ${scoreReport.overall_score}점 ` +
+          `(${scoreReport.ok ? "통과" : "미달"}, rank=${scoreReport.candidate_rank})`,
+      );
+      for (const row of scoreReport.rows) {
+        log(`plan-driven: 검사 '${row.state}' ${row.score}점, 힌트 ${row.hints.length}개`);
+      }
+      await writeFile(
+        path.join(workDir, "inspect.json"),
+        JSON.stringify({ inspect: inspectReport, score: scoreReport }, null, 2) + "\n",
+      );
+      if (scoreReport.hints.length > 0) {
+        await writeFile(path.join(workDir, "correction-hints.txt"), formatHints(scoreReport.hints));
+      }
+    }
+  }
+
   // 이번 런의 방향 앵커 행을 base 에 기록해 다음 런이 재사용하게 한다.
   {
     const base = getLockedBase(sessionId);
@@ -336,6 +377,26 @@ export async function runPlanDrivenSpritesheet(
       request,
       curationApplied: composed.manifest.curation_applied,
       warnings: [...gateWarnings, ...result.warnings],
+      // 폐루프 신호. 점수·힌트만 담고 프레임은 담지 않는다 — 리포트가 params 를
+      // 무겁게 만들면 안 되고, 프레임은 workDir 의 inspect.json 에 이미 있다.
+      inspect: scoreReport
+        ? {
+            ok: scoreReport.ok,
+            overall_score: scoreReport.overall_score,
+            candidate_rank: scoreReport.candidate_rank,
+            rows: scoreReport.rows.map(r => ({
+              state: r.state,
+              score: r.score,
+              errors: r.errors,
+              warnings: r.warnings,
+              hints: r.hints,
+            })),
+            hints: scoreReport.hints,
+            metrics: Object.fromEntries(
+              (inspectReport?.rows ?? []).map(r => [r.state, r.metrics]),
+            ),
+          }
+        : null,
       // 모션 QA 산출물 경로 — 판정은 사람이 한다. 여기 기록해 두면 어떤 런의 어떤
       // 상태를 봤는지 사후에 짚을 수 있다.
       motionQa: {

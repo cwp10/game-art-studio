@@ -26,6 +26,15 @@ type MotionQa = {
   states: PreviewState[];
 };
 
+/** `params.inspect` — plan-driven 이 남긴 폐루프 요약. */
+type InspectSummary = {
+  ok: boolean;
+  overall_score: number;
+  rows: Array<{ state: string; score: number; errors: string[]; warnings: string[]; hints: string[] }>;
+  hints: string[];
+  metrics: Record<string, unknown>;
+};
+
 function allowedPaths(qa: MotionQa): Map<string, string> {
   const out = new Map<string, string>();
   const add = (p: string | undefined): void => {
@@ -76,6 +85,10 @@ export async function GET(req: NextRequest) {
   const url = (p: string | undefined): string | null =>
     p ? `/api/sprite/qa?atlasGenerationId=${atlasId}&file=${encodeURIComponent(path.basename(p))}` : null;
 
+  // 폐루프 신호 — 사람이 눈으로 보는 접촉 시트·GIF 옆에 **기계가 잰 수치**를 같이
+  // 둔다. 사람이 못 보는 것(무게중심 지터 0.3px, 모션 0.0064)이 여기서 잡힌다.
+  const inspect = atlas.params?.inspect as InspectSummary | null | undefined;
+
   return Response.json({
     ok: qa.ok,
     allContact: url(qa.allContact),
@@ -88,6 +101,15 @@ export async function GET(req: NextRequest) {
       loop: s.loop,
       contact: url(s.contactPath),
       gif: url(s.gifPath),
+      score: inspect?.rows?.find(r => r.state === s.state) ?? null,
+      metrics: inspect?.metrics?.[s.state] ?? null,
     })),
+    inspect: inspect
+      ? {
+          ok: inspect.ok,
+          overall_score: inspect.overall_score,
+          hints: inspect.hints,
+        }
+      : null,
   });
 }

@@ -44,7 +44,22 @@ type QaData = {
     loop?: boolean;
     contact: string | null;
     gif: string | null;
+    /** 폐루프 채점 — 없으면 이 시트가 검사 이전 산출물이다. */
+    score?: {
+      state: string;
+      score: number;
+      errors: string[];
+      warnings: string[];
+      hints: string[];
+    } | null;
+    metrics?: {
+      histogram_intersection: { min: number; mean: number };
+      dhash_similarity: { min: number; mean: number };
+      motion_presence: number;
+      centroid_sigma: { x: number; y: number };
+    } | null;
   }>;
+  inspect?: { ok: boolean; overall_score: number; hints: string[] } | null;
 };
 
 type Props = {
@@ -1803,7 +1818,11 @@ export function SpriteCanvas({
                       <Film size={14} /> 모션 QA
                     </span>
                     <span className="text-xs text-text-muted">
-                      {qa.ok ? `${qa.states.length}개 행` : "일부 실패"}
+                      {qa.inspect
+                        ? `${qa.inspect.overall_score}점 · ${qa.states.length}개 행`
+                        : qa.ok
+                          ? `${qa.states.length}개 행`
+                          : "일부 실패"}
                     </span>
                   </button>
                   {qaOpen && (
@@ -1812,16 +1831,78 @@ export function SpriteCanvas({
                         큐레이션 <b>이전</b> 프레임 전체입니다. 루프 이음매·발 접지·해부 파손을
                         보고 뺄 프레임을 정하세요. 걷기·달리기는 정본에서 experimental 등급입니다.
                       </p>
+                      {/* 기계가 잰 신호. 사람 눈이 놓치는 것(모션 0.0064, 무게중심 0.3px 지터)이
+                          여기서 잡힌다. 점수는 차단이 아니라 판단 재료다 — 정본도 inspect/score 는
+                          신호만 내고 재생성 여부는 사람이나 correction loop 가 정한다. */}
+                      {qa.inspect && (
+                        <div
+                          className={`rounded-lg border p-2 text-[11px] leading-snug ${
+                            qa.inspect.ok
+                              ? "border-[color:var(--accent)]/40 text-text-muted"
+                              : "border-[color:var(--warning,#d59f0f)]/50 text-text-muted"
+                          }`}
+                        >
+                          <b className="text-text-primary">
+                            자동 검사 {qa.inspect.overall_score}점 —{" "}
+                            {qa.inspect.ok ? "통과" : "미달"}
+                          </b>
+                          {qa.inspect.hints.length > 0 && (
+                            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                              {qa.inspect.hints.map((h, i) => (
+                                <li key={i}>{h}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                       {qa.states.map(s => (
                         <div key={s.state} className="space-y-1">
                           <div className="flex items-baseline justify-between text-xs">
-                            <span className="text-text-primary">{s.state}</span>
+                            <span className="text-text-primary">
+                              {s.state}
+                              {s.score && (
+                                <span
+                                  className={
+                                    s.score.score >= 90
+                                      ? " text-[color:var(--accent)]"
+                                      : " text-[color:var(--warning,#d59f0f)]"
+                                  }
+                                >
+                                  {" "}
+                                  {s.score.score}점
+                                </span>
+                              )}
+                            </span>
                             <span className="text-text-muted">
                               {s.ok
                                 ? `${s.frames}f · ${s.fps}fps · ${s.loop ? "루프" : "비루프"}`
                                 : (s.note ?? "실패")}
                             </span>
                           </div>
+                          {s.metrics && (
+                            <div className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10px] text-text-muted">
+                              <span title="프레임 간 색 정체성 — 낮으면 팔레트가 흔들린다">
+                                색 {s.metrics.histogram_intersection.min.toFixed(3)}
+                              </span>
+                              <span title="프레임 간 실루엣 정체성 — 낮으면 매 프레임 다시 그려진 것">
+                                실루엣 {s.metrics.dhash_similarity.min.toFixed(3)}
+                              </span>
+                              <span
+                                title="프레임 간 변화량 — 0.01 미만이면 사실상 정지 화면"
+                                className={
+                                  s.metrics.motion_presence < 0.01
+                                    ? "text-[color:var(--warning,#d59f0f)]"
+                                    : undefined
+                                }
+                              >
+                                모션 {s.metrics.motion_presence.toFixed(4)}
+                              </span>
+                              <span title="알파 무게중심 흔들림(px) — 재생 시 지터로 보인다">
+                                지터 {s.metrics.centroid_sigma.x.toFixed(2)}/
+                                {s.metrics.centroid_sigma.y.toFixed(2)}
+                              </span>
+                            </div>
+                          )}
                           {s.gif && (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img
