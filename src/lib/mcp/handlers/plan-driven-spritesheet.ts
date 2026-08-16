@@ -12,7 +12,7 @@
  * base 가 아니라 **앵커**에서 정체성을 받는다.
  */
 import path from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { buildPreviews } from "@/lib/sprite/preview";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
@@ -21,6 +21,8 @@ import { formatHints } from "@/lib/sprite/correction-loop";
 import { inspectStates, type InspectReport } from "@/lib/sprite/inspect";
 import { scoreInspection, type ScoreReport } from "@/lib/sprite/score";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
+import { generateChunkedRow } from "@/lib/sprite/chunk-generate";
+import { selectImageBackend } from "@/lib/image-backend";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
 import {
@@ -239,8 +241,93 @@ export async function runPlanDrivenSpritesheet(
     log(`plan-driven: 앵커 지정 ${JSON.stringify(picks)}`);
   }
 
+  /**
+   * 청크 생성 — 행을 2프레임씩 나눠 만들고 격자를 게이트로 건 뒤 하나의 스트립으로 잇는다.
+   *
+   * 청크 이미지는 generation 으로 남기지 않는다. 남는 것은 **합성 스트립 하나**라
+   * 하류(추출·큐레이션·합성)가 여느 행과 똑같이 다룬다.
+   */
+  const generateChunked = async (
+    spec: Parameters<GenerateFn>[0],
+    step: number,
+  ): Promise<{ generationId: string; imagePath: string; width: number; height: number }> => {
+    const c = spec.chunked!;
+    const backend = await selectImageBackend();
+    const result = await generateChunkedRow({
+      frameCount: c.frameCount,
+      chromaRgb: c.chromaRgb,
+      label: spec.state,
+      log: message => log(`plan-driven: ${message}`),
+      generateChunk: async (chunkIndex, frames, attempt) => {
+        const guide = await c.guideFor(frames, chunkIndex);
+        const refs = [...spec.inputPaths.filter(p2 => !/guide-.*\.png$/.test(p2)), guide];
+        const tmpId = `chunk_${spec.state}_${chunkIndex}_${attempt}_${Date.now().toString(36)}`;
+        const out = await backend.execute(
+          {
+            id: tmpId,
+            generationId: tmpId,
+            kind: "spritesheet",
+            prompt: c.promptFor(frames),
+            inputImagePaths: refs,
+            params: { rawPrompt: true, state: spec.state, planDriven: true },
+          },
+          (stage, detail) =>
+            log(
+              `plan-driven: ${spec.role} ${step}/${stateOrder.length} ` +
+                `청크 ${chunkIndex + 1} [${stage}]${detail ? ` ${detail}` : ""}`,
+            ),
+        );
+        const { data, info } = await sharp(out.imagePath)
+          .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+        await rm(out.imagePath, { force: true });
+        return { data: Buffer.from(data), width: info.width, height: info.height };
+      },
+    });
+    for (const w of result.warnings) gateWarnings.push(w);
+    log(
+      `plan-driven: ${spec.state} 청크 ${result.attempts.length}개 — ` +
+        result.attempts.map(a => `#${a.index + 1} ${a.attempts}회 피치 ${a.pitch[0].toFixed(1)}`).join(", "),
+    );
+
+    // 합성 스트립을 이 행의 generation 으로 저장한다.
+    const genId = newGenerationId();
+    const outPath = imagePath(genId);
+    await sharp(result.strip.data, {
+      raw: { width: result.strip.width, height: result.strip.height, channels: 4 },
+    }).png().toFile(outPath);
+    createGeneration({
+      id: genId,
+      session_id: sessionId,
+      message_id: null,
+      kind: "spritesheet",
+      prompt: spec.prompt,
+      input_image_ids: [],
+      params: {
+        rawPrompt: true,
+        state: spec.state,
+        role: spec.role,
+        planDriven: true,
+        chunked: result.attempts,
+        curation: { selected: [] },
+      },
+      image_path: toRelative(outPath),
+      width: result.strip.width,
+      height: result.strip.height,
+      backend: "codex_exec",
+    });
+    return {
+      generationId: genId,
+      imagePath: outPath,
+      width: result.strip.width,
+      height: result.strip.height,
+    };
+  };
+
   const generate: GenerateFn = async spec => {
     const step = stateOrder.indexOf(spec.state) + 1;
+    if (spec.chunked) {
+      return generateChunked(spec, step);
+    }
     const res = await runImageTool({
       name: "sprite_row",
       kind: "spritesheet",
