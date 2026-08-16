@@ -119,19 +119,18 @@ function defaultSessionsDir(): string {
 /** 디렉터리를 재귀 순회하며 조건에 맞는 파일 경로를 모은다. */
 async function walk(dir: string, match: (name: string) => boolean): Promise<string[]> {
   const found: string[] = [];
-  let entries: Awaited<ReturnType<typeof readdir>>;
   try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return found;
-  }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      found.push(...(await walk(full, match)));
-    } else if (match(entry.name)) {
-      found.push(full);
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        found.push(...(await walk(full, match)));
+      } else if (match(entry.name)) {
+        found.push(full);
+      }
     }
+  } catch {
+    // 읽을 수 없는 디렉터리는 건너뛴다 (권한·경쟁 삭제)
   }
   return found;
 }

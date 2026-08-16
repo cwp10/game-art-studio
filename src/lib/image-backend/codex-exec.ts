@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import {
@@ -17,6 +18,7 @@ import type {
   ProgressCallback,
 } from "./index";
 import { chromaKeyFile, lumaKeyFile, GREEN_SUBJECT_RE, VFX_EFFECT_RE, stripBgHints, type ChromaKeyColor } from "./chroma-key";
+import { extractStreamErrors, parseSessionId, recoverPngFromRollout } from "./codex-rollout";
 
 /**
  * CodexExecBackend — `codex exec` 를 spawn 해서 imagegen 스킬을 자동 발동.
@@ -494,13 +496,24 @@ export class CodexExecBackend implements ImageBackend {
     // 대체 파서가 프롬프트 단어를 명령으로 오인하는 문제를 피한다.
     // `-i, --image <FILE>...` 는 multi-value 옵션이라, attached image 가 있으면
     // `--` 로 옵션 종료를 명시한 뒤 stdin sentinel `-` 를 positional 로 둔다.
+    // --json: stdout 이 JSON 이벤트 스트림이 된다. session id 파싱과 진행 단계 추론이
+    //         여기에 의존한다.
+    // --add-dir: ~/.codex/generated_images 는 기본 쓰기 집합에 없다. 누락 시 image_gen 이
+    //            조용히 실패할 수 있다(sprite-gen codex_provider.py 헤더의 관측).
+    // --ephemeral 은 절대 쓰지 않는다 — rollout jsonl 이 디스크에 남아야 회수가 된다.
+    const genDir = path.join(os.homedir(), ".codex", "generated_images");
     const args = [
       "exec",
+      "--json",
       "--cd",
       workDir,
       "--sandbox",
       "workspace-write",
       "--skip-git-repo-check",
+      "--color",
+      "never",
+      "--add-dir",
+      genDir,
       "-c", `model_reasoning_effort="high"`,
       ...attachedImages.flatMap(p => ["-i", p]),
       ...(attachedImages.length > 0 ? ["--"] : []),
@@ -525,9 +538,20 @@ export class CodexExecBackend implements ImageBackend {
       spawnCmd = "codex";
       spawnArgs = args;
     }
+    // 헤드리스 생성 서브프로세스는 스폰한 에이전트의 세션 정체성을 물려받지 않는다.
+    // 우리는 Claude CLI 가 띄운 MCP 서버 안에서 codex 를 다시 spawn 하므로,
+    // 세션 환경이 섞이면 추적이 어려워진다. prefix 블랙리스트로 걷어낸다
+    // (화이트리스트는 codex 인증·PATH 관련 변수를 빠뜨릴 위험이 있다).
+    const ORCHESTRATOR_ENV_PREFIXES = ["CLAUDE_", "CLAUDECODE", "ANTHROPIC_", "MCP_"];
+    const childEnv = { ...process.env };
+    for (const key of Object.keys(childEnv)) {
+      if (ORCHESTRATOR_ENV_PREFIXES.some(prefix => key.startsWith(prefix))) delete childEnv[key];
+    }
+    childEnv.NODE_OPTIONS = "--max-old-space-size=8192";
+
     const child = spawn(spawnCmd, spawnArgs, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
+      env: childEnv,
       shell: false,
       windowsHide: true,
     });
@@ -621,37 +645,36 @@ export class CodexExecBackend implements ImageBackend {
       );
     }
 
-    // workDir 에서 output.png 찾기
-    onProgress("recovering", "scanning workdir");
-    const outputCandidate = path.join(workDir, "output.png");
-    let pickedPath: string | null = null;
-    try {
-      await fs.stat(outputCandidate);
-      pickedPath = outputCandidate;
-    } catch {
-      // fallback: 가장 최근의 .png 파일을 채택.
-      // 단, workDir 로 복사된 입력 이미지(input0.png, input1.png …)는 제외한다.
-      // codex 가 조용히 실패해 output.png 를 못 만들면 입력 파일이 "가장 최근 PNG"로
-      // 잘못 선택되어 입력이 곧 결과로 반환되는 silent wrong-output 버그를 막는다.
-      const entries = await fs.readdir(workDir);
-      const pngs = entries.filter(
-        e => e.toLowerCase().endsWith(".png") && !/^input\d*\.png$/i.test(e),
+    // rollout jsonl 의 inline base64 에서 회수한다.
+    // 모델이 보고하는 saved_path 나 workDir 의 파일은 신뢰하지 않는다 —
+    // 그 경로는 모델이 파일을 복사해줄 때만 존재한다.
+    // 과거의 "output.png → 없으면 최신 .png" 폴백은 제거했다. 회수 실패를 조용히
+    // 덮어 엉뚱한 이미지를 결과로 반환할 수 있었다.
+    onProgress("recovering", "reading rollout");
+    const sessionId = parseSessionId(stdoutBuf);
+    if (!sessionId) {
+      const streamErrors = extractStreamErrors(stdoutBuf);
+      const detail = streamErrors.length > 0
+        ? streamErrors.join("; ")
+        : "(stdout 에 오류 상세 없음)";
+      throw new Error(
+        `codex: stdout 에서 session id 를 찾지 못했습니다 — ${detail}. See ${logFile}`,
       );
-      if (pngs.length === 0) {
-        throw new Error(`No PNG produced in ${workDir}. See ${logFile}`);
-      }
-      // mtime 으로 가장 최근
-      const stats = await Promise.all(
-        pngs.map(async e => ({ name: e, mtime: (await fs.stat(path.join(workDir, e))).mtimeMs })),
-      );
-      stats.sort((a, b) => b.mtime - a.mtime);
-      pickedPath = path.join(workDir, stats[0].name);
     }
 
-    // 최종 위치로 이동
     const destPath = imagePathFor(job.generationId);
     await fs.mkdir(IMAGES_DIR, { recursive: true });
-    await fs.rename(pickedPath, destPath);
+    let recovered: { bytes: number; statuses: string[] };
+    try {
+      recovered = await recoverPngFromRollout(sessionId, destPath);
+    } catch (e) {
+      throw new Error(`${(e as Error).message}. See ${logFile}`);
+    }
+    await fs.appendFile(
+      logFile,
+      `\n# recovered: session=${sessionId} bytes=${recovered.bytes} ` +
+        `statuses=${JSON.stringify(recovered.statuses)}`,
+    );
 
     // remove_bg 후처리: VFX 이펙트 → 루미넌스 키, 캐릭터/오브젝트 → 크로마키.
     // layer_extract 는 항상 크로마키(마스크 기반 추출이라 VFX 경우가 없음).
