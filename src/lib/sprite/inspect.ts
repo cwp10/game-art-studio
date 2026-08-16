@@ -199,8 +199,30 @@ export const DEFAULT_INSPECT_THRESHOLDS: InspectThresholds = {
   motionMin: DEFAULT_MOTION_MIN,
 };
 
+/**
+ * 행의 역할. 방향 앵커 행은 **모션 임계에서 면제**된다.
+ *
+ * 정본 이탈이고, 근거는 정본 자신의 프롬프트다. 방향 앵커 행에는
+ * *"keep poses minimal (subtle breathing) so a single frame can be cropped as the
+ * anchor"* 가 붙는다(prepare.py:707) — 그 행은 앵커로 잘라 쓸 정지에 가까운 포즈가
+ * 목적이다. 그런데 정본 score 는 상태를 가리지 않고 `motion < 0.01` 을 경고로
+ * 올리므로, 앵커 행은 **고칠 수 없는 경고**를 영구히 받는다. 정본은 CLI 라
+ * `--motion-min` 으로 사람이 낮추면 그만이지만 우리 앱에는 그 자리가 없다.
+ *
+ * 실측(2026-08-16, 같은 런):
+ *
+ *   down_idle  (앵커 행) 모션 0.0065  실루엣 1.0000  →  85점, 교정해도 85점
+ *   down_attack(액션 행) 모션 0.0660  실루엣 0.7656  → 100점
+ *
+ * 액션 행은 10배 움직이고 만점이다. 파이프라인이 아니라 앵커 행의 성질이다.
+ * 그 행에 "더 움직여라" 힌트를 주고 재생성하면 프롬프트가 자기 자신과 싸우고
+ * (같은 프롬프트에 minimal 3회 vs visibly progress 1회) codex 비용만 나간다.
+ */
+export type RowRole = "direction-anchor" | "action-row";
+
 export type InspectRow = {
   state: string;
+  role?: RowRole;
   source: "frames" | "missing";
   expected_frames: number;
   found_frames: number;
@@ -208,6 +230,8 @@ export type InspectRow = {
   ok: boolean;
   errors: string[];
   warnings: string[];
+  /** 경고가 아닌 기록(임계 면제 사유 등). 점수에 영향을 주지 않는다. */
+  notes?: string[];
 };
 
 export type InspectReport = {
@@ -228,17 +252,18 @@ export type InspectReport = {
  * 사람이 읽는 자리(모션 QA)에 그대로 나가므로 표현을 갈라놓지 않는다.
  */
 export function inspectStates(
-  input: Array<{ state: string; expected: number; frames: Frame[] }>,
+  input: Array<{ state: string; expected: number; frames: Frame[]; role?: RowRole }>,
   thresholds: InspectThresholds = DEFAULT_INSPECT_THRESHOLDS,
 ): InspectReport {
   const rows: InspectRow[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  for (const { state, expected, frames } of input) {
+  for (const { state, expected, frames, role } of input) {
     if (frames.length === 0) {
       const row: InspectRow = {
         state,
+        role,
         source: "missing",
         expected_frames: expected,
         found_frames: 0,
@@ -254,6 +279,8 @@ export function inspectStates(
     const found = frames.length;
     const rowErrors: string[] = [];
     const rowWarnings: string[] = [];
+    /** 경고가 아닌 기록 — 점수에 영향을 주지 않는다. */
+    const rowNotes: string[] = [];
     if (found !== expected) {
       rowErrors.push(`${state}: expected ${expected} frame(s), inspect found ${found}`);
     }
@@ -273,7 +300,17 @@ export function inspectStates(
           `(${metrics.dhash_similarity.min.toFixed(3)} < ${thresholds.dhashMin.toFixed(3)})`,
       );
     }
-    if (metrics.motion_presence < thresholds.motionMin) {
+    // 앵커 행은 모션 임계에서 면제한다(RowRole 주석 참고). 면제 사실은 남긴다 —
+    // 조용히 빼면 "이 행은 왜 경고가 없나" 를 나중에 못 짚는다.
+    if (role === "direction-anchor") {
+      if (metrics.motion_presence < thresholds.motionMin) {
+        rowNotes.push(
+          `${state}: motion ${metrics.motion_presence.toFixed(4)} — 방향 앵커 행이라 ` +
+            `모션 임계(${thresholds.motionMin.toFixed(4)})를 적용하지 않았습니다. ` +
+            "이 행은 앵커로 잘라 쓸 최소 동작이 목적입니다",
+        );
+      }
+    } else if (metrics.motion_presence < thresholds.motionMin) {
       rowWarnings.push(
         `${state}: motion presence is too low ` +
           `(${metrics.motion_presence.toFixed(4)} < ${thresholds.motionMin.toFixed(4)})`,
@@ -281,7 +318,9 @@ export function inspectStates(
     }
     rows.push({
       state,
+      role,
       source: "frames",
+      ...(rowNotes.length > 0 ? { notes: rowNotes } : {}),
       expected_frames: expected,
       found_frames: found,
       metrics,

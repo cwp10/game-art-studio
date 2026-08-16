@@ -16,12 +16,12 @@ import { scoreInspection } from "../src/lib/sprite/score";
 const PY = "/Users/wonpyoung/Developer/workspace/sprite-gen/.venv/bin/python";
 const CANON = "/Users/wonpyoung/Developer/workspace/sprite-gen";
 
-function mk(rows: Array<Partial<{ state: string; expected: number; found: number; errs: string[]; warns: string[]; hist: number; dh: number; motion: number }>>, thresholds = { histogram_min: 0.0, dhash_min: 0.55, motion_min: 0.01 }): InspectReport {
+function mk(rows: Array<Partial<{ state: string; expected: number; found: number; errs: string[]; warns: string[]; hist: number; dh: number; motion: number; role: "direction-anchor" | "action-row" }>>, thresholds = { histogram_min: 0.0, dhash_min: 0.55, motion_min: 0.01 }): InspectReport {
   return {
     ok: true, engine: "component-row", kind: "sprite-gen-inspect-report",
     states: rows.map(r => r.state ?? "s"), thresholds,
     rows: rows.map(r => ({
-      state: r.state ?? "s", source: "frames" as const,
+      state: r.state ?? "s", role: r.role, source: "frames" as const,
       expected_frames: r.expected ?? 4, found_frames: r.found ?? 4,
       metrics: { histogram_intersection: { min: r.hist ?? 1, mean: r.hist ?? 1 },
                  dhash_similarity: { min: r.dh ?? 1, mean: r.dh ?? 1 },
@@ -71,5 +71,23 @@ print(json.dumps(score_inspection(json.loads(sys.stdin.read()))))
     console.log(`    ref =${JSON.stringify(ref).slice(0, 240)}`);
   }
 }
+// 앵커 행 면제는 **정본에 없는 우리 규칙**이라 정본 대조 대상이 아니다. 여기서
+// 따로 검사한다: 경고만 빼고 감점·힌트를 그대로 두면 "경고 0인데 12점 깎이고
+// 고치라는 힌트가 나오는" 상태가 된다(실측으로 잡은 버그).
+{
+  const anchor = scoreInspection(mk([{ state: "down_idle", motion: 0.001, role: "direction-anchor" }]));
+  const action = scoreInspection(mk([{ state: "down_attack", motion: 0.001, role: "action-row" }]));
+  const checks: Array<[string, boolean, string]> = [
+    ["앵커 행은 모션 감점이 없다", anchor.rows[0].score === 100, `${anchor.rows[0].score}점`],
+    ["앵커 행은 모션 힌트가 없다", anchor.rows[0].hints.length === 0, JSON.stringify(anchor.rows[0].hints)],
+    ["액션 행은 모션 감점 -12", action.rows[0].score === 88, `${action.rows[0].score}점`],
+    ["액션 행은 모션 힌트가 있다", action.rows[0].hints.some(h => h.includes("too similar")), JSON.stringify(action.rows[0].hints)],
+  ];
+  for (const [n, ok, detail] of checks) {
+    if (ok) { pass++; console.log(`  OK   ${n}`); }
+    else { fail++; console.log(`  FAIL ${n} — ${detail}`); }
+  }
+}
+
 console.log(`\n${pass} passed / ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -326,11 +326,18 @@ export async function runPlanDrivenSpritesheet(
   let inspectReport: InspectReport | null = null;
   let scoreReport: ScoreReport | null = null;
   {
+    // 어느 상태가 방향 앵커 행인지는 앵커 해석 결과가 안다. 그 행은 모션 임계에서
+    // 면제된다 — 프롬프트가 "앵커로 크롭할 수 있게 최소 동작" 을 요구하므로 고칠 수
+    // 없는 경고가 된다(inspect.ts RowRole 참고).
+    const anchorStates = new Set(Object.values(result.anchors).map(a => a.state));
     const inspectInput = stateOrder
       .filter(s => framesByState[s]?.length)
       .map(s => ({
         state: s,
         expected: request.states[s].frames,
+        role: (anchorStates.has(s) ? "direction-anchor" : "action-row") as
+          | "direction-anchor"
+          | "action-row",
         frames: framesByState[s].map(f => ({ data: f.data, width: f.width, height: f.height })),
       }));
     if (inspectInput.length > 0) {

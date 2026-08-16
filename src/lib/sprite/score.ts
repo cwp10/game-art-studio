@@ -82,8 +82,12 @@ function hintsForRow(row: InspectRow, histogramMin: number, dhashMin: number): s
         "Keep the same body proportions and camera angle; only change the limb motion needed for this action.",
     );
   }
+  // 방향 앵커 행은 모션에서 면제된다 — inspect 가 경고를 빼는 것만으로는 부족하다.
+  // score 는 리포트를 보고 **독립적으로** 힌트와 감점을 만들기 때문에, 여기서도
+  // 같은 판단을 하지 않으면 "경고는 없는데 12점이 깎이고 고치라는 힌트가 나오는"
+  // 상태가 된다(실측: 경고 0개인데 88점 = 100 - 12).
   const motion = metrics?.motion_presence ?? 1.0;
-  if (motion < 0.01 && expected > 1) {
+  if (row.role !== "direction-anchor" && motion < 0.01 && expected > 1) {
     hints.push(
       `${state}: Adjacent frames are too similar (motion presence ${motion.toFixed(4)}). ` +
         "Make the action visibly progress across the row while preserving the same character identity and foot baseline.",
@@ -137,7 +141,9 @@ export function scoreInspection(report: InspectReport): ScoreReport {
     if (found !== expected) score -= 35 + 10 * Math.abs(found - expected);
     score -= 13 * errors.length;
     score -= 3 * warnings.length;
-    if ((metrics?.motion_presence ?? 1.0) < 0.01 && expected > 1) score -= 12;
+    if (row.role !== "direction-anchor" && (metrics?.motion_presence ?? 1.0) < 0.01 && expected > 1) {
+      score -= 12;
+    }
     if ((metrics?.dhash_similarity.min ?? 1.0) < dhashMin) score -= 10;
     if (histogramMin > 0 && (metrics?.histogram_intersection.min ?? 1.0) < histogramMin) {
       score -= 10;

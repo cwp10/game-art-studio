@@ -262,6 +262,32 @@ function noise(w: number, h: number, seed: number): Frame {
         JSON.stringify(r4.rows[0].warnings),
       );
       check("경고는 ok 를 뒤집지 않는다 (에러만 뒤집는다)", r4.ok && r4.rows[0].ok);
+
+    // 방향 앵커 행은 모션 임계에서 면제된다 — 그 행은 "앵커로 크롭할 최소 동작" 이
+    // 목적이라 경고를 내면 고칠 수 없는 것을 고치라고 시키게 된다(실측: 교정
+    // 재생성해도 85점 그대로, 같은 런의 액션 행은 모션 10배에 100점).
+    const anchor = inspectStates([
+      { state: "down_idle", expected: 2, frames: still, role: "direction-anchor" },
+    ]);
+    check(
+      "앵커 행은 모션 경고를 받지 않는다",
+      !anchor.rows[0].warnings.some(w => w.includes("motion presence is too low")),
+      JSON.stringify(anchor.rows[0].warnings),
+    );
+    check(
+      "면제 사실은 note 로 남는다",
+      (anchor.rows[0].notes ?? []).some(n => n.includes("모션 임계")),
+      JSON.stringify(anchor.rows[0].notes),
+    );
+    check("면제는 점수를 깎지 않는다 (경고 0)", anchor.rows[0].warnings.length === 0);
+    const action = inspectStates([
+      { state: "down_attack", expected: 2, frames: still, role: "action-row" },
+    ]);
+    check(
+      "액션 행은 그대로 모션 경고를 받는다",
+      action.rows[0].warnings.some(w => w.includes("motion presence is too low")),
+      JSON.stringify(action.rows[0].warnings),
+    );
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
