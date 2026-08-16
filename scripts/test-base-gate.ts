@@ -6,6 +6,7 @@
 import sharp from "sharp";
 import {
   detectBackgroundMode,
+  inspectBaseImage,
   softAlphaFraction,
   subjectBBox,
   touchesEdge,
@@ -176,6 +177,73 @@ void (async () => {
     .toBuffer({ resolveWithObject: true });
   const bg = detectBackgroundMode(data, info.width, info.height, info.channels);
   check("sharp raw 버퍼와 호환", bg.mode === "flat", `${bg.mode} ch=${info.channels}`);
+
+  // ── inspectBaseImage (파일 경로 기반) ───────────────────────────
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const tmp = mkdtempSync(join(tmpdir(), "base-gate-test-"));
+
+  // 통과 케이스: 평면 마젠타 배경 + 잘리지 않은 중앙 피사체, AA 없음
+  const goodPath = join(tmp, "good.png");
+  await sharp(
+    makeRaw(64, 64, (x, y) =>
+      x >= 20 && x <= 43 && y >= 20 && y <= 43 ? [20, 40, 200, 255] : [255, 0, 255, 255],
+    ).raw,
+    { raw: { width: 64, height: 64, channels: 4 } },
+  )
+    .png()
+    .toFile(goodPath);
+
+  const good = await inspectBaseImage(goodPath);
+  check("통과 케이스 autoPass", good.autoPass, JSON.stringify(good.checks));
+  check("검사 3종 보고", good.checks.length === 3, String(good.checks.length));
+  check("치수 보고", good.width === 64 && good.height === 64);
+
+  // 실패 케이스: 피사체가 가장자리까지 잘림
+  const croppedPath = join(tmp, "cropped.png");
+  await sharp(makeRaw(64, 64, (x, y) => (y >= 20 ? [20, 40, 200, 255] : [255, 0, 255, 255])).raw, {
+    raw: { width: 64, height: 64, channels: 4 },
+  })
+    .png()
+    .toFile(croppedPath);
+
+  const cropped = await inspectBaseImage(croppedPath);
+  check("잘린 피사체는 autoPass 실패", !cropped.autoPass);
+  check(
+    "실패 항목이 fullBody",
+    cropped.checks.find(c => c.id === "fullBody")?.ok === false,
+    JSON.stringify(cropped.checks),
+  );
+
+  // pixelArt 옵션: AA 가 있으면 실패
+  const aaPath = join(tmp, "aa.png");
+  await sharp(
+    makeRaw(64, 64, (x, y) => {
+      const inside = x >= 20 && x <= 43 && y >= 20 && y <= 43;
+      const edge = x === 19 || x === 44 || y === 19 || y === 44;
+      if (edge) return [20, 40, 200, 128];
+      return inside ? [20, 40, 200, 255] : [255, 0, 255, 255];
+    }).raw,
+    { raw: { width: 64, height: 64, channels: 4 } },
+  )
+    .png()
+    .toFile(aaPath);
+
+  const aa = await inspectBaseImage(aaPath, { pixelArt: true });
+  check(
+    "픽셀아트 런에서 AA 가장자리는 실패",
+    aa.checks.find(c => c.id === "pixelArt")?.ok === false,
+    JSON.stringify(aa.checks),
+  );
+
+  const aaOff = await inspectBaseImage(aaPath);
+  check(
+    "픽셀아트 런이 아니면 AA 는 통과",
+    aaOff.checks.find(c => c.id === "pixelArt")?.ok === true,
+  );
+
+  rmSync(tmp, { recursive: true, force: true });
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail === 0 ? 0 : 1);

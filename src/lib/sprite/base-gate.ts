@@ -11,6 +11,8 @@
  * 따른다 — 값을 바꾸면 원본과 다른 결과가 나온다.
  */
 
+import sharp from "sharp";
+
 /** 배경으로 인정할 테두리 색 거리(유클리드 RGB). */
 const BACKGROUND_TOLERANCE = 48.0;
 /** 테두리 링에서 불투명 픽셀이 이 비율 미만이면 투명 배경으로 본다. */
@@ -190,4 +192,93 @@ export function subjectBBox(
 /** bbox 가 캔버스 가장자리에 닿으면 잘렸을 가능성이 있다(잠금 기준 1번). */
 export function touchesEdge(bbox: BBox, width: number, height: number): boolean {
   return bbox.x0 === 0 || bbox.y0 === 0 || bbox.x1 === width - 1 || bbox.y1 === height - 1;
+}
+
+/** 픽셀아트 런에서 허용할 AA 반투명 비율 상한. 진짜 도트는 0 에 가깝다. */
+const PIXEL_ART_SOFT_ALPHA_MAX = 0.02;
+
+export type BaseCheck = {
+  id: "background" | "fullBody" | "pixelArt";
+  ok: boolean;
+  detail: string;
+};
+
+export type BaseInspection = {
+  checks: BaseCheck[];
+  /** 자동 검사가 전부 통과했는가. **잠금은 아니다** — 최종 y/n 은 사람이 누른다. */
+  autoPass: boolean;
+  background: BackgroundInfo;
+  softAlpha: number;
+  bbox: BBox | null;
+  width: number;
+  height: number;
+};
+
+/**
+ * base 후보 이미지를 잠금 기준으로 검사한다.
+ *
+ * 자동 판정은 3가지뿐이다(기준 1·3·6). 비율·스타일 적합성(2), 캐릭터 정체성(4),
+ * 실루엣 가독성(5)은 사람 몫이라 여기서 다루지 않는다. autoPass 가 true 라도
+ * 잠금이 자동으로 되지 않는다 — 정본도 "Good enough for now" 를 통과로 치지 않는다.
+ */
+export async function inspectBaseImage(
+  filePath: string,
+  opts?: { pixelArt?: boolean },
+): Promise<BaseInspection> {
+  const { data, info } = await sharp(filePath)
+    .toColorspace("srgb")
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const { width, height, channels } = info;
+  const background = detectBackgroundMode(data, width, height, channels);
+  const softAlpha = softAlphaFraction(data, width, height, channels);
+  const bbox = subjectBBox(data, width, height, channels, background);
+
+  const checks: BaseCheck[] = [];
+
+  // 기준 6 — 평면 크로마 배경 (또는 쉽게 키잉 가능한 투명 배경)
+  checks.push({
+    id: "background",
+    ok: background.mode === "flat" || background.mode === "transparent",
+    detail:
+      background.mode === "flat"
+        ? `평면 배경 ${background.hex} (테두리 ${Math.round(background.borderCoverage * 100)}%)`
+        : background.mode === "transparent"
+          ? "투명 배경"
+          : `테두리가 평면이 아님 (최다 색이 ${Math.round(background.borderCoverage * 100)}%만 덮음)`,
+  });
+
+  // 기준 1 — 전신, 잘린 곳 없음
+  checks.push({
+    id: "fullBody",
+    ok: bbox !== null && !touchesEdge(bbox, width, height),
+    detail:
+      bbox === null
+        ? "피사체를 찾지 못함"
+        : touchesEdge(bbox, width, height)
+          ? `피사체가 캔버스 가장자리에 닿음 (${bbox.x0},${bbox.y0})-(${bbox.x1},${bbox.y1})`
+          : `여백 확보 (${bbox.x0},${bbox.y0})-(${bbox.x1},${bbox.y1})`,
+  });
+
+  // 기준 3 — 픽셀아트 런일 때만 강제. 균일 블록 피치 실측은 ⑤ 에서 추가한다.
+  const pixelArtOk = !opts?.pixelArt || softAlpha <= PIXEL_ART_SOFT_ALPHA_MAX;
+  checks.push({
+    id: "pixelArt",
+    ok: pixelArtOk,
+    detail: opts?.pixelArt
+      ? `AA 반투명 ${(softAlpha * 100).toFixed(2)}% (상한 ${PIXEL_ART_SOFT_ALPHA_MAX * 100}%)`
+      : `픽셀아트 런 아님 — 검사 생략 (AA ${(softAlpha * 100).toFixed(2)}%)`,
+  });
+
+  return {
+    checks,
+    autoPass: checks.every(c => c.ok),
+    background,
+    softAlpha,
+    bbox,
+    width,
+    height,
+  };
 }
