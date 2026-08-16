@@ -318,3 +318,28 @@ function pyRound(x: number): number {
   if (diff < 0.5) return floor;
   return floor % 2 === 0 ? floor : floor + 1;
 }
+
+/**
+ * request 에서 추출용 픽셀 언페이크 옵션을 파생한다 — **배율 식의 소유자는 여기 하나다.**
+ *
+ * 소비자(추출·재합성·앵커 재추출)가 손으로 다시 유도하면 갈린다. 정본도 같은 이유로
+ * `pixel_snap_scale` 한 곳에 두고 extract·웹뷰·compose 가 전부 그것을 부른다.
+ *
+ * 꺼져 있으면 `{}` 라 스프레드해도 아무것도 안 붙는다.
+ */
+export function pixelUnfakeOptions(request: SpriteRequest): {
+  pixelUnfake?: { scale: number; logicalWidth: number; logicalHeight: number; detailBias: boolean };
+} {
+  const scale = pixelSnapScale(request);
+  if (scale === null) return {};
+  const logicalHeight = effectiveLogicalHeight(request);
+  if (logicalHeight === null) return {};
+  return {
+    pixelUnfake: {
+      scale,
+      logicalWidth: Math.max(1, Math.floor(request.cell.width / scale)),
+      logicalHeight,
+      detailBias: request.fit?.detail_bias ?? true,
+    },
+  };
+}

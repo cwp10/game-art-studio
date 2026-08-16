@@ -29,6 +29,7 @@ import {
 import { renderLayoutGuide } from "@/lib/sprite/layout-guide";
 import { buildRowPrompt } from "@/lib/sprite/row-prompt";
 import type { SpriteRequest } from "@/lib/sprite/request";
+import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
 
 export type GenerateFn = (spec: {
   state: string;
@@ -149,6 +150,9 @@ async function recordRow(
     },
     // 분리 모드 SSoT 는 request `fit` 하나다 — 행마다 다르게 두지 않는다.
     ...(request.fit ? { fit: request.fit } : {}),
+    // 픽셀 언페이크도 같은 SSoT 에서 파생한다 — 이걸 빼면 청크 생성만 돌고
+    // 추출이 일반 경로를 타 논리 프레임이 안 나온다.
+    ...pixelUnfakeOptions(request),
     label: state,
   });
   const dir = join(workDir, `frames-${state}`);

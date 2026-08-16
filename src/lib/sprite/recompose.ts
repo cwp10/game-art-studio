@@ -26,6 +26,7 @@ import { dirname, join } from "node:path";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { extractRowFrames, type RawImage } from "@/lib/sprite/extract";
 import type { SpriteRequest } from "@/lib/sprite/request";
+import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
 import {
   buildSelectedCycleManifest,
   labeledContactSheet,
@@ -90,8 +91,9 @@ export async function recomposeCuratedAtlas(atlasGenerationId: string): Promise<
         unmixReach: request.chroma.unmixReach,
         spillMaxFraction: request.chroma.spillMaxFraction,
       },
-      // 재합성은 처음 구울 때와 같은 프레임을 내야 한다 — 분리 모드도 같이 따라간다.
+      // 재합성은 처음 구울 때와 같은 프레임을 내야 한다 — 분리 모드·언페이크도 따라간다.
       ...(request.fit ? { fit: request.fit } : {}),
+      ...pixelUnfakeOptions(request),
       label: state,
     });
     framesByState[state] = extracted.frames;

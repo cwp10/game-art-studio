@@ -10,7 +10,7 @@ import type { Generation, Message, PromptLibraryItem, Session, StylePreset } fro
 /** POST/PATCH/DELETE + JSON body init 보일러플레이트 축약. */
 export function jsonFetch(
   url: string,
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<Response> {

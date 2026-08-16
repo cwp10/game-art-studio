@@ -22,6 +22,7 @@ import { inspectStates, type InspectReport } from "@/lib/sprite/inspect";
 import { scoreInspection, type ScoreReport } from "@/lib/sprite/score";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
 import { generateChunkedRow } from "@/lib/sprite/chunk-generate";
+import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
 import { selectImageBackend } from "@/lib/image-backend";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
@@ -200,8 +201,9 @@ export async function runPlanDrivenSpritesheet(
           unmixReach: request.chroma.unmixReach,
           spillMaxFraction: request.chroma.spillMaxFraction,
         },
-        // 앵커 행 재추출도 같은 분리 모드를 타야 새로 굽는 행과 프레임이 맞는다.
+        // 앵커 행 재추출도 같은 설정을 타야 새로 굽는 행과 프레임이 맞는다.
         ...(request.fit ? { fit: request.fit } : {}),
+        ...pixelUnfakeOptions(request),
         label: state,
       });
       const dir = path.join(workDir, `frames-${state}`);

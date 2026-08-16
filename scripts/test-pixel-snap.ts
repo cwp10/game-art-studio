@@ -20,6 +20,7 @@ import {
   snapByEdges,
   gridSnapDownscale,
 } from "../src/lib/sprite/pixel-snap";
+import { pixelUnfakeOptions } from "../src/lib/sprite/pixel-unfake";
 
 const PY = "/Users/wonpyoung/Developer/workspace/sprite-gen/.venv/bin/python";
 const SG = "/Users/wonpyoung/Developer/workspace/sprite-gen";
@@ -199,6 +200,35 @@ np.array(out).tofile(${JSON.stringify(plainBin)})
   await sharp(Buffer.from(plain.data), { raw: { width: plain.width, height: plain.height, channels: 4 } })
     .resize(plain.width * 8, plain.height * 8, { kernel: "nearest" })
     .png().toFile(join(dir, `logical-${name}.png`));
+}
+
+console.log("\n=== 추출 옵션 파생 (배율 식의 소유자는 한 곳) ===");
+{
+  const cell = { shape: "square" as const, width: 256, height: 256, safeMarginX: 24, safeMarginY: 24 };
+  const mk = (fit?: Record<string, unknown>) => ({ cell, fit } as unknown as Parameters<typeof pixelUnfakeOptions>[0]);
+
+  check("꺼져 있으면 아무것도 안 붙는다", JSON.stringify(pixelUnfakeOptions(mk())) === "{}");
+  check("fit 은 있지만 pixel_unfake 가 없으면 꺼짐",
+    JSON.stringify(pixelUnfakeOptions(mk({ segmentation: "projection" }))) === "{}");
+
+  const on = pixelUnfakeOptions(mk({ pixel_unfake: true }));
+  check("켜면 배율 1x, 논리 256 (logical_height 생략 = 셀 높이)",
+    on.pixelUnfake?.scale === 1 && on.pixelUnfake?.logicalHeight === 256 && on.pixelUnfake?.logicalWidth === 256,
+    JSON.stringify(on));
+  check("detailBias 기본 true", on.pixelUnfake?.detailBias === true);
+
+  const chunky = pixelUnfakeOptions(mk({ pixel_unfake: true, logical_height: 64 }));
+  check("logical_height 64 → 배율 4x", chunky.pixelUnfake?.scale === 4 && chunky.pixelUnfake?.logicalHeight === 64,
+    JSON.stringify(chunky));
+
+  // 셀 높이의 약수가 아니면 정수 배율이 선언을 무효화한다 (정본이 경고로 관측시키는 지점).
+  const invalid = pixelUnfakeOptions(mk({ pixel_unfake: true, logical_height: 48 }));
+  check("약수가 아닌 선언은 배율 5x 로 접힌다 (선언 무효)",
+    invalid.pixelUnfake?.scale === 5 && invalid.pixelUnfake?.logicalHeight === 51,
+    JSON.stringify(invalid));
+
+  const noBias = pixelUnfakeOptions(mk({ pixel_unfake: true, detail_bias: false }));
+  check("detail_bias 명시 false 가 전달된다", noBias.pixelUnfake?.detailBias === false);
 }
 
 console.log(`\n${pass} passed / ${fail} failed`);

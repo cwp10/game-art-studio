@@ -905,6 +905,16 @@ export function SpriteCanvas({
    * 사이드카의 호흡이 조용히 지워진다.
    */
   const [breatheOn, setBreatheOn] = useState<Set<string>>(new Set());
+  /**
+   * 상태별 행 후보(테이크). 리롤은 **교체가 아니라 후보 추가**라 목록이 쌓이고,
+   * 지금 쓰는 것(`current`)을 바꾸는 것이 "고르기" 다 — 원래 행은 `primary` 로 남아
+   * 언제든 되돌아갈 수 있다.
+   */
+  const [rowTakes, setRowTakes] = useState<
+    Record<string, { current: string; takes: Array<{ label: string; generationId: string; frames: number }> }>
+  >({});
+  const [rerollBusy, setRerollBusy] = useState<string | null>(null);
+  const [rerollMsg, setRerollMsg] = useState<string | null>(null);
 
   /** 프레임 인덱스 → 그 프레임이 속한 상태와 행 내 열 번호. */
   function frameState(origIdx: number): { state: string; col: number } | null {
@@ -959,6 +969,77 @@ export function SpriteCanvas({
       setBreatheOn(on);
     })();
   }, [isPlanDriven, sheetGenerationId]);
+
+  // 행 후보 목록을 읽는다 — 리롤로 쌓인 것이 있으면 고를 수 있어야 한다.
+  async function loadTakes(): Promise<void> {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    const res = await fetch(
+      `/api/sprite/reroll?atlasGenerationId=${encodeURIComponent(sheetGenerationId)}`,
+    );
+    if (!res.ok) return;
+    const body = (await res.json().catch(() => ({}))) as {
+      rows?: Record<string, { current: string; takes: Array<{ label: string; generationId: string; frames: number }> }>;
+    };
+    setRowTakes(body.rows ?? {});
+  }
+
+  useEffect(() => {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    void (async () => {
+      const res = await fetch(
+        `/api/sprite/reroll?atlasGenerationId=${encodeURIComponent(sheetGenerationId)}`,
+      );
+      if (!res.ok) return;
+      const body = (await res.json().catch(() => ({}))) as {
+        rows?: Record<string, { current: string; takes: Array<{ label: string; generationId: string; frames: number }> }>;
+      };
+      setRowTakes(body.rows ?? {});
+    })();
+  }, [isPlanDriven, sheetGenerationId]);
+
+  /** 그 상태의 행을 한 번 더 생성해 후보로 쌓는다 (합성 대상은 그대로). */
+  async function rerollRow(state: string) {
+    if (!sheetGenerationId) return;
+    setRerollBusy(state);
+    setRerollMsg(null);
+    try {
+      const res = await jsonFetch("/api/sprite/reroll", "POST", {
+        atlasGenerationId: sheetGenerationId,
+        state,
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; label?: string; error?: string };
+      if (!res.ok || !body.ok) throw new Error(body.error ?? `리롤 실패 (${res.status})`);
+      setRerollMsg(`${state}: 후보 '${body.label}' 추가됨 — 아래에서 고르면 시트에 반영됩니다`);
+      await loadTakes();
+    } catch (e) {
+      setRerollMsg(`리롤 실패: ${(e as Error).message}`);
+    } finally {
+      setRerollBusy(null);
+    }
+  }
+
+  /** 후보를 골라 합성에 쓰고 시트를 다시 굽는다. */
+  async function pickRowTake(state: string, label: string) {
+    if (!sheetGenerationId) return;
+    setRerollBusy(state);
+    setRerollMsg(null);
+    try {
+      const res = await jsonFetch("/api/sprite/reroll", "PUT", {
+        atlasGenerationId: sheetGenerationId,
+        state,
+        label,
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) throw new Error(body.error ?? `선택 실패 (${res.status})`);
+      setRerollMsg(`${state}: '${label}' 로 시트를 다시 구웠습니다`);
+      await loadTakes();
+      setSheetVersion(v => v + 1);
+    } catch (e) {
+      setRerollMsg(`선택 실패: ${(e as Error).message}`);
+    } finally {
+      setRerollBusy(null);
+    }
+  }
 
   /** 현재 표시 순서·제외를 상태별 selected 로 굽어 저장한다. */
   async function saveCurationSidecar() {
@@ -1980,6 +2061,61 @@ export function SpriteCanvas({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+              {params?.states && (
+                <div className="mb-2 rounded-lg border border-border p-2">
+                  <div className="mb-1.5 text-[11px] font-medium text-text-muted">
+                    행 다시 뽑기 (기존 행은 후보로 남습니다)
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {params.states.map(state => {
+                      const entry = rowTakes[state];
+                      const takes = entry?.takes ?? [];
+                      return (
+                        <div key={state} className="flex flex-wrap items-center gap-1">
+                          <span className="min-w-[92px] text-[11px] text-text-muted">{state}</span>
+                          <button
+                            onClick={() => void rerollRow(state)}
+                            disabled={rerollBusy !== null}
+                            className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted disabled:opacity-40"
+                            title="같은 프롬프트·같은 참조로 이 행을 한 번 더 생성합니다. 지금 쓰는 행은 바뀌지 않고 후보로만 쌓입니다."
+                          >
+                            {rerollBusy === state ? "생성 중…" : "다시 뽑기"}
+                          </button>
+                          {takes.map(t => {
+                            const isCurrent = entry?.current === t.generationId;
+                            return (
+                              <button
+                                key={t.label}
+                                onClick={() => void pickRowTake(state, t.label)}
+                                disabled={rerollBusy !== null || isCurrent}
+                                className={`rounded px-1.5 py-0.5 text-[11px] disabled:opacity-100 ${
+                                  isCurrent
+                                    ? "border border-[color:var(--accent)] text-[color:var(--accent)]"
+                                    : "border border-border text-text-muted"
+                                }`}
+                                title={isCurrent ? "지금 이 행을 쓰고 있습니다" : `${t.label} 로 바꾸고 시트를 다시 굽습니다`}
+                              >
+                                {t.label}
+                                {isCurrent ? " ✓" : ""}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {rerollMsg && (
+                    <div
+                      className={`mt-1.5 text-[10px] ${rerollMsg.includes("실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}
+                    >
+                      {rerollMsg}
+                    </div>
+                  )}
+                  <div className="mt-1 text-[10px] text-text-muted">
+                    생성은 한 번에 1분쯤 걸립니다. 마음에 드는 후보를 눌러야 시트에 반영됩니다.
+                  </div>
                 </div>
               )}
               {params?.states && (
