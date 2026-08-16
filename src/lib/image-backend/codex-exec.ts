@@ -35,14 +35,16 @@ const BUF_MAX = 500_000;       // stdout/stderr 로그 최대 유지 바이트 (
 const KILL_DELAY_MS = 5_000;   // SIGTERM 후 SIGKILL 까지 대기 시간
 const CODEX_TIMEOUT_MS = 600_000; // Codex 실행 최대 대기 시간 (10분). 초과 시 SIGTERM → 에러.
 
+// 파일 저장을 시키지 않는다. codex 의 image_gen 은 PNG 를 세션 rollout jsonl 에
+// base64 로 inline 반환하므로 우리가 프로토콜에서 직접 꺼낸다(codex-rollout.ts).
+// 모델에게 복사·이름짓기 같은 부가 작업을 시키면 회수가 그 성공 여부에 의존한다.
 const PROMPT_HEADER =
   "You are a game art image generator. " +
   "If the prompt is already detailed and specific, follow it exactly without adding extra elements. " +
   "If the prompt is generic, add tasteful composition framing, lighting mood, and style clarity to improve quality. " +
-  "Generate a single high-quality game asset image using the built-in image_gen tool. " +
-  "Save the result as ./output.png in your current working directory. " +
+  "Call the built-in image_gen tool exactly once and generate a single high-quality game asset image. " +
   "Do not run remove_chroma_key.py or any background-removal script — the host pipeline handles all post-processing. " +
-  "Do not create any other files. Do not write code. Do not explain. Just produce ./output.png.\n\n";
+  "Do not save files, run shell commands, write code, or report paths. Generate only, then stop.\n\n";
 
 /**
  * Codex image_gen 은 정식 inpaint 가 아니라 image+prompt → 새 이미지 생성기.
@@ -397,13 +399,31 @@ function buildNaturalPrompt(job: ImageJob): string {
   throw new Error(`buildNaturalPrompt: unsupported kind '${job.kind}'`);
 }
 
-/** stdout 한 줄을 보고 어떤 단계에 와 있는지 추정. */
+/**
+ * `codex exec --json` stdout 한 줄을 보고 어떤 단계에 와 있는지 추정.
+ *
+ * 과거에는 stderr 의 `generated_images` + `find`/`cp ` 문자열을 봤다. 그건 모델이
+ * 파일을 복사하는 부가 동작의 부산물이었고, 그 지시를 프롬프트에서 제거하면서
+ * 근거가 사라졌다. 이제 프로토콜 이벤트를 직접 읽는다.
+ */
 function inferStage(
   line: string,
 ): "image_generating" | "recovering" | null {
-  if (line.includes("generated_images") && line.includes("find")) return "image_generating";
-  if (line.includes("generated_images") && line.includes("cp ")) return "recovering";
-  if (line.includes("Done.") && !line.includes("ok")) return null;
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("{")) return null;
+  let event: { type?: unknown };
+  try {
+    event = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  const type = typeof event?.type === "string" ? event.type : "";
+  if (type === "image_generation_call" || type === "image_generation.started") {
+    return "image_generating";
+  }
+  if (type === "image_generation_end" || type === "turn.completed") {
+    return "recovering";
+  }
   return null;
 }
 
