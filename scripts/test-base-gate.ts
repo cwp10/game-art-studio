@@ -282,7 +282,10 @@ void (async () => {
     params: { source: "test" },
   });
 
-  check("잠금 전에는 조회 결과 없음", getLockedBase(null) === null);
+  // 개발 DB 를 공유하므로 "잠긴 base 가 하나도 없다"를 단언하면 안 된다 —
+  // CLI(gen-sprite-run)가 남긴 잠금이 있으면 깨진다. 이 generation 이 아직 base 가
+  // 아니라는 것만 본다.
+  check("잠금 전에는 이 generation 이 base 가 아니다", getLockedBase(null)?.id !== genId);
 
   lockBaseGeneration(genId, null);
   const locked = getLockedBase(null);
