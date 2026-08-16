@@ -19,7 +19,7 @@ import {
 import { GREEN_SUBJECT_RE } from "../../image-backend/chroma-key.js";
 import { decideBackgroundMode } from "../../sprite/background-mode.js";
 import { inferSubjectType, isLocomotion, type Directions } from "../spritesheet-classify.js";
-import { canUsePlanDrivenPath, runPlanDrivenSpritesheet } from "./plan-driven-spritesheet.js";
+import { canUsePlanDrivenPath, planDrivenBlocker, runPlanDrivenSpritesheet } from "./plan-driven-spritesheet.js";
 import {
   analyzeRefFacing,
   analyzeRefHandObjects,
@@ -62,10 +62,14 @@ export async function handleMakeSpritesheet(
   // 적용 조건을 만족하면 base 잠금 → 방향 앵커 → 액션 행 → 컴포넌트 추출 → 아틀라스로
   // 간다. 아니면 아래 기존 경로가 그대로 처리한다 — 이펙트·오브젝트·다방향 시트는
   // component-row 엔진의 범위가 아니다.
+  const st0 = (args.subjectType as string | undefined) ?? inferSubjectType(userPrompt, !!refId);
+  const dirs0 = (args.directions as number | undefined) ?? null;
+  // 구 경로로 떨어지면 **왜** 떨어졌는지 남긴다. 조용한 폴백은 정본이 BLOCKING 으로 둔
+  // base 잠금 게이트를 통째로 건너뛰게 만든다.
+  const legacyReason = planDrivenBlocker({ subjectType: st0, directions: dirs0, refId });
   {
-    const st =
-      (args.subjectType as string | undefined) ?? inferSubjectType(userPrompt, !!refId);
-    const dirs = (args.directions as number | undefined) ?? null;
+    const st = st0;
+    const dirs = dirs0;
     if (canUsePlanDrivenPath({ subjectType: st, directions: dirs, refId })) {
       const uiFacing =
         typeof args.facing === "string" && FACING_ENUM.has(args.facing.toUpperCase())
@@ -364,6 +368,20 @@ export async function handleMakeSpritesheet(
     best.structuredContent.elapsedMs = cumulativeMs;
     best.structuredContent.width = cols * FINAL_CELL_PX;
     best.structuredContent.height = rows * FINAL_CELL_PX;
+  }
+
+  // 어느 엔진이 처리했는지 응답에 남긴다. 캐릭터인데 참조가 없어 떨어진 경우는
+  // base 잠금 게이트로 안내한다 — 그쪽이 정본 경로다.
+  if (legacyReason) {
+    log(`make_spritesheet → 격자 경로: ${legacyReason}`);
+    const guide =
+      st0 === "character" && !refId
+        ? " 참조 이미지를 붙이고 패널의 base 잠금 게이트에서 잠그면 component-row 엔진으로 갑니다."
+        : "";
+    best!.content = [
+      ...best!.content,
+      { type: "text", text: `\n엔진: 격자(grid-legacy) — ${legacyReason}.${guide}` },
+    ];
   }
   return best!;
 }

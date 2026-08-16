@@ -16,6 +16,7 @@ import { mkdir } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { buildPreviews } from "@/lib/sprite/preview";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
+import { inspectBaseImage } from "@/lib/sprite/base-gate";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
@@ -59,10 +60,31 @@ export function canUsePlanDrivenPath(opts: {
   directions: number | null;
   refId: string | null;
 }): boolean {
-  if (opts.subjectType !== "character") return false;
-  if (opts.directions !== null && opts.directions > 1) return false;
-  if (!opts.refId) return false;
-  return true;
+  return planDrivenBlocker(opts) === null;
+}
+
+/**
+ * 플랜 구동 경로를 쓸 수 **없는** 이유. 쓸 수 있으면 null.
+ *
+ * 이유를 문자열로 돌려주는 목적은 하나다 — 구 격자 경로로 떨어진 사실이 **조용하지
+ * 않게** 하는 것. 정본이 base 잠금을 BLOCKING 으로 둔 이유가 "약한 base 가 모든 행을
+ * 오염시킨다" 인데, 우리 쪽 조용한 폴백은 그 게이트를 통째로 건너뛰게 만든다.
+ */
+export function planDrivenBlocker(opts: {
+  subjectType: string;
+  directions: number | null;
+  refId: string | null;
+}): string | null {
+  if (opts.subjectType !== "character") {
+    return `피사체가 '${opts.subjectType}' — component-row 엔진은 캐릭터 상태 행을 위한 것이라 이펙트·오브젝트는 격자 경로가 맞습니다`;
+  }
+  if (opts.directions !== null && opts.directions > 1) {
+    return `다방향(${opts.directions}) 시트 — 아직 플랜 구동 경로가 단일 방향만 받습니다`;
+  }
+  if (!opts.refId) {
+    return "참조 이미지가 없습니다 — base 를 먼저 만들고 잠그면 component-row 엔진(방향 앵커 체인 · 컴포넌트 추출 · 큐레이션)을 씁니다";
+  }
+  return null;
 }
 
 export async function runPlanDrivenSpritesheet(
@@ -74,11 +96,39 @@ export async function runPlanDrivenSpritesheet(
   const t0 = Date.now();
 
   // ① base 잠금 — 약한 base 는 모든 행을 오염시킨다.
-  if (getLockedBase(sessionId)?.id !== input.baseGenerationId) {
-    lockBaseGeneration(input.baseGenerationId, sessionId);
-    log(`plan-driven: base 잠금 ${input.baseGenerationId}`);
-  }
+  //
+  // 사람이 게이트에서 잠근 base 면 그대로 쓴다. 아니면 여기서 자동으로 잠그는데,
+  // 그건 정본이 BLOCKING 으로 둔 y/n 을 건너뛰는 것이므로 **자동 검사 결과를 경고로
+  // 표면화한다.** 실패 항목이 있으면 2회의 codex 호출을 쓰기 전에 사람이 알아야 한다.
+  const gateWarnings: string[] = [];
+  const alreadyLocked = getLockedBase(sessionId)?.id === input.baseGenerationId;
   const { filePath: basePath } = loadGenerationWithPath(input.baseGenerationId);
+  if (!alreadyLocked) {
+    lockBaseGeneration(input.baseGenerationId, sessionId);
+    log(`plan-driven: base 자동 잠금 ${input.baseGenerationId} (게이트 미검토)`);
+    try {
+      const inspection = await inspectBaseImage(basePath);
+      const failed = inspection.checks.filter(c => !c.ok);
+      const unmeasured = inspection.checks.filter(c => c.unmeasured);
+      if (failed.length > 0) {
+        gateWarnings.push(
+          `base 게이트 미검토 + 자동 검사 실패: ${failed.map(c => `${c.id}(${c.detail})`).join("; ")} — ` +
+            "약한 base 는 모든 행의 비율·스타일·정체성을 오염시킵니다",
+        );
+      } else {
+        gateWarnings.push(
+          "base 를 게이트 검토 없이 자동 잠금했습니다 — 자동 검사는 통과했지만 비율·스타일·정체성·" +
+            "실루엣 가독성은 기계가 못 봅니다(패널의 base 잠금 게이트에서 확인하세요)",
+        );
+      }
+      for (const c of unmeasured) {
+        gateWarnings.push(`base 검사 '${c.id}' 는 근거 없이 통과로 쳤습니다 — ${c.detail}`);
+      }
+    } catch (e) {
+      gateWarnings.push(`base 자동 검사 실패: ${(e as Error).message}`);
+    }
+    for (const w of gateWarnings) log(`plan-driven 경고: ${w}`);
+  }
 
   const workDir = path.join(DATA_DIR, "sprite-runs", `${input.characterId}-${Date.now()}`);
   await mkdir(workDir, { recursive: true });
@@ -271,7 +321,7 @@ export async function runPlanDrivenSpritesheet(
       // 다시 구울 수 없어 편집 전 산출물이 남는다.
       request,
       curationApplied: composed.manifest.curation_applied,
-      warnings: result.warnings,
+      warnings: [...gateWarnings, ...result.warnings],
       // 모션 QA 산출물 경로 — 판정은 사람이 한다. 여기 기록해 두면 어떤 런의 어떤
       // 상태를 봤는지 사후에 짚을 수 있다.
       motionQa: {

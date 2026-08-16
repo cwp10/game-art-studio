@@ -427,6 +427,17 @@ export function SpriteGenPanel({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={referenceImageUrl} alt="참조" className="block max-h-[56vh] max-w-full object-contain" />
               </div>
+            ) : subjectType === "character" ? (
+              // 참조가 없으면 base 를 잠글 대상이 없어 구 격자 경로로 간다. 정본은 base
+              // 잠금을 BLOCKING 으로 두므로, 그 사실이 조용히 넘어가면 안 된다.
+              <div className="max-w-[340px] px-4 text-center">
+                <p className="text-xs text-text-muted/70">참조 이미지 없음 — 아래 텍스트 설명으로 생성합니다</p>
+                <p className="mt-2 rounded-lg border border-border bg-bg-card p-2.5 text-[11px] leading-relaxed text-text-muted">
+                  이 경우 <b className="text-text-primary">격자 경로</b>로 생성됩니다. 참조 이미지를
+                  붙이고 <b className="text-text-primary">base 로 잠그면</b> 방향 앵커 체인·컴포넌트
+                  추출·큐레이션을 쓰는 component-row 엔진으로 갑니다.
+                </p>
+              </div>
             ) : (
               <p className="px-4 text-center text-xs text-text-muted/50">참조 이미지 없음 — 아래 텍스트 설명으로 생성합니다</p>
             )}
