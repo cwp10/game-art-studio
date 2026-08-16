@@ -125,8 +125,18 @@ export function bareState(state: string, directions: DirectionsSpec | null): str
 
 /**
  * UI 방향 어휘 → sprite-gen 토큰. **이식이 아니라 신규 코드다** — 우리 패널의
- * DOWN/UP/LEFT/RIGHT/대각선 8종을 정본 어휘로 옮긴다. 내부를 정본 어휘로 통일해야
- * 이식한 두 요구사항 함수(접두사 계약·45도 접미사 규약)가 문구 수정 없이 돈다.
+ * DOWN/UP/LEFT/RIGHT/대각선 8종을 정본 어휘로 옮긴다.
+ *
+ * **대각선은 `down45`/`up45` 다.** 정본이 등록해 둔 45도 토큰이 그 둘뿐이고, 좌/우
+ * 구분은 방향이 아니라 **상태명 접미사**(`-front-right`)가 지고 있기 때문이다
+ * (`directional_requirements`). 예전에 쓰던 `front-right` 같은 토큰은 정본
+ * `DIRECTION_FACING` 에 없어서 두 경로를 모두 비껴갔다 — 접두사 경로는 폴백 문구
+ * ("facing the front-right direction")만 내고, 접미사 경로는 상태명이 접미사로 끝나지
+ * 않아 아예 발화하지 않았다. 정본도 미등록 토큰에 같은 폴백을 쓰므로(prepare.py:700)
+ * 어긋난 동작은 아니었지만, 45도 잠금을 하나도 못 받는 상태였다.
+ *
+ * 그 결과 `DOWN-RIGHT` 와 `DOWN-LEFT` 는 방향(=앵커)을 공유하고 행마다 좌/우가 갈린다.
+ * 정본의 좌우 쌍 절차(basis 먼저 → paired 에 basis 를 gait 참조로 부착)와 같은 구조다.
  *
  * null = 방향 계약을 걸지 않는다. REF 는 참조 이미지의 방향을 그대로 따르는 모드다.
  */
@@ -135,12 +145,27 @@ const UI_TO_SPRITE_GEN: Record<string, string> = {
   UP: "up",
   RIGHT: "right",
   LEFT: "left",
-  "DOWN-RIGHT": "front-right",
-  "DOWN-LEFT": "front-left",
-  "UP-RIGHT": "back-right",
-  "UP-LEFT": "back-left",
+  "DOWN-RIGHT": "down45",
+  "DOWN-LEFT": "down45",
+  "UP-RIGHT": "up45",
+  "UP-LEFT": "up45",
+};
+
+/**
+ * UI 방향 → 정본 45도 상태명 접미사. 4방위는 null(접미사 없음).
+ * 이 접미사가 붙어야 `directionalRequirements` 의 3/4 뷰 잠금이 발화한다.
+ */
+const UI_TO_SIDE_SUFFIX: Record<string, string> = {
+  "DOWN-RIGHT": "-front-right",
+  "DOWN-LEFT": "-front-left",
+  "UP-RIGHT": "-back-right",
+  "UP-LEFT": "-back-left",
 };
 
 export function toSpriteGenDirection(ui: string): string | null {
   return UI_TO_SPRITE_GEN[ui] ?? null;
+}
+
+export function toSideSuffix(ui: string): string {
+  return UI_TO_SIDE_SUFFIX[ui] ?? "";
 }

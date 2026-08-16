@@ -8,6 +8,7 @@ import { chooseChromaKey } from "@/lib/sprite/chroma-key";
 import {
   ensureDirectionAnchors,
   normalizeDirections,
+  toSideSuffix,
   toSpriteGenDirection,
 } from "@/lib/sprite/directions";
 import {
@@ -56,8 +57,16 @@ export async function buildSpriteRequest(
   // 동작 텍스트에서 정본 상태 어휘를 뽑는다. 여기가 비면 상태명이 `action` 으로 고정되고
   // STATE_REQUIREMENTS·상태별 fps·등급 판정이 전부 죽는다 (state-name.ts 참조).
   const bare = input.stateName ?? inferActionHint(input.actionPrompt)?.state ?? DEFAULT_STATE_NAME;
+  // 45도는 좌/우를 **상태명 접미사**가 진다 — 정본이 그렇게 나눈다. `down45_run-front-right`
+  // 는 접두사 경로(45도 facing)와 접미사 경로(3/4 뷰 잠금)를 둘 다 발화시킨다.
+  const sideSuffix = toSideSuffix(input.uiDirection);
+  // 정본은 방향성 로코모션을 진행형으로 쓴다(`running-front-right`, `walking-back-left`).
+  // 그 형태여야 classifyState 의 `running-`/`walking-` 접두사와 isLocomotionState 의
+  // `running-front-` 계열이 걸린다. 4방위 런은 정본대로 `run`/`walk` 그대로 둔다.
+  const DIRECTIONAL_VERB: Record<string, string> = { run: "running", walk: "walking" };
+  const stem = sideSuffix ? (DIRECTIONAL_VERB[bare] ?? bare) : bare;
   // 방향 계약 런은 상태명이 <direction>_<state> 여야 한다 (③ normalizeDirections).
-  const stateName = direction === null ? bare : `${direction}_${bare}`;
+  const stateName = direction === null ? bare : `${direction}_${stem}${sideSuffix}`;
 
   const advice = frameCountAdvice(input.frames);
   if (advice.band === "not-default" || advice.band === "advanced") {
@@ -66,7 +75,7 @@ export async function buildSpriteRequest(
 
   // 정본은 약한 walk/run 행을 simple MVP 산출물과 같은 등급으로 조용히 승격하지 말라고
   // 못박는다 — 모션 QA 를 통과하기 전에는 experimental 로 **보고**한다.
-  const grade = classifyState(bare);
+  const grade = classifyState(`${stem}${sideSuffix}`);
   if (grade === "experimental") {
     warnings.push(
       `상태 '${bare}' 는 정본 experimental 등급이다 — 모션 QA(qa/${stateName}.gif)를 ` +
@@ -76,7 +85,7 @@ export async function buildSpriteRequest(
     warnings.push(`상태 '${bare}' 는 정본 simple 후보다 — 모션 QA 통과 전에는 pass 가 아니다`);
   }
   // 정본 체크리스트 3번. 우리는 아직 로코모션 행에 모션 위상 참조를 붙이지 못한다.
-  if (isLocomotionState(bare)) {
+  if (isLocomotionState(`${stem}${sideSuffix}`)) {
     warnings.push(
       `상태 '${bare}' 는 주기적 이동이다 — 정본은 양쪽 접지가 다 보이는 모션 위상 참조` +
         `(접촉 시트·선택 사이클·레이아웃 페이즈 가이드)를 요구한다. 지금은 방향 idle 앵커만 붙는다`,

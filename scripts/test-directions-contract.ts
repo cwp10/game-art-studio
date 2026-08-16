@@ -9,6 +9,7 @@ import {
   ensureDirectionAnchors,
   normalizeDirections,
   stateDirection,
+  toSideSuffix,
   toSpriteGenDirection,
 } from "../src/lib/sprite/directions";
 import type { StateSpec } from "../src/lib/sprite/request";
@@ -133,10 +134,20 @@ check("DOWN → down", toSpriteGenDirection("DOWN") === "down");
 check("UP → up", toSpriteGenDirection("UP") === "up");
 check("RIGHT → right", toSpriteGenDirection("RIGHT") === "right");
 check("LEFT → left", toSpriteGenDirection("LEFT") === "left");
-check("DOWN-RIGHT → front-right", toSpriteGenDirection("DOWN-RIGHT") === "front-right");
-check("DOWN-LEFT → front-left", toSpriteGenDirection("DOWN-LEFT") === "front-left");
-check("UP-RIGHT → back-right", toSpriteGenDirection("UP-RIGHT") === "back-right");
-check("UP-LEFT → back-left", toSpriteGenDirection("UP-LEFT") === "back-left");
+// 대각선은 정본이 등록해 둔 45도 토큰(down45/up45)으로 간다. 좌/우는 방향이 아니라
+// **상태명 접미사**가 진다 — 그래야 directionalRequirements 의 3/4 뷰 잠금이 발화한다.
+check("DOWN-RIGHT → down45", toSpriteGenDirection("DOWN-RIGHT") === "down45");
+check("DOWN-LEFT → down45 (앵커를 공유)", toSpriteGenDirection("DOWN-LEFT") === "down45");
+check("UP-RIGHT → up45", toSpriteGenDirection("UP-RIGHT") === "up45");
+check("UP-LEFT → up45 (앵커를 공유)", toSpriteGenDirection("UP-LEFT") === "up45");
+check("down45 는 정본 DIRECTION_FACING 에 있다", DIRECTION_FACING.down45 !== undefined);
+check("up45 도 있다", DIRECTION_FACING.up45 !== undefined);
+
+check("DOWN-RIGHT 접미사", toSideSuffix("DOWN-RIGHT") === "-front-right");
+check("DOWN-LEFT 접미사", toSideSuffix("DOWN-LEFT") === "-front-left");
+check("UP-RIGHT 접미사", toSideSuffix("UP-RIGHT") === "-back-right");
+check("UP-LEFT 접미사", toSideSuffix("UP-LEFT") === "-back-left");
+check("4방위는 접미사 없음", toSideSuffix("DOWN") === "" && toSideSuffix("RIGHT") === "");
 check("REF 는 방향 계약 없음", toSpriteGenDirection("REF") === null);
 check("모르는 값도 null", toSpriteGenDirection("SIDEWAYS") === null);
 

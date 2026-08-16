@@ -83,11 +83,51 @@ void (async () => {
     check("사용자 값이 합성 앵커를 이긴다", request.states.down_idle.action === "대기 호흡");
   }
 
-  console.log("=== 45도 방향 ===");
+  console.log("=== 45도 방향 — 방향은 down45/up45, 좌우는 상태명 접미사 ===");
   {
     const { request } = await buildSpriteRequest({ ...base, uiDirection: "DOWN-RIGHT" });
-    check("DOWN-RIGHT → front-right", request.directions?.set.join(",") === "front-right");
-    check("상태 이름", "front-right_action" in request.states);
+    check("DOWN-RIGHT → down45", request.directions?.set.join(",") === "down45");
+    check("상태 이름에 45도 접미사", "down45_action-front-right" in request.states);
+    check("앵커는 down45_idle", "down45_idle" in request.states);
+  }
+  {
+    const { request } = await buildSpriteRequest({ ...base, uiDirection: "UP-LEFT" });
+    check("UP-LEFT → up45", request.directions?.set.join(",") === "up45");
+    check("상태 이름", "up45_action-back-left" in request.states);
+  }
+  {
+    // 정본은 방향성 로코모션을 진행형으로 쓴다 — 그래야 등급·로코모션 판정이 걸린다.
+    const { request, warnings } = await buildSpriteRequest({
+      ...base,
+      uiDirection: "DOWN-RIGHT",
+      actionPrompt: "달리기 사이클",
+    });
+    check(
+      "run + 45도 → running-front-right",
+      "down45_running-front-right" in request.states,
+      Object.keys(request.states).join(","),
+    );
+    check("experimental 로 보고된다", warnings.some(w => w.includes("experimental")));
+    check("로코모션 경고도 붙는다", warnings.some(w => w.includes("주기적 이동")));
+  }
+  {
+    // 4방위는 접미사가 붙지 않고 진행형으로도 바뀌지 않는다.
+    const { request } = await buildSpriteRequest({
+      ...base,
+      uiDirection: "DOWN",
+      actionPrompt: "달리기 사이클",
+    });
+    check("4방위 run 은 그대로", "down_run" in request.states, Object.keys(request.states).join(","));
+  }
+  {
+    // 좌우가 같은 방향(=같은 앵커)을 공유한다 — 정본 좌우 쌍 절차의 전제다.
+    const r = await buildSpriteRequest({ ...base, uiDirection: "DOWN-RIGHT" });
+    const l = await buildSpriteRequest({ ...base, uiDirection: "DOWN-LEFT" });
+    check(
+      "DOWN-RIGHT 와 DOWN-LEFT 는 앵커를 공유",
+      r.request.directions?.set[0] === l.request.directions?.set[0],
+    );
+    check("행은 갈린다", !("down45_action-front-right" in l.request.states));
   }
 
   console.log("=== REF 는 방향 계약 없음 ===");
