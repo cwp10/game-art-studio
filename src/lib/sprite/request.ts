@@ -123,6 +123,17 @@ export type SpriteRequest = {
  */
 export type FitSpec = {
   segmentation?: "components" | "projection";
+  /**
+   * 격자 스냅 다운스케일로 **진짜 해상도를 복원**한다 (`pixel-unfake.ts`). 기본은 꺼짐.
+   *
+   * 켜려면 생성물에 실제 픽셀 블록이 있어야 한다 — 검출 피치가 1.0 이면 스냅이
+   * 통째로 건너뛰어진다. 프레임당 폭이 임계 아래로 떨어지면 codex 가 블록을 안 그린다.
+   */
+  pixel_unfake?: boolean;
+  /** 목표 논리 높이. 셀 높이의 약수가 아니면 정수 배율이 선언을 무효화한다. */
+  logical_height?: number;
+  /** 셀 지배색에서 어두운 소수 디테일(눈·아웃라인)을 살린다. 기본 true. */
+  detail_bias?: boolean;
 };
 
 export const DEFAULT_STATES: Record<string, StateSpec> = {

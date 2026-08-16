@@ -46,6 +46,10 @@ files below carry the port, each naming its upstream source in its header:
                                         grid detection, cell uniformity, phase)
     src/lib/sprite/pixel-snap.ts     <- sprite_gen/extract.py (pixel unfake
                                         dominant-color snap downscale)
+    src/lib/sprite/pixel-unfake.ts   <- sprite_gen/extract.py (_snap_strip,
+                                        fit_pixel_unfake, conform_row_logical,
+                                        binarize_alpha) and curation.py
+                                        (pixel_snap_scale)
     src/lib/sprite/selected-cycle.ts <- sprite_gen/compose_cycle.py
     src/lib/sprite/reroll.ts         <- sprite_gen/reroll.py
     src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
