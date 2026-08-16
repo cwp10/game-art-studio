@@ -247,6 +247,89 @@ export function lockBaseGeneration(generationId: string, sessionId: string | nul
 }
 
 /**
+ * 행의 큐레이션(표시 순서·제외)을 저장한다.
+ *
+ * 앵커는 사람이 화면에서 승인한 모습이어야 하므로 앵커 해석이 이 기록을 읽는다.
+ * 이 값이 없으면 resolveAnchor 는 index 0 을 앵커로 삼는데, 사용자가 앞 프레임을
+ * 제외한 런에서 그것은 기각분이다 (sprite-gen 실사고 2026-07-19).
+ */
+export function saveCuration(
+  generationId: string,
+  curation: { order: number[]; excluded: number[] },
+): void {
+  const db = getDb();
+  const row = db.prepare("SELECT params FROM generations WHERE id = ?").get(generationId) as
+    | { params: string | null }
+    | undefined;
+  if (!row) throw new Error(`saveCuration: generation ${generationId} 이(가) 없습니다`);
+  const params = row.params ? (JSON.parse(row.params) as Record<string, unknown>) : {};
+  params.curation = { order: curation.order, excluded: curation.excluded };
+  db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
+    JSON.stringify(params),
+    generationId,
+  );
+}
+
+export function getCuration(generationId: string): { order: number[]; excluded: number[] } | null {
+  const gen = getGeneration(generationId);
+  const c = gen?.params?.curation as { order?: number[]; excluded?: number[] } | undefined;
+  if (!c || !Array.isArray(c.order) || !Array.isArray(c.excluded)) return null;
+  return { order: c.order, excluded: c.excluded };
+}
+
+/**
+ * 방향 앵커 프레임을 지정한다.
+ *
+ * 저장 위치가 잠긴 base 인 이유: 지정은 run 스코프 메타데이터인데 우리에게 run 테이블이
+ * 없다. 위의 lockBaseGeneration 이 "base 는 스코프당 딱 1장"을 강제하므로 base 가
+ * 유일하게 안정적인 자리다. run 이 실체를 가지면 그때 옮긴다.
+ */
+export function pinAnchorFrame(
+  sessionId: string | null,
+  direction: string,
+  pick: { generationId: string; index: number },
+): void {
+  const base = getLockedBase(sessionId);
+  if (!base) throw new Error("pinAnchorFrame: 잠긴 base 가 없습니다 — 먼저 base 를 잠그세요");
+  const params = { ...base.params };
+  const picks = { ...((params.anchorPicks as Record<string, unknown>) ?? {}) };
+  picks[direction] = { generationId: pick.generationId, index: pick.index };
+  params.anchorPicks = picks;
+  getDb()
+    .prepare("UPDATE generations SET params = ? WHERE id = ?")
+    .run(JSON.stringify(params), base.id);
+}
+
+export function clearAnchorPick(sessionId: string | null, direction: string): void {
+  const base = getLockedBase(sessionId);
+  if (!base) return;
+  const params = { ...base.params };
+  const picks = { ...((params.anchorPicks as Record<string, unknown>) ?? {}) };
+  delete picks[direction];
+  params.anchorPicks = picks;
+  getDb()
+    .prepare("UPDATE generations SET params = ? WHERE id = ?")
+    .run(JSON.stringify(params), base.id);
+}
+
+export function getAnchorPicks(
+  sessionId: string | null,
+): Record<string, { generationId: string; index: number }> {
+  const base = getLockedBase(sessionId);
+  const picks = base?.params?.anchorPicks as
+    | Record<string, { generationId?: string; index?: number }>
+    | undefined;
+  if (!picks) return {};
+  const out: Record<string, { generationId: string; index: number }> = {};
+  for (const [dir, p] of Object.entries(picks)) {
+    if (typeof p?.generationId === "string" && typeof p?.index === "number") {
+      out[dir] = { generationId: p.generationId, index: p.index };
+    }
+  }
+  return out;
+}
+
+/**
  * 현재 잠긴 base 를 돌려준다. 스코프당 1장이므로 정렬이 필요 없다.
  * sessionId 가 null 이면 세션에 묶이지 않은 잠금을 본다(전부가 아니다).
  */
