@@ -1027,6 +1027,40 @@ SKILL.md Runtime Contract 필수 필드:
 (2026-07-26). 우리 `SpriteCanvas` 도 프레임 편집·제외·재정렬 기능이 있으므로 **같은 함정이
 있다.** 편집 결과가 반영된 산출물과 편집 전 산출물을 구분하는 경계를 ⑥에서 명시해야 한다.
 
+#### 함정이 실제로 있었다 — 경계를 그었다 (2026-08-16)
+
+`composeAtlas` 가 큐레이션을 **무시하고 추출 프레임 전부를 굽고 있었다.** 사용자가 프레임을
+제외·재정렬해 저장해도 시트는 편집 전 그대로였다. 정본이 못박은 그 형태다.
+
+우리 구조의 경계:
+
+```text
+진실  = 행 generation 의 raw 시트  +  그 행에 저장된 큐레이션(사이드카)
+파생  = 아틀라스 PNG + manifest    ← 매번 진실에서 다시 굽는다
+```
+
+- `composeAtlas(curationByState)` 가 재생 순서대로 굽는다. 프레임 수·columns·`durations_ms`·
+  `frame_layout` 이 전부 큐레이션을 따르고, `manifest.curation_applied` 가 반영 여부를 싣는다
+  (정본 `compose_atlas.py` 와 같은 필드).
+- 큐레이션 없음 = 추출 순서 그대로. **명시적 기본값이지 조용한 폴백이 아니다**
+  (`curation.md`). 범위 밖 인덱스는 `curatedSequence` 가 던진다.
+- `recomposeCuratedAtlas` — 행 raw 시트에서 프레임을 다시 추출해 아틀라스를 제자리에서 다시
+  굽는다. 정본의 "큐레이션 후 `compose_sprite_atlas.py` 재실행" 에 해당한다.
+- `/api/sprite/curation` POST 가 저장 후 재합성하고, 재합성 실패를 성공으로 보고하지 않는다.
+
+**실측 (2026-08-16, 실제 codex)**: `down_idle` + `down_attack` 2행 4프레임 → 1024×512.
+접촉 시트에서 `down_attack` 프레임 0 이 칼이 안 보이는 약한 프레임임을 눈으로 확인하고 두 행
+모두 `selected: [1,2,3]` 으로 저장 → **768×512(3칸)로 재합성**, `curation_applied: true`,
+약한 프레임이 실제로 빠졌다. 앵커도 큐레이션 헤드를 따라 `down_idle#1` 이었다.
+
+**모션 QA 는 큐레이션 이전을 본다.** `preview.ts` 는 추출 프레임 **전체**로 접촉 시트와 GIF 를
+만든다(정본 `preview_animation.py` 가 `frames/` 를 읽는 것과 같다) — 사람이 그것을 보고 뺄
+프레임을 정하므로 판정 입력이 편집 전이어야 한다. `GET /api/sprite/qa` 가 화이트리스트로
+서빙하고 `SpriteCanvas` 의 접이식 "모션 QA" 블록이 상태별 GIF·접촉 시트를 보여준다.
+
+**아직 없는 것**: 큐레이션 `transforms`(프레임별 아핀)·픽셀 편집·복제(clones)와 그에 따른
+아틀라스 칸 재사용. 정본에는 있고 우리 UI 에는 그 입력 자체가 없다.
+
 ## 9. 라이선스
 
 sprite-gen 은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
