@@ -121,6 +121,10 @@ export function SpriteCanvas({
   const overlayDragCounter = useRef(0);
   const overlayFileInputRef = useRef<HTMLInputElement>(null);
 
+  // 큐레이션 재합성이 아틀라스를 제자리에서 덮어쓰면 증가한다 — params 재조회와 이미지
+  // 캐시 무효화를 함께 태운다(프레임 수가 줄면 cols 가 바뀌므로 둘 다 갱신돼야 한다).
+  const [sheetVersion, setSheetVersion] = useState(0);
+
   // 마운트 시 parentGenerationId 로 params fetch → 있으면 rows/cols/fps 를 그 값으로 동기화.
   // 사용자 수동 입력은 유지(이후 setRows/setCols 가능)하되 초기값만 params 우선.
   useEffect(() => {
@@ -134,7 +138,7 @@ export function SpriteCanvas({
       setParams(p ?? null);
     });
     return () => { cancelled = true; };
-  }, [parentGenerationId]);
+  }, [parentGenerationId, sheetVersion]);
   const [atlasFormat, setAtlasFormat] = useState<AtlasFormat>("custom");
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [gifBusy, setGifBusy] = useState(false);
@@ -194,8 +198,9 @@ export function SpriteCanvas({
       imgRef.current = img;
       setImgLoaded(true);
     };
-    img.src = imageUrl;
-  }, [imageUrl]);
+    // 재합성은 같은 URL 에 덮어쓰므로 브라우저 캐시를 쿼리로 깬다.
+    img.src = sheetVersion > 0 ? `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${sheetVersion}` : imageUrl;
+  }, [imageUrl, sheetVersion]);
 
   useEffect(() => {
     const c = baseRef.current;
@@ -899,8 +904,19 @@ export function SpriteCanvas({
         const { error } = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(error ?? `저장 실패 (${res.status})`);
       }
+      // 저장만으로는 끝이 아니다 — 아틀라스가 큐레이션 반영본으로 다시 구워져야 한다.
+      // 재합성이 실패하면 편집 전 시트가 남은 것이므로 성공으로 표시하지 않는다.
+      const body = (await res.json().catch(() => ({}))) as {
+        recomposed?: { columns: number; frameCounts: Record<string, number> } | null;
+        recomposeError?: string;
+      };
+      if (body.recomposeError) {
+        throw new Error(`저장했지만 시트를 다시 굽지 못했습니다 — ${body.recomposeError}`);
+      }
       const counts = params.states.map(st => `${st} ${byState[st].selected.length}장`).join(", ");
-      setCurationMsg(`큐레이션 저장됨 — ${counts}`);
+      setCurationMsg(`큐레이션 저장·재합성됨 — ${counts}`);
+      // 아틀라스 PNG 가 같은 URL 에 덮어써졌다. 캐시를 깨고 다시 읽는다.
+      setSheetVersion(v => v + 1);
     } catch (e) {
       setCurationMsg(`저장 실패: ${(e as Error).message}`);
     } finally {

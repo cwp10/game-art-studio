@@ -216,7 +216,12 @@ export async function runPlanDrivenSpritesheet(
     }
   }
 
-  const composed = composeAtlas({ request, framesByState });
+  // 재사용한 행에는 사람이 저장한 큐레이션이 붙어 있다 — 아틀라스는 **그것을 반영해**
+  // 구워야 한다(정본 Output Contract: `frames/` 가 아니라 큐레이션 반영본을 설치).
+  const curationByState = Object.fromEntries(
+    stateOrder.map(s => [s, result.rows[s]?.curation ?? null]),
+  );
+  const composed = composeAtlas({ request, framesByState, curationByState });
   if (composed.errors.length > 0) {
     throw new Error(`아틀라스 합성 실패: ${composed.errors.join("; ")}`);
   }
@@ -262,6 +267,10 @@ export async function runPlanDrivenSpritesheet(
       extraction: Object.fromEntries(states.map(s => [s, result.rows[s].method])),
       anchors: result.anchors,
       manifest: composed.manifest,
+      // 큐레이션 저장 후 재합성이 이 request 로 프레임을 다시 추출한다. 없으면 아틀라스를
+      // 다시 구울 수 없어 편집 전 산출물이 남는다.
+      request,
+      curationApplied: composed.manifest.curation_applied,
       warnings: result.warnings,
       // 모션 QA 산출물 경로 — 판정은 사람이 한다. 여기 기록해 두면 어떤 런의 어떤
       // 상태를 봤는지 사후에 짚을 수 있다.

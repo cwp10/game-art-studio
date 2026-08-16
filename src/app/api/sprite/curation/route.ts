@@ -4,6 +4,7 @@ import {
   getGeneration,
   saveCuration,
 } from "@/lib/db/repo/generations";
+import { recomposeCuratedAtlas, type RecomposeResult } from "@/lib/sprite/recompose";
 
 export const runtime = "nodejs";
 
@@ -18,8 +19,12 @@ export const runtime = "nodejs";
  * (`resolveAnchor`)이 그 행의 큐레이션 시퀀스 첫 인스턴스를 앵커로 삼기 때문이다 —
  * index 0 이 아니다. 사용자가 앞 프레임을 제외하면 앵커가 따라 움직여야 한다.
  *
+ * 저장 뒤에는 **아틀라스를 다시 굽는다.** 정본은 큐레이션 후 `compose_sprite_atlas.py` 를
+ * 다시 돌린다 — 그 단계가 없으면 사용자가 편집을 저장해도 시트는 편집 전 그대로이고,
+ * 그것이 정본이 실사고로 못박은 Output Contract 함정이다.
+ *
  * body: { atlasGenerationId, curationByState: { <state>: { selected: number[], order?: number[] } } }
- * 응답: { ok: true, saved: { <state>: { selected, order? } } }
+ * 응답: { ok: true, saved: {...}, recomposed: {...} | null, recomposeError?: string }
  */
 
 type Body = {
@@ -53,7 +58,22 @@ export async function POST(req: NextRequest) {
     saved[state] = getCuration(rowId) ?? { selected };
   }
 
-  return Response.json({ ok: true, saved });
+  // 큐레이션은 저장됐다. 재합성이 실패해도 그 사실을 잃지 않되, **조용히 성공으로
+  // 보고하지 않는다** — 편집 전 시트가 남았다는 것을 호출자가 알아야 한다.
+  let recomposed: RecomposeResult | null = null;
+  let recomposeError: string | undefined;
+  try {
+    recomposed = await recomposeCuratedAtlas(atlasId);
+  } catch (e) {
+    recomposeError = (e as Error).message;
+  }
+
+  return Response.json({
+    ok: true,
+    saved,
+    recomposed,
+    ...(recomposeError ? { recomposeError } : {}),
+  });
 }
 
 /** GET /api/sprite/curation?atlasGenerationId=... — 상태별 저장된 큐레이션 조회. */

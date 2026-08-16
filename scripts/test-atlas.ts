@@ -146,5 +146,85 @@ console.log("=== 픽셀이 실제로 그 자리에 놓인다 ===");
   check("b 행의 빈 칸은 투명", r.atlas.data[(64 * r.atlas.width + 64) * 4 + 3] === 0);
 }
 
+console.log("=== 큐레이션 반영 — Output Contract 경계 ===");
+{
+  // 큐레이션 없음 = 추출 순서 그대로. **명시적 기본값이지 조용한 폴백이 아니다.**
+  const r = composeAtlas({
+    request: req({ a: S(4, 6, true) }),
+    framesByState: { a: [frame(1000, 11), frame(1000, 22), frame(1000, 33), frame(1000, 44)] },
+  });
+  check("큐레이션 없으면 curation_applied=false", r.manifest.curation_applied === false);
+  check("프레임 4개 그대로", r.manifest.animation.rows.a.frames === 4);
+}
+{
+  // 프레임 0 을 뺀 큐레이션 → 아틀라스가 3칸으로 좁아지고 첫 칸이 원래 1번이 된다.
+  const r = composeAtlas({
+    request: req({ a: S(4, 6, true) }),
+    framesByState: { a: [frame(4096, 11), frame(4096, 22), frame(4096, 33), frame(4096, 44)] },
+    curationByState: { a: { selected: [1, 2, 3] } },
+  });
+  check("curation_applied=true", r.manifest.curation_applied === true);
+  check("프레임 수가 큐레이션을 따른다", r.manifest.animation.rows.a.frames === 3);
+  check("columns 가 좁아진다", r.manifest.animation.columns === 3);
+  check("아틀라스 폭도 좁아진다", r.atlas.width === 3 * 64, `${r.atlas.width}`);
+  check("durations_ms 길이도 3", r.manifest.animation.rows.a.durations_ms.length === 3);
+  check("rect 3개", r.manifest.frame_layout.rows.a.length === 3);
+  const px = (x: number, y: number): number => r.atlas.data[(y * r.atlas.width + x) * 4];
+  check("첫 칸이 원래 프레임 1", px(0, 0) === 22, `${px(0, 0)}`);
+  check("둘째 칸이 원래 프레임 2", px(64, 0) === 33);
+  check("셋째 칸이 원래 프레임 3", px(128, 0) === 44);
+}
+{
+  // 재정렬도 그대로 구워진다 — selected 는 재생 순서다.
+  const r = composeAtlas({
+    request: req({ a: S(3, 6, true) }),
+    framesByState: { a: [frame(4096, 11), frame(4096, 22), frame(4096, 33)] },
+    curationByState: { a: { selected: [2, 0, 1] } },
+  });
+  const px = (x: number): number => r.atlas.data[x * 4];
+  check("재생 순서대로 배치", px(0) === 33 && px(64) === 11 && px(128) === 22);
+}
+{
+  // 빈 selected 는 기본값으로 떨어진다(정본 state_plan 과 같다).
+  const r = composeAtlas({
+    request: req({ a: S(2, 6, true) }),
+    framesByState: { a: [frame(4096, 11), frame(4096, 22)] },
+    curationByState: { a: { selected: [] } },
+  });
+  check("빈 selected 는 전체 순서", r.manifest.animation.rows.a.frames === 2);
+  check("빈 selected 는 curation_applied=false", r.manifest.curation_applied === false);
+}
+{
+  // 인덱스 공간이 바뀐(재추출된) 큐레이션은 던진다 — 다른 프레임을 조용히 굽지 않는다.
+  let threw = "";
+  try {
+    composeAtlas({
+      request: req({ a: S(2, 6, true) }),
+      framesByState: { a: [frame(4096, 11), frame(4096, 22)] },
+      curationByState: { a: { selected: [0, 5] } },
+    });
+  } catch (e) {
+    threw = String(e);
+  }
+  check("범위 밖 인덱스는 fail-loud", threw.includes("curation"), threw);
+}
+{
+  // 상태마다 큐레이션이 다를 수 있고, 하나만 있어도 applied 다.
+  const r = composeAtlas({
+    request: req({ a: S(3, 6, true), b: S(3, 6, true) }),
+    framesByState: {
+      a: [frame(4096, 11), frame(4096, 22), frame(4096, 33)],
+      b: [frame(4096, 44), frame(4096, 55), frame(4096, 66)],
+    },
+    curationByState: { a: { selected: [0, 2] }, b: null },
+  });
+  check("상태별로 다른 프레임 수", r.manifest.animation.rows.a.frames === 2 && r.manifest.animation.rows.b.frames === 3);
+  check("columns 는 최대치", r.manifest.animation.columns === 3);
+  check("한 상태만 큐레이션돼도 applied", r.manifest.curation_applied === true);
+  const px = (x: number, y: number): number => r.atlas.data[(y * r.atlas.width + x) * 4];
+  check("a 의 둘째 칸은 원래 프레임 2", px(64, 0) === 33);
+  check("a 행의 남는 칸은 투명", r.atlas.data[(0 * r.atlas.width + 128) * 4 + 3] === 0);
+}
+
 console.log(`\n${passed} passed / ${failed} failed`);
 if (failed > 0) process.exit(1);

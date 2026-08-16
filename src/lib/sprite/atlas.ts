@@ -22,6 +22,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
+import { curatedSequence, type CurationRecord } from "@/lib/sprite/anchor";
 import type { RawImage } from "@/lib/sprite/extract";
 import type { CellSpec, SpriteRequest } from "@/lib/sprite/request";
 
@@ -59,6 +60,16 @@ export type SpriteManifest = {
   chroma_key: SpriteRequest["chromaKey"];
   animation: Animation;
   frame_layout: FrameLayout;
+  /**
+   * 이 아틀라스가 큐레이션 사이드카를 반영해 구워졌는가.
+   *
+   * 정본 Output Contract 의 핵심 기록이다 — *"Install from `curated/`, never from
+   * `frames/`"*. `frames/` 는 큐레이션 이전이고, 사람의 선택은 사이드카에 있다가
+   * 합성 시점에 적용된다. 이 플래그가 없으면 편집 반영본과 편집 전 산출물을 구분할 수
+   * 없고, 그것이 실사고의 형태다(2026-07-26: 손으로 고친 191픽셀이 조용히 누락되고
+   * "적용됨" 으로 보고).
+   */
+  curation_applied: boolean;
 };
 
 export type ComposeResult = {
@@ -79,8 +90,17 @@ function alphaNonzeroCount(img: RawImage): number {
 
 export function composeAtlas(opts: {
   request: SpriteRequest;
-  /** 상태 → 추출된 프레임들. 키 순서가 곧 행 순서다. */
+  /**
+   * 상태 → **추출된 전체 프레임**(큐레이션 이전). 키 순서가 곧 행 순서다.
+   * 정본 `frames/` 에 해당한다 — 여기서 바로 구우면 안 되고 큐레이션을 통과해야 한다.
+   */
   framesByState: Record<string, RawImage[]>;
+  /**
+   * 상태 → 사람이 저장한 재생 시퀀스. 없거나 비어 있으면 추출 순서 그대로 쓴다 —
+   * **명시적 기본값이지 조용한 폴백이 아니다**(curation.md: *"an explicit default,
+   * not a silent fallback"*).
+   */
+  curationByState?: Record<string, CurationRecord | null | undefined>;
   atlasName?: string;
   minUsedPixels?: number;
 }): ComposeResult {
@@ -90,7 +110,17 @@ export function composeAtlas(opts: {
   const states = Object.keys(framesByState);
   const errors: string[] = [];
 
-  const columns = Math.max(1, ...states.map(s => framesByState[s].length));
+  // 재생 순서 해석 — 이 배열이 굽는 인스턴스 순서다(정본 curation.state_plan).
+  // 범위를 벗어난 인덱스는 curatedSequence 가 던진다(재추출로 인덱스 공간이 바뀐 큐레이션).
+  const playOrder: Record<string, number[]> = {};
+  let curationApplied = false;
+  for (const state of states) {
+    const curation = opts.curationByState?.[state] ?? null;
+    playOrder[state] = curatedSequence(framesByState[state].length, curation);
+    if (curation && curation.selected.length > 0) curationApplied = true;
+  }
+
+  const columns = Math.max(1, ...states.map(s => playOrder[s].length));
   const sheetWidth = columns * cell.width;
   const sheetHeight = states.length * cell.height;
   const atlasData = Buffer.alloc(sheetWidth * sheetHeight * 4);
@@ -114,16 +144,18 @@ export function composeAtlas(opts: {
     const entry = request.states[state];
     const rects: FrameRect[] = [];
 
-    frames.forEach((frame, col) => {
+    // 재생 순서대로 굽는다 — col 은 아틀라스 칸이고 srcIndex 는 추출 프레임이다.
+    playOrder[state].forEach((srcIndex, col) => {
+      const frame = frames[srcIndex];
       if (frame.width !== cell.width || frame.height !== cell.height) {
         errors.push(
-          `${state} frame ${col} is ${frame.width}x${frame.height}; expected ${cell.width}x${cell.height}`,
+          `${state} frame ${srcIndex} is ${frame.width}x${frame.height}; expected ${cell.width}x${cell.height}`,
         );
         return;
       }
       const used = alphaNonzeroCount(frame);
       if (used < minUsed) {
-        errors.push(`${state} frame ${col} is too sparse (${used})`);
+        errors.push(`${state} frame ${srcIndex} is too sparse (${used})`);
       }
       const left = col * cell.width;
       const top = rowIndex * cell.height;
@@ -158,6 +190,7 @@ export function composeAtlas(opts: {
       chroma_key: request.chromaKey,
       animation,
       frame_layout: frameLayout,
+      curation_applied: curationApplied,
     },
     errors,
   };
