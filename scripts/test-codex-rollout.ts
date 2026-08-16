@@ -6,11 +6,16 @@
  * 실제 ~/.codex/sessions 레코드 형태(2026-08-16 실측)를 고정 문자열로 재현해
  * session id 추출 · inline base64 수집 · PNG 매직 검증 · 에러 추출을 단언한다.
  */
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   collectInlineResults,
   extractStreamErrors,
   isPng,
   parseSessionId,
+  recoverPngFromRollout,
+  resolveRolloutPath,
 } from "../src/lib/image-backend/codex-rollout";
 
 let pass = 0;
@@ -111,5 +116,67 @@ check(
   extractStreamErrors(`{"type":"thread.started","thread_id":"${SID}"}`).length === 0,
 );
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail === 0 ? 0 : 1);
+// ── resolveRolloutPath / recoverPngFromRollout ────────────────────
+// 파일 IO 가 필요한 구간. package.json 에 type:module 이 없어 top-level await 를
+// 쓸 수 없으므로 async IIFE 안에서 실행하고 집계도 여기서 낸다.
+void (async () => {
+  const tmpRoot = mkdtempSync(join(tmpdir(), "codex-rollout-test-"));
+  const sessionsDir = join(tmpRoot, "sessions");
+  mkdirSync(join(sessionsDir, "2026", "08", "16"), { recursive: true });
+
+  // 1×1 투명 PNG 의 base64 (실제 PNG 매직으로 시작한다)
+  const TINY_PNG_B64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  const rolloutPath = join(
+    sessionsDir,
+    "2026",
+    "08",
+    "16",
+    `rollout-2026-08-16T00-00-00-${SID}.jsonl`,
+  );
+  writeFileSync(
+    rolloutPath,
+    [
+      `{"payload":{"type":"session_meta","id":"${SID}"}}`,
+      `{"payload":{"type":"image_generation_call","id":"c1","result":"${TINY_PNG_B64}","status":"generating"}}`,
+      `{"payload":{"type":"image_generation_end","call_id":"c1","result":"${TINY_PNG_B64}","status":"generating"}}`,
+    ].join("\n"),
+  );
+
+  const resolved = await resolveRolloutPath(SID, sessionsDir);
+  check("session id 로 rollout 파일 해석", resolved === rolloutPath, resolved);
+
+  let notFound = false;
+  try {
+    await resolveRolloutPath("no-such-session", sessionsDir);
+  } catch {
+    notFound = true;
+  }
+  check("없는 session id 는 throw", notFound);
+
+  const destPath = join(tmpRoot, "out.png");
+  const recovered = await recoverPngFromRollout(SID, destPath, sessionsDir);
+  check("PNG 가 기록됨", isPng(readFileSync(destPath)));
+  check("바이트 수 반환", recovered.bytes > 0, String(recovered.bytes));
+  check("status 를 함께 반환", recovered.statuses.includes("generating"));
+
+  // result 레코드가 없는 rollout
+  const emptySid = "0000ffff-0000-0000-0000-000000000000";
+  writeFileSync(
+    join(sessionsDir, "2026", "08", "16", `rollout-2026-08-16T00-00-01-${emptySid}.jsonl`),
+    `{"payload":{"type":"user_message"}}`,
+  );
+  let noResult = false;
+  try {
+    await recoverPngFromRollout(emptySid, join(tmpRoot, "none.png"), sessionsDir);
+  } catch (e) {
+    noResult = (e as Error).message.includes("image_gen");
+  }
+  check("결과 레코드가 없으면 throw", noResult);
+
+  rmSync(tmpRoot, { recursive: true, force: true });
+
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail === 0 ? 0 : 1);
+})();
