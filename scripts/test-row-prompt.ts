@@ -269,5 +269,33 @@ console.log("=== 합성 순서 — 접두사 → 접미사 → STATE_REQUIREMENT
   check("그래도 facing 잠금은 붙는다", dw.includes("Lock the whole row to facing the viewer"));
 }
 
+// 교정 힌트 주입 — 정본은 힌트를 파일로 뱉고 프롬프트 조립을 provider 에 맡기지만,
+// 우리는 직접 얹으므로 **어디에** 얹히는지가 계약이다. 레이아웃 규칙보다 앞이어야
+// 한다: 교정은 이번 시도에서 반드시 달라져야 하는 것이라 뒤에 묻히면 안 된다.
+{
+  const hint =
+    "attack: Adjacent frames are too similar (motion presence 0.0064). Make the action visibly progress.";
+  const withHint = buildRowPrompt(request, "attack", request.states.attack, [hint]);
+  check("힌트가 프롬프트에 들어간다", withHint.includes(hint));
+  check(
+    "교정 머리말이 붙는다",
+    withHint.includes("The previous attempt at this row was rejected"),
+  );
+  check(
+    "힌트가 레이아웃 규칙보다 앞에 온다",
+    withHint.indexOf(hint) < withHint.indexOf("Layout requirements:"),
+  );
+  check(
+    "힌트가 Anchor lock 보다 앞에 온다",
+    withHint.indexOf(hint) < withHint.indexOf("Anchor lock:"),
+  );
+  const noHint = buildRowPrompt(request, "attack", request.states.attack, []);
+  check(
+    "힌트가 없으면 머리말도 없다",
+    !noHint.includes("The previous attempt at this row was rejected"),
+  );
+  check("힌트 없는 프롬프트는 기존과 같다", noHint === p);
+}
+
 console.log(`\n${passed} passed / ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -146,6 +146,13 @@ const SCHEMAS = {
           "(선택) 참조 이미지의 generation id. 캐릭터 스타일 참조 및 배경 색상 자동 상속에 사용. " +
           "사용자가 [reference: <id>] 를 첨부했을 때 이 값을 전달.",
       },
+      correctFrom: {
+        type: "string",
+        description:
+          "(선택) 교정 재생성의 출발점이 될 스프라이트시트 generation id. " +
+          "메시지에 [correct: <id>] 마커가 있을 때 그 값을 그대로 전달한다. " +
+          "서버가 그 시트의 자동 검사 힌트를 읽어 해당 상태 행의 프롬프트에 얹는다.",
+      },
       seamlessLoop: {
         type: "boolean",
         description:

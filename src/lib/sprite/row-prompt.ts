@@ -195,7 +195,20 @@ export function directionalRequirements(state: string): string[] {
   return requirements;
 }
 
-export function buildRowPrompt(request: SpriteRequest, state: string, entry: StateSpec): string {
+export function buildRowPrompt(
+  request: SpriteRequest,
+  state: string,
+  entry: StateSpec,
+  /**
+   * 이전 시도의 교정 힌트 (`score.ts` 가 만든 그 문자열 그대로).
+   *
+   * 정본은 힌트를 `correction-hints.txt` 로 뱉고 프롬프트 조립은 provider 에게
+   * 맡긴다 — 우리는 직접 얹으므로 위치를 정해야 했다. **레이아웃 규칙보다 앞**에
+   * 둔다: 교정은 이번 시도에서 반드시 달라져야 하는 것이고, 뒤에 묻히면 앞선
+   * 일반 규칙에 가려진다.
+   */
+  correctionHints: string[] = [],
+): string {
   const { cell, chromaKey, character } = request;
   const frames = entry.frames;
   const runtimeSize = `${cell.width}x${cell.height}`;
@@ -242,7 +255,14 @@ Style contract: ${STYLE_DEFAULT}.
 Use this prompt as an authoritative sprite-production spec. Do not expand it into a polished illustration, painterly character image, anime key art, 3D render, vector mascot, glossy app icon, realistic portrait, or marketing artwork.
 
 Animation action: ${entry.action}.
-
+${
+  correctionHints.length > 0
+    ? `
+The previous attempt at this row was rejected. Fix these before anything else:
+${correctionHints.map(h => `- ${h}`).join("\n")}
+`
+    : ""
+}
 Anchor lock:
 ${anchorLockText}
 ${stateRequirementText}

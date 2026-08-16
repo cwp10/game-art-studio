@@ -85,6 +85,10 @@ export async function handleMakeSpritesheet(
           frames: cols * rows,
           loop: seamlessLoop,
           actionPrompt: userPrompt,
+          // 교정 재생성 — 이전 아틀라스의 힌트를 얹어 다시 굽는다. 사람이 트리거를
+          // 쥔다(정본도 correction-loop 는 별도 명령이다).
+          correctFrom:
+            typeof args.correctFrom === "string" && args.correctFrom ? args.correctFrom : undefined,
         },
         extra,
         ctx,

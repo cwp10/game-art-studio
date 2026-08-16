@@ -519,6 +519,37 @@ export function ChatLayout() {
     [handleSend, setSpriteGen],
   );
 
+  /**
+   * 교정 재생성 — 자동 검사 힌트를 얹어 같은 행을 다시 굽는다.
+   *
+   * 서버가 마커를 조립하고(재료가 서버에만 있다) 여기서는 그것을 **일반 메시지로**
+   * 보낸다. 재생성이 기존 채팅 경로를 그대로 타야 두 번째 생성 경로가 생기지 않는다.
+   * 이전 시트는 그대로 남는다 — 재생성이 더 나빠질 수 있고, 그때는 이전 것을 쓴다.
+   */
+  const handleCorrect = useCallback(
+    async (atlasGenerationId: string) => {
+      const res = await fetch("/api/sprite/correct", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ atlasGenerationId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        attachmentGenerationIds?: string[];
+        error?: string;
+      };
+      if (!res.ok || !data.message) {
+        window.alert(`교정 재생성을 시작할 수 없습니다 — ${data.error ?? res.status}`);
+        return;
+      }
+      setEditing(null);
+      await handleSend(data.message, {
+        attachmentGenerationIds: data.attachmentGenerationIds ?? [],
+      });
+    },
+    [handleSend],
+  );
+
   // [✨ 제안] — 사용자 입력을 LLM 으로 다양화한 3-4개 컨셉을 chat 에 카드로 표시.
   // active session 없으면 신규 생성. dispatch suggestions_requested → API 호출 →
   // suggestions_received. 카드 클릭은 onPickSuggestion 으로 Composer prefill.
@@ -692,6 +723,7 @@ export function ChatLayout() {
               imageHeight={editing.height}
               sessionId={state.activeSessionId}
               sheetGenerationId={editing.generationId}
+              onCorrect={handleCorrect}
               onRegenBusyChange={handleRegenBusyChange}
               onOverlay={handleSpriteOverlay}
               onVfxOverlay={handleVfxOverlay}

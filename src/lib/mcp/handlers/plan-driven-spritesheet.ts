@@ -52,6 +52,15 @@ export type PlanDrivenInput = {
   frames: number;
   loop: boolean;
   actionPrompt: string;
+  /**
+   * 교정 재생성의 출발점이 된 아틀라스 generation.
+   *
+   * 정본은 correction loop 를 **별도 CLI 명령**으로 노출한다
+   * (`sprite-gen correction-loop --provider-command …`) — 기본 생성에 자동으로
+   * 붙지 않는다. 재생성은 codex 호출이라 비용·시간이 배로 드니 사람이 트리거를
+   * 쥔다. 우리도 같다: 이 필드가 있을 때만 이전 힌트를 얹어 다시 굽는다.
+   */
+  correctFrom?: string;
 };
 
 /**
@@ -153,6 +162,39 @@ export async function runPlanDrivenSpritesheet(
 
   const stateOrder = Object.keys(request.states);
 
+  // ── 교정 재생성: 이전 시도의 힌트 회수 ───────────────────────────────────
+  // 힌트는 이전 아틀라스의 params 에 이미 있다. 그것을 상태별로 갈라 그 상태 행의
+  // 프롬프트에만 얹는다. 이전 점수도 들고 있다가 아래에서 새 점수와 비교한다 —
+  // 재생성이 **더 나빠질 수 있고**, 그 사실이 조용하면 퇴보한 시트를 쓰게 된다.
+  const correctionHints: Record<string, string[]> = {};
+  let previousScore: { id: string; overall: number; ok: boolean } | null = null;
+  if (input.correctFrom) {
+    const prev = getGeneration(input.correctFrom);
+    const prevInspect = prev?.params?.inspect as
+      | { ok: boolean; overall_score: number; rows: Array<{ state: string; hints: string[] }> }
+      | null
+      | undefined;
+    if (!prevInspect) {
+      gateWarnings.push(
+        `교정 출발점 ${input.correctFrom} 에 검사 리포트가 없습니다 — 힌트 없이 새로 생성합니다`,
+      );
+    } else {
+      previousScore = {
+        id: input.correctFrom,
+        overall: prevInspect.overall_score,
+        ok: prevInspect.ok,
+      };
+      for (const row of prevInspect.rows) {
+        if (row.hints.length > 0) correctionHints[row.state] = row.hints;
+      }
+      const total = Object.values(correctionHints).reduce((a, h) => a + h.length, 0);
+      log(
+        `plan-driven: 교정 재생성 (이전 ${prevInspect.overall_score}점, 힌트 ${total}개 ` +
+          `— ${Object.keys(correctionHints).join(", ") || "없음"})`,
+      );
+    }
+  }
+
   // ── 기존 방향 앵커 행 재사용 ─────────────────────────────────────────────
   // 매 런마다 앵커 행을 새로 만들면 사람이 그 행에 한 큐레이션·핀이 즉시 무의미해진다.
   // 잠긴 base 가 자기 스코프의 앵커 행을 기억하고, 있으면 재사용한다.
@@ -164,6 +206,13 @@ export async function runPlanDrivenSpritesheet(
   const existingRows: Record<string, RunPlanRow> = {};
   for (const [state, rowId] of Object.entries(anchorRows)) {
     if (!(state in request.states)) continue;
+    // 교정 대상 상태는 **재사용하지 않는다**. 그 행을 그대로 쓰면 힌트를 얹을 자리가
+    // 없어 "교정 재생성" 이 아무것도 바꾸지 않는다 — 방향 앵커 행이 곧 게임의 idle
+    // 행이기도 해서 실제로 자주 걸린다.
+    if (correctionHints[state]?.length) {
+      log(`plan-driven: 앵커 행 '${state}' 재사용 생략 — 교정 대상`);
+      continue;
+    }
     const rowGen = getGeneration(rowId);
     if (!rowGen) continue;
     try {
@@ -248,6 +297,7 @@ export async function runPlanDrivenSpritesheet(
     picks,
     workDir,
     lockedBasePath: basePath,
+    correctionHints,
     log: m => log(`plan-driven: ${m}`),
   });
   for (const w of result.warnings) log(`plan-driven 경고: ${w}`);
@@ -299,6 +349,26 @@ export async function runPlanDrivenSpritesheet(
       );
       if (scoreReport.hints.length > 0) {
         await writeFile(path.join(workDir, "correction-hints.txt"), formatHints(scoreReport.hints));
+      }
+      // 교정이 **퇴보했을 수 있다.** 정본의 correction loop 는 최선 후보를 따로
+      // 보존하는데, 우리는 두 시트가 다 DB 에 남으므로 사람이 고른다 — 대신 어느
+      // 쪽이 나은지는 말해줘야 한다. 조용하면 새 시트가 무조건 낫다고 오해한다.
+      if (previousScore) {
+        const delta = scoreReport.overall_score - previousScore.overall;
+        const line =
+          `교정 결과 ${previousScore.overall}점 → ${scoreReport.overall_score}점 ` +
+          `(${delta >= 0 ? "+" : ""}${Math.round(delta * 100) / 100})`;
+        if (delta < 0) {
+          gateWarnings.push(
+            `${line} — **이전 시트가 더 낫습니다**. 이전 것을 쓰려면 ` +
+              `${previousScore.id} 를 그대로 두고 이 시트를 버리세요`,
+          );
+        } else if (delta === 0) {
+          gateWarnings.push(`${line} — 점수가 그대로입니다`);
+        } else {
+          gateWarnings.push(line);
+        }
+        log(`plan-driven: ${line}`);
       }
     }
   }
@@ -377,6 +447,14 @@ export async function runPlanDrivenSpritesheet(
       request,
       curationApplied: composed.manifest.curation_applied,
       warnings: [...gateWarnings, ...result.warnings],
+      // 교정 계보 — 어느 시트를 고치려다 나온 것인지, 점수가 어떻게 움직였는지.
+      ...(previousScore
+        ? {
+            correctionOf: previousScore.id,
+            previousScore: previousScore.overall,
+            correctedStates: Object.keys(correctionHints),
+          }
+        : {}),
       // 폐루프 신호. 점수·힌트만 담고 프레임은 담지 않는다 — 리포트가 params 를
       // 무겁게 만들면 안 되고, 프레임은 workDir 의 inspect.json 에 이미 있다.
       inspect: scoreReport

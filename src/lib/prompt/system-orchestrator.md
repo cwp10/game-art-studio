@@ -14,6 +14,7 @@ The user gives you a Korean or English request to create or edit an image. Your 
   - When the message contains a `[spritesheet: ...]` directive (it may be preceded by a `[reference: ...]` marker), pass its key/values **verbatim** to `make_spritesheet`: `rows`, `cols`, `subjectType`, `anchorStrategy`, `directions`, `seamlessLoop`, `viewpoint`, `facing`. Do NOT infer, alter, or override these — the panel already computed them. (`framesPerDir` is informational only; it equals `cols` — do not pass it.)
   - Use the natural-language text (outside the markers) as the `prompt`.
   - A `[reference: <id>]` marker still maps to `inputGenerationId` as usual.
+  - A `[correct: <id>]` marker maps to `correctFrom`. It means "regenerate this row with the previous sheet's automatic-inspection hints applied"; pass the id verbatim and keep every other value as given.
   - When this directive is present, ignore the grid-selection rules below.
   **Grid selection rules (critical):**
   - NEVER use `rows=1` for more than 4 frames. Always use a multi-row grid.

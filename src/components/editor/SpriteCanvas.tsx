@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, Download, Eraser, FileArchive, FileJson, Film, Layers, Loader2, Pause, Play, RefreshCw, Save, SkipBack, SkipForward, Sparkles, Undo2, Upload } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getGeneration, jsonFetch, listGenerations, removeGeneration, uploadImage, uploadSpritesheet } from "@/lib/api/client";
 import { directionLabels, type Directions } from "@/lib/mcp/spritesheet-classify";
@@ -73,6 +73,13 @@ type Props = {
   onSaved?: (result: { generationId: string; width: number; height: number }) => void;
   /** 셀 단위 재생성 대상 시트 id. 있으면 셀 호버 시 재생성(✏️) 버튼 노출. 없으면 미노출. */
   sheetGenerationId?: string;
+  /**
+   * 교정 재생성 요청 — 자동 검사 힌트를 얹어 이 시트를 다시 굽는다.
+   *
+   * codex 호출이 다시 드는 일이라 **사람이 누를 때만** 돈다. 정본도 correction
+   * loop 를 기본 생성에 붙이지 않고 별도 명령으로 노출한다.
+   */
+  onCorrect?: (atlasGenerationId: string) => void;
   /** 셀 재생성으로 새 시트가 생기면 호출 — ChatLayout 이 패널을 새 시트로 re-point. */
   onSheetUpdated?: (result: {
     generationId: string;
@@ -97,6 +104,7 @@ export function SpriteCanvas({
   onCancel,
   onSaved,
   sheetGenerationId,
+  onCorrect,
   onSheetUpdated,
   onRegenBusyChange,
   onOverlay,
@@ -1852,6 +1860,15 @@ export function SpriteCanvas({
                                 <li key={i}>{h}</li>
                               ))}
                             </ul>
+                          )}
+                          {!qa.inspect.ok && qa.inspect.hints.length > 0 && onCorrect && sheetGenerationId && (
+                            <button
+                              onClick={() => onCorrect(sheetGenerationId)}
+                              className="mt-2 flex h-7 w-full items-center justify-center gap-1.5 rounded border border-[color:var(--warning,#d59f0f)] text-[11px] text-[color:var(--warning,#d59f0f)]"
+                              title="위 힌트를 해당 상태 행의 프롬프트에 얹어 다시 굽습니다. codex 호출이 다시 듭니다 — 이전 시트는 그대로 남습니다."
+                            >
+                              <RefreshCw size={12} /> 힌트 반영해 재생성
+                            </button>
                           )}
                         </div>
                       )}

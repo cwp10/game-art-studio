@@ -52,6 +52,11 @@ export type RunPlanDeps = {
   workDir: string;
   /** 잠긴 base 의 파일 경로. 방향 앵커 행에만 붙는다. */
   lockedBasePath: string | null;
+  /**
+   * 상태별 교정 힌트 — 이전 시도의 score 가 만든 것. 그 상태 행의 프롬프트에만 얹는다.
+   * 상태를 섞으면 idle 의 결함을 attack 행에 고치라고 시키는 꼴이 된다.
+   */
+  correctionHints?: Record<string, string[]>;
   log: (message: string) => void;
 };
 
@@ -198,7 +203,7 @@ export async function runSpritePlan(
       deps.log(`flat ${state}: refs=${inputPaths.length}`);
       const gen = await deps.generate({
         state,
-        prompt: buildRowPrompt(request, state, entry),
+        prompt: buildRowPrompt(request, state, entry, deps.correctionHints?.[state] ?? []),
         inputPaths,
         role: "action-row",
       });
@@ -229,7 +234,7 @@ export async function runSpritePlan(
     deps.log(`stage1 ${item.state}: refs=${inputPaths.length}`);
     const gen = await deps.generate({
       state: item.state,
-      prompt: buildRowPrompt(request, item.state, entry),
+      prompt: buildRowPrompt(request, item.state, entry, deps.correctionHints?.[item.state] ?? []),
       inputPaths,
       role: item.role,
     });
@@ -283,7 +288,7 @@ export async function runSpritePlan(
     );
     const gen = await deps.generate({
       state: item.state,
-      prompt: buildRowPrompt(request, item.state, entry),
+      prompt: buildRowPrompt(request, item.state, entry, deps.correctionHints?.[item.state] ?? []),
       inputPaths,
       role: item.role,
     });
