@@ -121,3 +121,73 @@ export function detectBackgroundMode(
     borderCoverage: Math.round(borderCoverage * 1000) / 1000,
   };
 }
+
+/**
+ * 반투명(안티앨리어싱) 픽셀 비율. 완전 투명(alpha=0)은 세지 않는다 —
+ * 그건 잘라낸 배경이지 AA 가장자리가 아니다.
+ *
+ * 정본의 잠금 기준 3번은 "균일 블록 피치가 실측되고 AA 반투명 가장자리가
+ * 없을 것"이다. 피치 실측은 ⑤(추출)에서 검출기를 포팅한 뒤 붙인다. 여기서는
+ * AA 쪽만 본다 — 진짜 픽셀아트는 이 값이 0 에 가깝다.
+ */
+export function softAlphaFraction(
+  raw: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+): number {
+  if (channels < 4) return 0;
+  const total = width * height;
+  if (total === 0) return 0;
+  let soft = 0;
+  for (let i = 0; i < total; i++) {
+    const a = raw[i * channels + 3];
+    if (a > 0 && a < 255) soft++;
+  }
+  return soft / total;
+}
+
+export type BBox = { x0: number; y0: number; x1: number; y1: number };
+
+/**
+ * 배경이 아닌 픽셀의 경계 상자. 배경 판정은 detectBackgroundMode 결과를 따른다:
+ * flat 이면 그 색과의 거리로, 그 외에는 알파로만 가른다.
+ *
+ * heterogeneous 는 배경색을 특정할 수 없으므로 알파 기준으로 떨어진다 —
+ * 불투명 그라디언트 배경에서는 bbox 가 캔버스 전체가 되고, 그건 잠금 기준 1번을
+ * 실패시키는 관측 가능한 결과다.
+ */
+export function subjectBBox(
+  raw: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+  background: BackgroundInfo,
+): BBox | null {
+  const key = background.mode === "flat" ? background.rgb : null;
+  let x0 = width;
+  let y0 = height;
+  let x1 = -1;
+  let y1 = -1;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * channels;
+      const a = channels >= 4 ? raw[i + 3] : 255;
+      if (a <= ALPHA_TRANSPARENT_MAX) continue;
+      if (key && colorDistance([raw[i], raw[i + 1], raw[i + 2]], key) <= BACKGROUND_TOLERANCE) {
+        continue;
+      }
+      if (x < x0) x0 = x;
+      if (y < y0) y0 = y;
+      if (x > x1) x1 = x;
+      if (y > y1) y1 = y;
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
+/** bbox 가 캔버스 가장자리에 닿으면 잘렸을 가능성이 있다(잠금 기준 1번). */
+export function touchesEdge(bbox: BBox, width: number, height: number): boolean {
+  return bbox.x0 === 0 || bbox.y0 === 0 || bbox.x1 === width - 1 || bbox.y1 === height - 1;
+}

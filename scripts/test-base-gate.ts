@@ -4,7 +4,12 @@
  *   pnpm tsx scripts/test-base-gate.ts
  */
 import sharp from "sharp";
-import { detectBackgroundMode } from "../src/lib/sprite/base-gate";
+import {
+  detectBackgroundMode,
+  softAlphaFraction,
+  subjectBBox,
+  touchesEdge,
+} from "../src/lib/sprite/base-gate";
 
 let pass = 0;
 let fail = 0;
@@ -91,6 +96,70 @@ const SIZE = 32;
   const { raw, width, height, channels } = makeRaw(1, 1, () => [255, 0, 255, 255]);
   const bg = detectBackgroundMode(raw, width, height, channels);
   check("1×1 이미지 처리", bg.mode === "flat", bg.mode);
+}
+
+// ── softAlphaFraction ─────────────────────────────────────────────
+{
+  const opaque = makeRaw(16, 16, () => [10, 20, 30, 255]);
+  check(
+    "반투명 없음 → 0",
+    softAlphaFraction(opaque.raw, opaque.width, opaque.height, opaque.channels) === 0,
+  );
+
+  const half = makeRaw(16, 16, x => [10, 20, 30, x < 8 ? 128 : 255]);
+  check(
+    "절반 반투명 → 0.5",
+    Math.abs(softAlphaFraction(half.raw, half.width, half.height, half.channels) - 0.5) < 1e-9,
+  );
+
+  const cut = makeRaw(16, 16, x => [10, 20, 30, x < 8 ? 0 : 255]);
+  check(
+    "완전 투명은 세지 않는다",
+    softAlphaFraction(cut.raw, cut.width, cut.height, cut.channels) === 0,
+  );
+}
+
+// ── subjectBBox / touchesEdge ─────────────────────────────────────
+{
+  const img = makeRaw(32, 32, (x, y) =>
+    x >= 10 && x <= 20 && y >= 10 && y <= 20 ? [20, 40, 200, 255] : [255, 0, 255, 255],
+  );
+  const bg = detectBackgroundMode(img.raw, img.width, img.height, img.channels);
+  const box = subjectBBox(img.raw, img.width, img.height, img.channels, bg);
+  check("피사체 bbox 검출", box !== null);
+  if (box) {
+    check(
+      "bbox 좌표 정확",
+      box.x0 === 10 && box.y0 === 10 && box.x1 === 20 && box.y1 === 20,
+      JSON.stringify(box),
+    );
+    check("가장자리에 닿지 않음", !touchesEdge(box, img.width, img.height));
+  }
+
+  const full = makeRaw(32, 32, (x, y) =>
+    x >= 0 && x <= 20 && y >= 10 && y <= 20 ? [20, 40, 200, 255] : [255, 0, 255, 255],
+  );
+  const fullBg = detectBackgroundMode(full.raw, full.width, full.height, full.channels);
+  const fullBox = subjectBBox(full.raw, full.width, full.height, full.channels, fullBg);
+  check("잘린 피사체는 가장자리에 닿음", fullBox !== null && touchesEdge(fullBox, 32, 32));
+
+  const trans = makeRaw(32, 32, (x, y) =>
+    x >= 12 && x <= 18 && y >= 12 && y <= 18 ? [20, 40, 200, 255] : [0, 0, 0, 0],
+  );
+  const transBg = detectBackgroundMode(trans.raw, trans.width, trans.height, trans.channels);
+  const transBox = subjectBBox(trans.raw, trans.width, trans.height, trans.channels, transBg);
+  check(
+    "투명 배경에서 bbox 검출",
+    transBox !== null && transBox.x0 === 12 && transBox.x1 === 18,
+    JSON.stringify(transBox),
+  );
+
+  const empty = makeRaw(16, 16, () => [255, 0, 255, 255]);
+  const emptyBg = detectBackgroundMode(empty.raw, empty.width, empty.height, empty.channels);
+  check(
+    "피사체 없으면 null",
+    subjectBBox(empty.raw, empty.width, empty.height, empty.channels, emptyBg) === null,
+  );
 }
 
 // sharp 가 실제로 같은 레이아웃을 주는지 확인 (raw 규약 고정)
