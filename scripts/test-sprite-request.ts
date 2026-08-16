@@ -83,10 +83,10 @@ console.log("=== normalizeStates ===");
   check("wave 4f/6fps/non-loop", s.wave.frames === 4 && s.wave.fps === 6 && s.wave.loop === false);
 }
 {
-  // 이탈 1건: sprite-gen 의 loop 폴백은 무조건 true 라 DEFAULT_STATES 의 non-loop 와
-  // 어긋난다. 우리는 fps·action 과 같이 DEFAULT_STATES 에서 채운다.
+  // 원본 그대로: loop 폴백은 무조건 true (prepare.py:509). DEFAULT_STATES 의
+  // attack.loop=false 와 어긋나 보이지만 loop 은 UX 가 항상 명시로 넘긴다.
   const s = normalizeStates({ attack: { frames: 4 } });
-  check("loop 생략 시 DEFAULT_STATES 를 따른다 (attack → false)", s.attack.loop === false);
+  check("loop 폴백은 원본과 같이 true", s.attack.loop === true);
   check("fps 생략 시 DEFAULT_STATES (attack → 8)", s.attack.fps === 8);
   check("action 생략 시 DEFAULT_STATES", s.attack.action.includes("windup"));
 }

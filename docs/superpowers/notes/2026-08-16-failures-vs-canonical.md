@@ -51,37 +51,36 @@ return [fit_to_cell(img, cell_width, cell_height, safe_margin_x, safe_margin_y, 
 | 4 | ④a 셀 경계 침범 4/4 | components 는 그리드를 안 본다. 이웃과 닿으면 **컴포넌트 병합**으로 나타나고, 대응은 옵트인 `projection` 세그먼테이션(투영 최적 절단 → 투명 거터 → 재조립, `segment.py`) | **프롬프트 문제가 아니다.** px→비율 변경 시도는 되돌렸다 |
 | 5 | ④a `ANCHOR_SCALE=8` 이 443px 셀에 과함 → `anchorScaleFor` 클램프 발명 | `ANCHOR_SCALE = 8` 고정, 클램프 없음. **원본 셀은 항상 request cell(256)이라 8배가 2048 로 딱 맞는다** | **사례 3의 파생.** 추출이 붙으면 셀이 256 이 되어 클램프가 불필요. 제거 대상 |
 | 6 | ④a `params.rawPrompt` 통과 경로 추가 | `sprite-gen gen --prompt-file prompts/<state>.txt` — 행 프롬프트를 그대로 보내고 provider 헤더만 붙는다 | **원본과 일치.** 구조적 등가물. 유지 |
-| 7 | ② `normalizeStates` 의 `loop` 폴백을 `DEFAULT_STATES` 기준으로 바꿈 | `bool(entry.get("loop", True))` — 무조건 `True` | **의도적 이탈.** 원본 내부 불일치를 고친 것(`DEFAULT_STATES.attack.loop = False` 인데 폴백은 True). 원칙상 재검토 대상 — 아래 참조 |
+| 7 | ② `normalizeStates` 의 `loop` 폴백을 `DEFAULT_STATES` 기준으로 바꿈 | `bool(entry.get("loop", True))` — 무조건 `True` | **원본으로 되돌림 (2026-08-16).** loop 은 UX 가 항상 명시로 넘기는 변수라 폴백이 안 쓰인다 |
 | 8 | ③ 큐레이션 스키마를 `{order, excluded}` 로 만듦 | `selected` 가 권위 필드, `order` 는 표시 전용 | **이미 정정** (`{selected, order?}`) |
 | 9 | ④a 프레임 수 미달을 경고로만 처리 | `could not extract N sprite components` → **행 차단**. 폴백은 명시 옵트인 | **원본은 차단한다.** 우리는 셀 수단이 없어 못 한다. ⑤에서 차단으로 바꾼다 |
 | 10 | `test-base-gate` 가 실 DB 상태에 의존해 깨짐 | 해당 없음 (우리 테스트 문제) | 고침 |
 
-## 사례 7 — 판단이 필요한 유일한 항목
+## 사례 7 — 원본으로 되돌렸다
 
-원본 `normalize_states` 는 `loop` 폴백이 무조건 `True` 인데, 같은 파일의
-`DEFAULT_STATES` 는 `attack`/`jump`/`wave` 를 `loop: False` 로 정의한다.
-`states-and-frames.md` 도 "attack/jump/wave 는 non-loop"라고 적는다.
+원본 `normalize_states` 는 `loop` 폴백이 무조건 `True` 인데, 같은 파일의 `DEFAULT_STATES`
+는 `attack`/`jump`/`wave` 를 `loop: False` 로 정의한다 — **원본 안에서 두 곳이 어긋난다.**
 
-즉 **원본 안에서 두 곳이 어긋난다.** 우리는 `fps`·`action` 과 같은 규칙으로
-`DEFAULT_STATES` 를 참조하게 했다(`loop` 생략 시 attack → false).
+**결정 (2026-08-16)**: `loop` 은 사용자가 UX 에서 체크하는 변수이므로 항상 명시로 넘어오고,
+폴백이 실제로 쓰이지 않는다. 따라서 원본과 다르게 둘 이유가 없다 → 폴백을 `true` 로 되돌렸다.
+원본 내부 불일치를 우리 쪽에서 고치지 않는다.
 
-- 원본을 글자 그대로 따르면: 폴백을 `true` 로 되돌린다. 대신 `{attack: {frames: 4}}`
-  같은 부분 지정에서 문서와 다른 결과가 나온다.
-- 원본의 *의도*를 따르면: 지금이 맞다.
+## 정본 문서 두 개가 어긋난 건 1건 — 코드가 답
 
-**현재는 후자를 유지하고 있고 스펙 §6.1.1 에 이탈로 기록돼 있다.**
+`sheet-slicing.md` 는 알파 정리를 **"v1.13 4-pass"**(hard key cut → key-depth in-band
+unmix → soft-alpha unmix → trapped-spill despill)라 하고, 전용 문서 `chroma-alpha.md` 는
+**"Three passes, in order"** 라 한다.
 
-## 같이 발견한 스펙 오류 1건
+`remove_chroma_background` 를 세어 보면 **픽셀을 고치는 패스는 3개**다:
 
-스펙 §1.1 과 §11 이 크로마 알파 정리를 **"3패스"** 라고 적는다. `sheet-slicing.md`
-의 Alpha ownership 절은 **4패스**라고 명시한다:
+1. 분류(`np.select`) + 하드 키 컷 (`data[keyed_mask] = 0`)
+2. 소프트 알파 unmix — **한 루프**. in-band 와 out-of-band 는 같은 루프의 적격 조건이다:
+   `((classes == _BLEND_IN_BAND) & (depths <= _IN_BAND_UNMIX_KEY_DEPTH)) | (classes == _BLEND_OUT_OF_BAND)`
+3. 갇힌 스필 despill
 
-> the same v1.13 **4-pass** chain the row pipeline uses (hard key cut →
-> **key-depth in-band unmix** → soft-alpha unmix → trapped-spill despill)
+사이의 체비셰프 거리 변환(`depths`)은 2번의 전제 계산이지 별도 패스가 아니다.
 
-v1.13 에서 `key-depth in-band unmix` 가 추가됐다. `remove_chroma_background` 는
-`np.select` 분류 + 키 영역까지의 **체비셰프 거리 변환**(`depths`)을 쓴다 — 이 거리가
-in-band unmix 의 근거다. 스펙을 4패스로 고쳐야 하고, ⑤ 이식 범위에 이 패스가 포함된다.
+**스펙의 "3패스"가 맞았다.** 대조 중에 4패스로 고쳤다가 코드 확인 후 되돌렸다.
 
 ## ⑤ 착수 시 제거·교체 목록
 

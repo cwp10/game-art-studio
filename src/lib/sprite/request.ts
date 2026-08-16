@@ -163,11 +163,10 @@ export function normalizeStates(
     out[state] = {
       frames,
       fps: Math.trunc(entry.fps ?? fallback?.fps ?? 6),
-      // 원본으로부터의 의도적 이탈: prepare.py:509 의 loop 폴백은 무조건 True 라
-      // DEFAULT_STATES 의 attack/jump/wave(loop:false) 와 어긋난다. fps·action 이
-      // DEFAULT_STATES 를 참조하는 것과 같은 규칙으로 맞춘다. 미지 상태에서는
-      // 원본과 동일하게 true 로 떨어진다.
-      loop: entry.loop ?? fallback?.loop ?? true,
+      // 원본 그대로(prepare.py:509): 폴백은 무조건 true 다. DEFAULT_STATES 의
+      // attack/jump/wave(loop:false)와 어긋나 보이지만, loop 은 UX 가 항상 명시로
+      // 넘기는 변수이므로 폴백이 실제로 쓰이지 않는다. 원본과 다르게 두지 않는다.
+      loop: entry.loop ?? true,
       action: entry.action ?? fallback?.action ?? state,
     };
   }

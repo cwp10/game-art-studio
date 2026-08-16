@@ -41,7 +41,7 @@
 | `fit.resample` | **`lanczos`** | `kcentroid` 는 픽셀아트 대상, `nearest` 는 오프그리드 아웃라인 손실 |
 | `fit` 객체 자체 | **부재(legacy)** | 픽셀아트 타깃·지터 없는 locomotion 일 때만 선언 |
 
-따라서 이식의 1차 목표는 이 옵션들이 아니라 **기본 경로**다: 4패스 RGB 알파 정리, components
+따라서 이식의 1차 목표는 이 옵션들이 아니라 **기본 경로**다: 3패스 RGB 알파 정리, components
 분할, 프레임 수 미달 시 행 차단, 그리고 파이프라인 구조(베이스 잠금 → 가이드 → 행 생성 →
 내용 기반 추출) 자체.
 
@@ -515,10 +515,10 @@ export type SpriteRequest = {
 loop(정본 experimental) · 공격 6f(정본 4) · 점프 6f(정본 4) · 시전 8f 다. **②에서
 고치지 않는다** — 실제 생성 결과 없이 바꿀 근거가 없으므로 §3.3 UI 체크포인트로 넘긴다.
 
-**`normalizeStates` 의 의도적 이탈 1건**: 원본 `prepare.py:509` 의 `loop` 폴백은 무조건
-`True` 라 `DEFAULT_STATES` 의 `attack`/`jump`/`wave`(`loop: false`)와 어긋난다. 우리는
-`fps`·`action` 과 같은 규칙으로 `DEFAULT_STATES` 에서 채운다. 미지 상태에서는 원본과
-동일하게 `true` 로 떨어진다.
+**`normalizeStates` 의 `loop` 폴백은 원본 그대로 `true` 다**(`prepare.py:509`).
+`DEFAULT_STATES` 의 `attack`/`jump`/`wave`(`loop: false`)와 어긋나 보이지만, **loop 은
+UX 가 항상 명시로 넘기는 변수**라 폴백이 실제로 쓰이지 않는다. 원본 내부 불일치를
+우리 쪽에서 고치지 않는다(2026-08-16 확정).
 
 `character.anchorGenerationId` 는 ①에서 잠근 앵커를 가리킨다. 베이스 이미지 ID 가 아니다.
 
@@ -1028,10 +1028,11 @@ sprite-gen 은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
 
 - `SKILL.md` 전체 — 필수 게이트, Base Lock Gate, SSoT, Prompt/Output/Runtime Contract, QA
 - `docs/architecture.md` §1~§5
-- `docs/chroma-alpha.md` — 키 선택 분기표, `auto` 거부 로직, 알파 정리 패스, ycbcr 옵트인
-- `docs/sheet-slicing.md` — 그리드 크롭 대신 centroid 배정, 병합 분리, 이웃 debris 규칙.
-  **알파 정리는 v1.13 4패스**(하드 키 컷 → key-depth in-band unmix → 소프트 알파 unmix →
-  갇힌 스필 despill) — 스펙이 3패스로 적었던 것을 정정
+- `docs/chroma-alpha.md` — 키 선택 분기표, `auto` 거부 로직, **3패스** 알파 정리, ycbcr 옵트인
+- `docs/sheet-slicing.md` — 그리드 크롭 대신 centroid 배정, 병합 분리, 이웃 debris 규칙,
+  빈 셀 fail-loud. 이 문서는 알파 정리를 "4-pass" 라 부르지만 **코드는 픽셀을 고치는 패스가
+  3개**다. 4번째로 센 `key-depth in-band unmix` 는 unmix 패스 **안의 적격 규칙**이지 별도
+  루프가 아니다. 정본 문서끼리 어긋나면 전용 문서 + 코드를 따랐다
 - `docs/pixel-unfake.md` — `fit` 기본값, 역할 계약, 스타일 SSoT, 픽셀 밀도 규칙, 전/후 쌍둥이
 - `docs/qa-motion.md` — Motion Continuity 판정 기준 5가지
 - `docs/run-contract.md` §1(스테이지 표), §6~§7(실패 원자성, 동시성 경계)
