@@ -11,7 +11,8 @@
  * See NOTICE and licenses/sprite-gen-Apache-2.0.txt.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { directionAnchorStates, facingOf, stateDirection } from "@/lib/sprite/directions";
+import { bareState, directionAnchorStates, facingOf, stateDirection } from "@/lib/sprite/directions";
+import { stateMotionPhases } from "@/lib/sprite/motion-phase";
 import type { SpriteRequest, StateSpec } from "@/lib/sprite/request";
 
 /**
@@ -217,6 +218,20 @@ export function buildRowPrompt(request: SpriteRequest, state: string, entry: Sta
   const transparencyText = TRANSPARENCY_ARTIFACT_RULES.map(r => `- ${r}`).join("\n");
   const anchorLockText = ANCHOR_LOCK.map(r => `- ${r}`).join("\n");
 
+  // 모션 위상 요구사항 — 가이드에 스틱 포즈를 실제로 그렸을 때만 붙인다. 그리지도 않고
+  // "가이드의 힌트를 따르라"고 말하면 없는 것을 가리키는 지시가 된다.
+  const phases = request.motionPhaseGuides
+    ? stateMotionPhases(bareState(state, request.directions ?? null), frames)
+    : [];
+  const phaseText = phases.length
+    ? "\n\nMotion phase requirements:\n" +
+      "- The layout guide includes simple stick-pose motion hints inside each slot. Use those hints only for body height, foot contact, and leg phase. Do not copy guide colors or guide lines into the artwork.\n" +
+      "- Make the sequence loop as one continuous locomotion cycle, not eight unrelated poses.\n" +
+      "- The motion phase guide and any multi-pose contact sheet override a single running/walking pose anchor for leg phase. Do not repeat one anchor's forward leg across every frame.\n" +
+      "- Opposite contact frames must visibly trade which leg reaches forward; passing frames must not look like duplicate contact frames.\n" +
+      phases.map((p, i) => `- frame ${i + 1}: ${p.name} — ${p.note}`).join("\n")
+    : "";
+
   return `Create a single horizontal sprite strip for the game character \`${character.id}\` in the state \`${state}\`.
 
 ${REFERENCE_CONTRACT}
@@ -231,6 +246,7 @@ Animation action: ${entry.action}.
 Anchor lock:
 ${anchorLockText}
 ${stateRequirementText}
+${phaseText}
 
 Transparency and artifact rules:
 ${transparencyText}

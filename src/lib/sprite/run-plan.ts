@@ -19,6 +19,7 @@ import {
   type CurationRecord,
 } from "@/lib/sprite/anchor";
 import { ANCHOR_SCALE, bakeAnchorImage } from "@/lib/sprite/anchor-image";
+import { bareState } from "@/lib/sprite/directions";
 import { extractRowFrames, writeRaw } from "@/lib/sprite/extract";
 import {
   buildGenerationPlan,
@@ -74,6 +75,19 @@ export type RunPlanResult = {
   skippedMirrors: MirroredDirection[];
   warnings: string[];
 };
+
+/**
+ * 그 상태의 가이드 셀 사양 — 모션 위상 힌트 옵트인을 여기서 얹는다.
+ * `motionPhaseState` 를 넘겨야 스틱 포즈가 그려지고, 8프레임 로코모션이 아니면 무시된다.
+ */
+function guideCell(request: SpriteRequest, state: string) {
+  return {
+    ...request.cell,
+    ...(request.motionPhaseGuides
+      ? { motionPhaseState: bareState(state, request.directions ?? null) }
+      : {}),
+  };
+}
 
 /** 액션 행에 base 가 붙었는지 기계적으로 검증한다 — 주석이 아니라 코드로 막는다. */
 function assertNoBase(item: PlanItem, inputPaths: string[], basePath: string | null): void {
@@ -144,7 +158,7 @@ export async function runSpritePlan(
   if (!plan) {
     for (const [state, entry] of Object.entries(request.states)) {
       const guide = join(deps.workDir, `guide-${state}.png`);
-      await renderLayoutGuide(guide, entry.frames, request.cell);
+      await renderLayoutGuide(guide, entry.frames, guideCell(request, state));
       const inputPaths = [...(deps.lockedBasePath ? [deps.lockedBasePath] : []), guide];
       deps.log(`flat ${state}: refs=${inputPaths.length}`);
       const gen = await deps.generate({
@@ -175,7 +189,7 @@ export async function runSpritePlan(
     }
     const entry = request.states[item.state];
     const guide = join(deps.workDir, `guide-${item.state}.png`);
-    await renderLayoutGuide(guide, entry.frames, request.cell);
+    await renderLayoutGuide(guide, entry.frames, guideCell(request, item.state));
     const inputPaths = [...(deps.lockedBasePath ? [deps.lockedBasePath] : []), guide];
     deps.log(`stage1 ${item.state}: refs=${inputPaths.length}`);
     const gen = await deps.generate({
@@ -225,7 +239,7 @@ export async function runSpritePlan(
     };
 
     const guide = join(deps.workDir, `guide-${item.state}.png`);
-    await renderLayoutGuide(guide, entry.frames, request.cell);
+    await renderLayoutGuide(guide, entry.frames, guideCell(request, item.state));
     // 정본 ref 순서: 타깃 방향 앵커 → (모션 참조) → 레이아웃 가이드
     const inputPaths = [anchorPath, guide];
     assertNoBase(item, inputPaths, deps.lockedBasePath);

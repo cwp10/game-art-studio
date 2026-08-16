@@ -15,6 +15,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import sharp from "sharp";
+import { drawMotionPhase, stateMotionPhases } from "@/lib/sprite/motion-phase";
 
 type RGB = readonly [number, number, number];
 
@@ -33,6 +34,12 @@ export type GuideCell = {
   height: number;
   safeMarginX: number;
   safeMarginY: number;
+  /**
+   * 모션 페이즈 힌트를 그릴 상태명(방향 접두사를 뗀 것). **옵트인이다** —
+   * 넘기지 않으면 원본의 `motion_phase_guides=False` 와 같이 아무것도 그리지 않는다.
+   * 8프레임 로코모션이 아니면 넘겨도 빈 배열이라 그려지지 않는다.
+   */
+  motionPhaseState?: string;
 };
 
 function fillRect(c: GuideCanvas, x0: number, y0: number, x1: number, y1: number, color: RGB): void {
@@ -101,6 +108,15 @@ export function renderLayoutGuideBuffer(frames: number, cell: GuideCell): GuideC
     // 의도인지 오프바이원인지는 원본에 근거가 없다. 픽셀 동일이 기준이라 유지한다.
     const centerX = left + Math.floor(cellWidth / 2);
     fillRect(canvas, centerX, marginY, centerX, height - marginY, CENTER_LINE);
+  }
+
+  // 모션 페이즈 힌트는 **박스를 다 그린 뒤** 위에 얹는다 (prepare.py:841 과 같은 순서).
+  if (cell.motionPhaseState) {
+    const phases = stateMotionPhases(cell.motionPhaseState, frames);
+    const facing = cell.motionPhaseState.endsWith("left") ? "left" : "right";
+    phases.forEach((phase, index) => {
+      drawMotionPhase(canvas, index * cellWidth, cellWidth, cellHeight, phase, facing);
+    });
   }
   return canvas;
 }

@@ -92,6 +92,12 @@ export type SpriteRequest = {
   states: Record<string, StateSpec>;
   /** 없으면(undefined) 기존 flat 런 — 방향 계약을 걸지 않는다. */
   directions?: DirectionsSpec;
+  /**
+   * 레이아웃 가이드에 막대 인간 모션 위상 힌트를 그린다. **옵트인이고 기본은 false 다.**
+   * 정본은 "명시적 로코모션 실험에만" 쓰라고 못박고, 8프레임 로코모션 상태가 아니면
+   * 켜도 아무것도 그려지지 않는다 (`motion-phase.ts`).
+   */
+  motionPhaseGuides?: boolean;
 };
 
 export const DEFAULT_STATES: Record<string, StateSpec> = {
