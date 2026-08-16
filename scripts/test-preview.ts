@@ -341,6 +341,69 @@ function parseGif(buf: Buffer): GifStructure {
       check("프레임 없는 상태는 ok:false", !res.ok && res.states[0].note === "no frame files");
     }
 
+    // LZW 코드 폭 증가는 사전이 512 항목에 닿아야 일어난다. 작은 합성 프레임만
+    // 굽던 이 테스트는 거기까지 못 가서, 폭 증가 시점이 한 코드 어긋난 채로 통과했다
+    // — 실제 256×256 QA GIF 는 Pillow·libvips 둘 다 "broken data stream" 으로 거부했다.
+    // 그래서 **폭이 실제로 늘어나는 크기**로 굽고 픽셀까지 되읽어 본다.
+    console.log("=== 큰 프레임 라운드트립 (LZW 코드 폭 증가 경로) ===");
+    if (!existsSync(VENV)) {
+      console.log("  SKIP  sprite-gen venv 없음");
+      skipped++;
+    } else {
+      for (const [size, colors] of [
+        [64, 32],
+        [256, 255],
+      ] as Array<[number, number]>) {
+        const big: Array<{ data: Buffer; width: number; height: number }> = [];
+        for (let f = 0; f < 3; f++) {
+          const d = Buffer.alloc(size * size * 4);
+          for (let p = 0; p < size * size; p++) {
+            const v = (p * 2654435761 + f * 40503) >>> 0;
+            const c = v % colors;
+            d[p * 4] = (c * 37) & 255;
+            d[p * 4 + 1] = (c * 91) & 255;
+            d[p * 4 + 2] = (c * 173) & 255;
+            d[p * 4 + 3] = p % 7 === 0 ? 0 : 255;
+          }
+          big.push({ data: d, width: size, height: size });
+        }
+        const bigGif = join(dir, `big-${size}-${colors}.gif`);
+        const bigSrc = join(dir, `big-${size}-${colors}.bin`);
+        await saveCleanGif(big, bigGif, { durationMs: 250 });
+        await writeFile(bigSrc, Buffer.concat(big.map(f => f.data)));
+        const out = execFileSync(
+          VENV,
+          [
+            "-c",
+            [
+              "from PIL import Image",
+              "import numpy as np",
+              `im = Image.open(${JSON.stringify(bigGif)})`,
+              `src = np.fromfile(${JSON.stringify(bigSrc)}, dtype=np.uint8).reshape(3, ${size}, ${size}, 4)`,
+              "bad = 0; rgb_bad = 0",
+              "for i in range(3):",
+              "    im.seek(i)",
+              "    a = np.array(im.convert('RGBA'))",
+              "    s = src[i]",
+              "    ms, mg = s[...,3] > 0, a[...,3] > 0",
+              "    bad += int((ms != mg).sum())",
+              "    sel = ms & mg",
+              "    rgb_bad += int((s[sel][:,:3] != a[sel][:,:3]).any(axis=1).sum())",
+              "print(bad, rgb_bad)",
+            ].join("\n"),
+          ],
+          { encoding: "utf8" },
+        );
+        const [alphaBad, rgbBad] = out.trim().split(/\s+/).map(Number);
+        check(
+          `${size}×${size} ${colors}색: Pillow 가 읽고 알파가 일치`,
+          alphaBad === 0,
+          `불일치 ${alphaBad}px`,
+        );
+        check(`${size}×${size} ${colors}색: RGB 가 일치`, rgbBad === 0, `불일치 ${rgbBad}px`);
+      }
+    }
+
     console.log("=== 원본 Pillow gif_report 대조 ===");
     if (!existsSync(VENV)) {
       console.log("  SKIP  sprite-gen venv 없음");

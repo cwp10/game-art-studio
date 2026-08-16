@@ -217,6 +217,9 @@ class BitWriter {
   }
 }
 
+/** 12비트로 표현 가능한 마지막 코드. 여기 닿으면 사전을 비운다. */
+const MAX_CODE = 4095;
+
 /** GIF 변종 LZW. 코드는 LSB 우선으로 채워 넣는다. */
 function lzwEncode(indices: Buffer, minCodeSize: number): number[] {
   const clearCode = 1 << minCodeSize;
@@ -237,18 +240,22 @@ function lzwEncode(indices: Buffer, minCodeSize: number): number[] {
       continue;
     }
     out.write(prefix, codeSize);
-    dict.set(key, nextCode);
-    nextCode++;
-    if (nextCode === 1 << codeSize) {
-      if (codeSize < 12) {
-        codeSize++;
-      } else {
-        // 테이블이 꽉 찼다 — 지우고 처음부터.
-        out.write(clearCode, codeSize);
-        dict = new Map();
-        codeSize = minCodeSize + 1;
-        nextCode = eoiCode + 1;
-      }
+    if (nextCode >= MAX_CODE) {
+      // 테이블이 꽉 찼다 — 지우고 처음부터. 새 항목은 넣지 않는다(넣을 자리가 없다).
+      out.write(clearCode, codeSize);
+      dict = new Map();
+      codeSize = minCodeSize + 1;
+      nextCode = eoiCode + 1;
+    } else {
+      dict.set(key, nextCode);
+      nextCode++;
+      // 폭은 nextCode 가 현재 폭을 **넘어선 뒤** 늘린다. 디코더의 사전은 인코더보다
+      // 한 코드 뒤처지므로(디코더는 직전 코드와 현재 코드로 항목을 만든다),
+      // `nextCode === 1 << codeSize` 에서 늘리면 인코더가 새 폭으로 쓰기 시작한
+      // 시점에 디코더는 아직 옛 폭으로 읽어 스트림이 어긋난다. 실측: 사전이 512 에
+      // 닿지 않는 작은 프레임만 우연히 살아남았고(16×16), 그보다 크면 Pillow·libvips
+      // 둘 다 "broken data stream" 으로 거부했다.
+      if (nextCode > 1 << codeSize && codeSize < 12) codeSize++;
     }
     prefix = k;
   }
