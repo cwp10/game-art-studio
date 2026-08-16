@@ -61,6 +61,38 @@ sprite-gen은 **셀 객체 하나가 생성·추출·아틀라스 세 단계를 
 (architecture.md §4). 추출은 내용 기반이다: connected components로 포즈 덩어리를 찾고,
 x-center로 묶고, bbox를 크롭해 종횡비를 유지한 채(`scale = min(...) ≤ 1.0`) 셀에 중앙 배치한다.
 
+### 2.4 provider 계층이 모델의 협조에 의존한다
+
+가장 근본적인 차이다. **codex `image_gen` 은 파일을 저장하지 않는다.** PNG 를 세션 rollout
+jsonl 안에 base64 로 inline 반환한다(sprite-gen `codex_provider.py` 헤더).
+
+우리는 `codex-exec.ts:43` 에서 `"Save the result as ./output.png in your current working
+directory"` 라고 지시하고, 모델이 `~/.codex/generated_images/…png` 를 워크스페이스로 복사해
+주기를 기대한 뒤 그 파일을 회수한다. 이 복사는 codex 의 보장이 아니라 **모델이 스킬 가이드를
+따라 해주는 부가 동작**이다. 모델이 파일명을 달리 쓰거나, 복사를 건너뛰거나, 설명을 덧붙이면
+회수가 실패한다. 우리 코드에 "output.png 없으면 최신 `.png`" 폴백이 있다는 사실 자체가 이
+경로의 불안정성을 보여준다.
+
+sprite-gen 은 정반대로 간다. 프롬프트에서 **파일 저장을 금지**하고
+(`"파일 저장·셸 명령·코드 작성·경로 보고 전부 금지"`), rollout jsonl 에서 base64 를 직접
+디코딩한다. 주석이 원칙을 못박는다: **"The model-reported path is never trusted."**
+
+호출 인자도 다르다.
+
+| | 우리 | sprite-gen |
+|---|---|---|
+| `--json` | 없음 | 있음 — session id 파싱에 필요 |
+| `--add-dir ~/.codex/generated_images` | 없음 | 있음 — *"not in the default writable set; missing it silently fails"* |
+| `--color never` | 없음 | 있음 |
+| 작업 디렉터리 | `--cd {jobDir}` | `-C {workdir}` |
+| 프롬프트 전달 | positional (`-- "prompt"`) | stdin (`-`) |
+| 환경변수 | 부모 상속 | orchestrator 세션 env 제거 |
+| `--ephemeral` | 해당 없음 | **금지** — jsonl 이 디스크에 남아야 추출 가능 |
+
+`--add-dir` 누락이 우리에게 실제로 어떤 영향을 주는지는 **확인되지 않았다**. 우리는 다른
+경로(스킬이 복사)를 쓰기 때문이다. 다만 sprite-gen 주석이 "이 플래그가 없으면 조용히
+실패한다"고 단언하므로, image_gen 도구 등록 자체에 영향을 줄 가능성이 있다.
+
 ## 3. 목표 파이프라인
 
 ```
@@ -68,6 +100,7 @@ sprite-request (숫자형 SSoT)
   → prepare: 레이아웃 가이드 PNG + row 프롬프트 (전 상태)
   → [게이트] idle 앵커 확정 → base·원본 refs 를 이후 입력에서 제거
   → 생성: 상태당 가로 스트립 1장 (AI 단계는 여기뿐)
+          codex exec --json → rollout jsonl 의 inline base64 디코딩
   → extract: 크로마 제거 → connected components → fit_to_cell (내용 기반)
   → compose: 아틀라스 + manifest.frame_layout (절대 좌표 + 상태별 fps/loop)
 ```
@@ -76,11 +109,15 @@ sprite-request (숫자형 SSoT)
 
 | 단계 | 범위 | 의존 |
 |------|------|------|
+| **⓪** | provider 정합 — codex 호출 인자와 이미지 회수 방식 교체 | 없음 |
 | **①** | 숫자형 SSoT + 레이아웃 가이드 + row 프롬프트 (생성 입력 계약) | 없음 |
-| **②** | 추출 교체 — 크로마 알파, connected components, fit_to_cell | 없음 (①과 독립) |
-| **③** | idle 앵커 게이트 + 아틀라스/매니페스트 | ①② |
+| **②** | 추출 교체 — 크로마 알파, connected components, fit_to_cell | ⓪ (입력 신뢰성) |
+| **③** | idle 앵커 게이트 + 아틀라스/매니페스트 | ⓪①② |
 
-①을 먼저 하면 ② 검증에 쓸 깨끗한 입력이 생긴다. 이 문서는 **①만** 상세화한다.
+**⓪ 을 가장 먼저 한다.** 회수가 불안정하면 그 위에 무엇을 쌓아도 흔들린다. 그리고 세 단계
+중 가장 작다 — `codex-exec.ts` 한 파일의 호출 인자와 출력 회수 경로 교체다.
+
+이 문서는 **⓪ 과 ①** 을 상세화한다.
 
 ### 3.2 대체·존치 대상
 
@@ -90,16 +127,110 @@ sprite-request (숫자형 SSoT)
 - `shared.ts`의 조건부 포즈 가이드 분기(`:373`, `:406`)와 거대 프롬프트 지시문 블록
   (`walkCycleRule` 등) — ①에서
 
+**부분 교체**
+- `codex-exec.ts` — spawn 골격·타임아웃·로그·progress 추론은 존치. **호출 인자와 출력 회수
+  경로만 교체**(⓪). `PROMPT_HEADER` 의 파일 저장 지시는 제거된다
+
 **존치**
-- `codex-exec.ts` — spawn 인프라. 변경 없음
 - `handlers/shared.ts`의 `runImageTool` — DB 기록·progress.jsonl 배선. 변경 없음
 - MCP 도구 스키마 — 입력 확장 필요, 골격 유지
 - `SpriteCanvas.tsx` — ③에서 매니페스트 대응 수정
 - `spritesheet-classify.ts` — `directionLabels` 등 일부 존치, `isLocomotion` 기반 분기는 축소
 
-## 4. 1단계 상세 설계
+## 4. 0단계 상세 설계 — provider 정합
 
-### 4.1 SpriteRequest — 숫자형 SSoT
+`codex-exec.ts` 한 파일의 변경이다. spawn 골격·타임아웃(10분)·로그 버퍼·`inferStage` 진행
+추론은 그대로 두고, **호출 인자·프롬프트 헤더·출력 회수** 세 곳만 교체한다.
+
+### 4.1 호출 인자
+
+```
+codex exec --json
+           --sandbox workspace-write
+           --skip-git-repo-check
+           --color never
+           --add-dir ~/.codex/generated_images
+           -C {jobDir}
+           [-i {ref}...]
+           -                      # 프롬프트는 stdin
+```
+
+변경점: `--json`·`--color never`·`--add-dir` 추가, 프롬프트를 positional 에서 stdin 으로,
+`--cd` 를 `-C` 로. `--ephemeral` 은 **절대 쓰지 않는다** — rollout jsonl 이 디스크에 남아야
+회수가 된다.
+
+환경변수는 부모를 그대로 물려주지 않는다. sprite-gen 이 `provider_subprocess_env()` 로
+orchestrator 세션 식별자를 걷어내는 이유는 codex 자체 훅이 프롬프트를 스폰한 워커의 채널로
+브로드캐스트하기 때문이다. 우리 환경에서 같은 훅이 도는지는 **확인하지 않았다.** 우리에게
+확실한 이유는 따로 있다 — 우리는 Claude CLI 가 spawn 한 MCP 서버 안에서 codex 를 다시
+spawn 하므로, 세션 환경이 섞이면 추적이 어려워진다. 필요한 변수만 통과시키는 화이트리스트로
+간다.
+
+### 4.2 프롬프트 헤더
+
+현재 `PROMPT_HEADER` 의 파일 저장 지시를 **삭제**한다.
+
+```
+- "Save the result as ./output.png in your current working directory."
+- "Do not create any other files. ... Just produce ./output.png."
++ "image_gen 도구를 정확히 1번 호출해 이미지 1장만 생성한다."
++ "파일 저장·셸 명령·코드 작성·경로 보고를 하지 않는다. 생성만 하고 끝낸다."
+```
+
+모델에게 부가 작업을 시키지 않는 것이 요점이다. 이미지는 프로토콜에서 가져온다.
+
+기존 헤더의 나머지 지시(구도·조명·스타일 보정, `remove_chroma_key.py` 금지)는 검토 후
+필요한 것만 남긴다. 배경 제거 스크립트 금지는 유지 — 후처리는 우리가 한다.
+
+### 4.3 출력 회수
+
+```
+stdout 파싱 → session id
+  {"type":"thread.started","thread_id":"<uuid>"}   (신 codex)
+  "session id: <uuid>"                              (구 codex, 정규식)
+↓
+~/.codex/sessions/**/rollout-*{session_id}*.jsonl   (mtime 최신 우선)
+↓
+각 줄 JSON 파싱 → payload.type ∈ {image_generation_call, image_generation_end}
+                   && payload.result 존재
+   payload.status 가 있고 "completed" 가 아니면 → 에러
+↓
+base64 디코딩 → data/images/{generationId}.png → PNG 시그니처 검증
+```
+
+레코드 타입 두 가지는 codex 버전 차이이며 **둘 다 정식**이다(폴백이 아니다).
+`saved_path` 필드가 있어도 **쓰지 않는다.**
+
+기존 "`output.png` → 없으면 최신 `.png`" 폴백은 제거한다. 이 폴백은 회수 실패를 조용히
+덮어 엉뚱한 이미지를 집어올 수 있다.
+
+### 4.4 에러 처리
+
+- **session id 파싱 실패** → 즉시 에러. stdout 에서 `turn.failed`/`error` 레코드의 사람이 읽을
+  수 있는 메시지를 뽑아 함께 보고한다(sprite-gen `_extract_stream_errors` 이식).
+- **rollout jsonl 없음** → 에러. 경로와 session id 를 메시지에 포함.
+- **`image_gen` 결과 레코드 없음** → 에러. 모델이 도구를 호출하지 않은 경우다. 프롬프트
+  문제이므로 stdout 요약을 함께 남긴다.
+- **status ≠ completed** → 에러.
+- **타임아웃** → 기존 10분 유지. SIGTERM → 5초 후 SIGKILL 도 유지.
+
+지금은 회수 실패가 폴백에 흡수돼 "이상한 이미지가 나왔다"로 나타난다. 바뀐 뒤에는 실패가
+실패로 드러난다. **이것이 이 단계의 핵심 이득이다.**
+
+### 4.5 검증
+
+⓪ 은 sprite-gen 과 픽셀 대조가 불가능하다(생성이 비결정적). 대신:
+
+| 항목 | 방법 | 통과 기준 |
+|------|------|-----------|
+| 회수 경로 | `pnpm probe` (probe-codex-imagegen) 실행 | PNG 생성 성공, 시그니처 검증 통과 |
+| 회수 실패 검출 | 프롬프트를 일부러 도구 미호출로 유도 | 폴백 없이 명시적 에러 |
+| img2img | `probe-codex-img2img.mjs` | `-i` 참조가 반영된 PNG 회수 |
+| 회귀 | 기존 생성 도구 전반 | `generate_image`·`edit_image` 각 1장 성공 |
+
+## 5. 1단계 상세 설계
+
+### 5.1 SpriteRequest — 숫자형 SSoT
 
 프롬프트 문자열에서 매번 재해석하는 대신, 한 객체가 셀 기하·크로마·상태 목록을 소유한다.
 
@@ -137,7 +268,7 @@ export type SpriteRequest = {
 먹기 때문이다(sprite-gen `chroma-alpha.md`). 베이스 이미지를 샘플링해 자동 선택하되,
 명시 지정도 받는다. 지금 우리가 `#00ff00` 고정에 가깝게 쓰는 것과 달라지는 지점이다.
 
-### 4.2 레이아웃 가이드 렌더러
+### 5.2 레이아웃 가이드 렌더러
 
 sprite-gen `draw_guide()`의 이식. `frames × cellW` 캔버스에:
 
@@ -159,7 +290,7 @@ safe margin·중앙선 개념이 없고 호출 조건이 다르다. **`generateG
 적용되는 옵트인이고(`motion_phase_guides`), 우리는 이미 `pose-reference.ts`에 유사 자산이
 있어 통합 방식을 ③에서 함께 정하는 편이 낫다.
 
-### 4.3 row 프롬프트 빌더
+### 5.3 row 프롬프트 빌더
 
 상태 하나당 프롬프트 하나. 구성 요소:
 
@@ -174,7 +305,7 @@ safe margin·중앙선 개념이 없고 호출 조건이 다르다. **`generateG
 유지한다(`image-pipeline-dev` 스킬의 프롬프트 작성 규칙 — gpt-image-2에 CFG 네거티브가 없다는
 제약은 그대로다).
 
-### 4.4 컴포넌트 경계
+### 5.4 컴포넌트 경계
 
 ```
 src/lib/sprite/
@@ -187,7 +318,7 @@ src/lib/sprite/
 `spritesheet-classify.ts`가 순수 함수 모듈로 유지되는 것과 같은 규약이다.
 `spritesheet-handler.ts`가 이들을 호출해 조립한다.
 
-### 4.5 에러 처리
+### 5.5 에러 처리
 
 - **크로마 키 자동 선택 실패**(베이스 이미지 없음, 샘플링 불가) → 기본 마젠타로 폴백하고
   경고를 progress에 남긴다. 생성을 막지 않는다.
@@ -196,7 +327,7 @@ src/lib/sprite/
 - **가이드 렌더링 실패** → non-fatal. 가이드 없이 진행하되 로그에 남긴다. 현재 포즈 가이드
   실패 처리와 동일한 정책.
 
-### 4.6 UI/UX 영향 — 1단계는 없음
+### 5.6 UI/UX 영향 — ⓪① 단계는 없음
 
 `SpriteGenPanel`은 이미 `subjectType`·`direction`·`frames`·`seamlessLoop`·`actionPrompt`·
 `perspective`를 받는다. `SpriteRequest`는 이 값들에서 파생하고 나머지는 기본값으로 채운다:
@@ -208,7 +339,7 @@ src/lib/sprite/
 | `states[s].loop` | 패널 `seamlessLoop` |
 | `states[s].fps` | 기본값 (프레임 수에서 파생) |
 | `cell` | 기본값 — 정사각 256, safe margin 24 |
-| `chromaKey` | 자동 선택 (§4.1) |
+| `chromaKey` | 자동 선택 (§5.1) |
 | `character.description` | 참조 이미지 있으면 그쪽, 없으면 `actionPrompt` |
 | `style` | 기본값 |
 
@@ -222,7 +353,9 @@ src/lib/sprite/
 `SpriteCanvas`(2,064줄)는 격자 전제로 짜여 있어 절대 좌표 `frame_layout`을 받으려면 수정해야
 한다. 그 설계는 ③ 스펙에서 다룬다.
 
-## 5. 검증 전략
+## 6. 1단계 검증 전략
+
+(⓪ 의 검증은 §4.5 에 있다. 생성이 비결정적이라 기준 대조가 불가능해 방법이 다르다.)
 
 **sprite-gen을 기준 구현으로 삼는다.** "코드상 맞아 보임"은 통과 근거가 아니다.
 
@@ -236,7 +369,7 @@ src/lib/sprite/
 Python 기준 출력 생성은 sprite-gen의 `.venv`를 그대로 쓴다(이미 구성돼 있고 CLI 동작 확인함).
 이 의존은 **개발·검증 시점에만** 있고 런타임·배포에는 없다.
 
-## 6. 후속 단계 개요
+## 7. 후속 단계 개요
 
 ### ② 추출 교체
 - `remove_chroma_background()` — 색거리 볼로 근접 키 픽셀 제거 → 완전 투명 RGB 정리 →
@@ -251,7 +384,7 @@ Python 기준 출력 생성은 sprite-gen의 `.venv`를 그대로 쓴다(이미 
 - `manifest.frame_layout` — 절대 좌표 프레임 사각형 + 상태별 fps/loop
 - `SpriteCanvas`·export·DB kind 대응
 
-## 7. 라이선스
+## 8. 라이선스
 
 sprite-gen은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
 
@@ -261,7 +394,7 @@ sprite-gen은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
   `segmentation: projection`, `chroma.mode: ycbcr`)의 이중 고지
 - 이 저장소는 공개 저장소이므로 고지 누락은 라이선스 위반이 된다
 
-## 8. 미해결 / 후속 결정
+## 9. 미해결 / 후속 결정
 
 - **기존 생성물 호환** — 이미 만든 스프라이트시트를 새 매니페스트 포맷으로 옮길지, 격자
   해석을 유지할지는 ③에서 결정한다.
