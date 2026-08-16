@@ -15,10 +15,18 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
-import { runSpritePlan, type GenerateFn } from "@/lib/sprite/run-plan";
-import type { RawImage } from "@/lib/sprite/extract";
+import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
+import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
-import { createGeneration, getLockedBase, lockBaseGeneration } from "../../db/repo/generations.js";
+import {
+  createGeneration,
+  getAnchorPicks,
+  getCuration,
+  getGeneration,
+  getLockedBase,
+  lockBaseGeneration,
+} from "../../db/repo/generations.js";
+import { getDb } from "../../db/client.js";
 import { DATA_DIR, imagePath, toRelative } from "../../util/paths.js";
 import { newGenerationId } from "../../util/ids.js";
 import {
@@ -90,6 +98,59 @@ export async function runPlanDrivenSpritesheet(
   );
 
   const stateOrder = Object.keys(request.states);
+
+  // ── 기존 방향 앵커 행 재사용 ─────────────────────────────────────────────
+  // 매 런마다 앵커 행을 새로 만들면 사람이 그 행에 한 큐레이션·핀이 즉시 무의미해진다.
+  // 잠긴 base 가 자기 스코프의 앵커 행을 기억하고, 있으면 재사용한다.
+  //
+  // 프레임은 저장된 경로를 믿지 않고 **raw 시트에서 다시 추출**한다 — 정본의 파생 캐시
+  // 원칙과 같다(파일이 사라지거나 낡아도 진실에서 다시 굽는다).
+  const lockedBase = getLockedBase(sessionId);
+  const anchorRows = (lockedBase?.params?.anchorRows as Record<string, string> | undefined) ?? {};
+  const existingRows: Record<string, RunPlanRow> = {};
+  for (const [state, rowId] of Object.entries(anchorRows)) {
+    if (!(state in request.states)) continue;
+    const rowGen = getGeneration(rowId);
+    if (!rowGen) continue;
+    try {
+      const { filePath } = loadGenerationWithPath(rowId);
+      const extracted = await extractRowFrames({
+        sheetPath: filePath,
+        frameCount: request.states[state].frames,
+        cell: request.cell,
+        chromaKey: request.chromaKey.rgb,
+        chroma: {
+          keyThreshold: request.chroma.keyThreshold,
+          unmixReach: request.chroma.unmixReach,
+          spillMaxFraction: request.chroma.spillMaxFraction,
+        },
+      });
+      const dir = path.join(workDir, `frames-${state}`);
+      await mkdir(dir, { recursive: true });
+      const framePaths: string[] = [];
+      for (let i = 0; i < extracted.frames.length; i++) {
+        const fp = path.join(dir, `frame-${i}.png`);
+        await writeRaw(extracted.frames[i], fp);
+        framePaths.push(fp);
+      }
+      existingRows[state] = {
+        generationId: rowId,
+        imagePath: filePath,
+        frameCount: extracted.frames.length,
+        framePaths,
+        method: extracted.method,
+        curation: getCuration(rowId),
+      };
+    } catch (e) {
+      // 재추출이 실패하면 재사용을 포기하고 새로 만든다 — 조용히 깨진 행을 쓰지 않는다.
+      log(`plan-driven: 앵커 행 ${state} 재사용 실패, 새로 생성 — ${(e as Error).message}`);
+    }
+  }
+  const picks = getAnchorPicks(sessionId);
+  if (Object.keys(picks).length > 0) {
+    log(`plan-driven: 앵커 지정 ${JSON.stringify(picks)}`);
+  }
+
   const generate: GenerateFn = async spec => {
     const step = stateOrder.indexOf(spec.state) + 1;
     const res = await runImageTool({
@@ -115,6 +176,8 @@ export async function runPlanDrivenSpritesheet(
 
   const result = await runSpritePlan(request, {
     generate,
+    existingRows,
+    picks,
     workDir,
     lockedBasePath: basePath,
     log: m => log(`plan-driven: ${m}`),
@@ -132,6 +195,24 @@ export async function runPlanDrivenSpritesheet(
       frames.push({ data, width: info.width, height: info.height });
     }
     framesByState[state] = frames;
+  }
+
+  // 이번 런의 방향 앵커 행을 base 에 기록해 다음 런이 재사용하게 한다.
+  {
+    const base = getLockedBase(sessionId);
+    if (base) {
+      const anchorStates = Object.keys(request.states).filter(st =>
+        st.endsWith(`_${request.directions?.anchorSuffix ?? "idle"}`),
+      );
+      const next = { ...anchorRows };
+      for (const st of anchorStates) {
+        if (result.rows[st]) next[st] = result.rows[st].generationId;
+      }
+      const params = { ...base.params, anchorRows: next };
+      getDb()
+        .prepare("UPDATE generations SET params = ? WHERE id = ?")
+        .run(JSON.stringify(params), base.id);
+    }
   }
 
   const composed = composeAtlas({ request, framesByState });

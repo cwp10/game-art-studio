@@ -14,7 +14,9 @@ import {
   AnchorUnavailable,
   resolveAnchor,
   type AnchorContext,
+  type AnchorPick,
   type AnchorRow,
+  type CurationRecord,
 } from "@/lib/sprite/anchor";
 import { ANCHOR_SCALE, bakeAnchorImage } from "@/lib/sprite/anchor-image";
 import { extractRowFrames, writeRaw } from "@/lib/sprite/extract";
@@ -36,6 +38,15 @@ export type GenerateFn = (spec: {
 
 export type RunPlanDeps = {
   generate: GenerateFn;
+  /**
+   * 이미 생성된 행 — stage 1 에서 **다시 만들지 않고 재사용**한다.
+   *
+   * 매 런마다 방향 앵커 행을 새로 만들면 사람이 그 행에 한 큐레이션이 즉시 무의미해진다.
+   * 정본은 run 디렉터리가 남아 stage 1 이 한 번만 돌고 이후 액션 행이 그 앵커를 쓴다.
+   */
+  existingRows?: Record<string, RunPlanRow>;
+  /** direction → 앵커 지정(핀). 없으면 큐레이션 시퀀스 첫 인스턴스가 앵커다. */
+  picks?: Record<string, AnchorPick>;
   /** 가이드·앵커 파일을 쓸 디렉터리. */
   workDir: string;
   /** 잠긴 base 의 파일 경로. 방향 앵커 행에만 붙는다. */
@@ -51,6 +62,10 @@ export type RunPlanRow = {
   /** 추출된 프레임 PNG 경로들 — 셀 크기, 알파 있음. */
   framePaths: string[];
   method: "components" | "slots-explicit";
+  /** 사람이 저장한 재생 시퀀스. 앵커 해석이 이것을 따른다. */
+  curation?: CurationRecord | null;
+  /** 이번 런에서 생성하지 않고 재사용한 행인가. */
+  reused?: boolean;
 };
 
 export type RunPlanResult = {
@@ -149,6 +164,15 @@ export async function runSpritePlan(
 
   // ── stage 1: 방향 앵커 행 ────────────────────────────────────────────────
   for (const item of plan.order[0].items) {
+    const existing = deps.existingRows?.[item.state];
+    if (existing) {
+      result.rows[item.state] = { ...existing, reused: true };
+      deps.log(
+        `stage1 ${item.state}: 재사용 ${existing.generationId} ` +
+          `(큐레이션 ${existing.curation ? "있음" : "없음"})`,
+      );
+      continue;
+    }
     const entry = request.states[item.state];
     const guide = join(deps.workDir, `guide-${item.state}.png`);
     await renderLayoutGuide(guide, entry.frames, request.cell);
@@ -173,10 +197,10 @@ export async function runSpritePlan(
       anchorRows[state] = {
         generationId: row.generationId,
         frameCount: row.frameCount,
-        curation: null,
+        curation: row.curation ?? null,
       };
     }
-    const ctx: AnchorContext = { request, picks: {}, rows: anchorRows };
+    const ctx: AnchorContext = { request, picks: deps.picks ?? {}, rows: anchorRows };
     let resolved;
     try {
       resolved = resolveAnchor(ctx, item.direction);

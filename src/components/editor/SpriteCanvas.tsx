@@ -22,6 +22,13 @@ type SheetParams = {
   seamlessLoop?: boolean;
   anchor?: { x: number; y: number };
   fps?: number;
+  /** 플랜 구동(sprite-gen component-row) 산출물 표식. */
+  engine?: string;
+  planDriven?: boolean;
+  /** 행 순서대로의 상태 이름 — 행 인덱스 → 상태. */
+  states?: string[];
+  /** 상태 → 그 행의 raw generation id. 큐레이션·앵커 핀이 여기 붙는다. */
+  rowGenerationIds?: Record<string, string>;
 };
 
 type Props = {
@@ -836,6 +843,105 @@ export function SpriteCanvas({
     triggerDownload(new Blob([json], { type: "application/json" }), `${parentGenerationId}.json`);
   }
 
+  // ── 플랜 구동 시트: 큐레이션 영속 + 앵커 핀 ──────────────────────────
+  // 정본의 큐레이션은 **비파괴 사이드카**다 — 원본 프레임을 고치지 않고 사람의 선택만
+  // 기록한다. 보정본 저장(아래)이 시트를 다시 굽는 것과 성질이 다르다.
+  //
+  // 앵커는 그 방향 앵커 행의 **큐레이션 시퀀스 첫 인스턴스**다(index 0 이 아니다).
+  // 앞 프레임을 제외하면 앵커가 따라 움직여야 하므로 이 저장이 앵커 해석의 입력이다.
+  const isPlanDriven = params?.planDriven === true && Array.isArray(params?.states);
+  const [curationMsg, setCurationMsg] = useState<string | null>(null);
+  const [curationBusy, setCurationBusy] = useState(false);
+  const [pinned, setPinned] = useState<Record<string, { generationId: string; index: number }>>({});
+
+  /** 프레임 인덱스 → 그 프레임이 속한 상태와 행 내 열 번호. */
+  function frameState(origIdx: number): { state: string; col: number } | null {
+    if (!isPlanDriven || !params?.states) return null;
+    const r = Math.floor(origIdx / cols);
+    const state = params.states[r];
+    return state ? { state, col: origIdx % cols } : null;
+  }
+
+  useEffect(() => {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    void (async () => {
+      const res = await fetch(`/api/sprite/anchor-pick?atlasGenerationId=${sheetGenerationId}`);
+      if (!res.ok) return;
+      const d = (await res.json()) as { picks?: Record<string, { generationId: string; index: number }> };
+      setPinned(d.picks ?? {});
+    })();
+  }, [isPlanDriven, sheetGenerationId]);
+
+  /** 현재 표시 순서·제외를 상태별 selected 로 굽어 저장한다. */
+  async function saveCurationSidecar() {
+    if (!isPlanDriven || !sheetGenerationId || !params?.states) return;
+    setCurationBusy(true);
+    setCurationMsg(null);
+    try {
+      const ord =
+        frameOrder.length === rows * cols
+          ? frameOrder
+          : Array.from({ length: rows * cols }, (_, i) => i);
+      const byState: Record<string, { selected: number[]; order: number[] }> = {};
+      for (const state of params.states) byState[state] = { selected: [], order: [] };
+      // 표시 순서대로 훑으며 각 상태의 재생 시퀀스를 만든다 — selected 가 권위 필드다.
+      for (const origIdx of ord) {
+        const fs = frameState(origIdx);
+        if (!fs) continue;
+        byState[fs.state].order.push(fs.col);
+        if (!excludedFrames.has(origIdx)) byState[fs.state].selected.push(fs.col);
+      }
+      const res = await jsonFetch("/api/sprite/curation", "POST", {
+        atlasGenerationId: sheetGenerationId,
+        curationByState: byState,
+      });
+      if (!res.ok) {
+        const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(error ?? `저장 실패 (${res.status})`);
+      }
+      const counts = params.states.map(st => `${st} ${byState[st].selected.length}장`).join(", ");
+      setCurationMsg(`큐레이션 저장됨 — ${counts}`);
+    } catch (e) {
+      setCurationMsg(`저장 실패: ${(e as Error).message}`);
+    } finally {
+      setCurationBusy(false);
+    }
+  }
+
+  /** 이 프레임을 그 방향의 앵커로 지정(또는 해제). */
+  async function toggleAnchorPin(origIdx: number) {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    const fs = frameState(origIdx);
+    if (!fs) return;
+    // 상태 이름이 `<direction>_<state>` 이므로 첫 밑줄 앞이 방향이다.
+    const direction = fs.state.includes("_") ? fs.state.slice(0, fs.state.indexOf("_")) : fs.state;
+    const rowId = params?.rowGenerationIds?.[fs.state];
+    const already =
+      pinned[direction]?.generationId === rowId && pinned[direction]?.index === fs.col;
+    const res = await jsonFetch("/api/sprite/anchor-pick", "POST", {
+      atlasGenerationId: sheetGenerationId,
+      direction,
+      ...(already ? { clear: true } : { state: fs.state, index: fs.col }),
+    });
+    if (!res.ok) {
+      const { error } = (await res.json().catch(() => ({}))) as { error?: string };
+      setCurationMsg(`앵커 지정 실패: ${error ?? res.status}`);
+      return;
+    }
+    const d = (await res.json()) as { picks?: Record<string, { generationId: string; index: number }> };
+    setPinned(d.picks ?? {});
+    setCurationMsg(already ? `앵커 지정 해제 (${direction})` : `앵커 지정 — ${fs.state}#${fs.col}`);
+  }
+
+  /** 이 프레임이 현재 지정된 앵커인가. */
+  function isPinnedFrame(origIdx: number): boolean {
+    const fs = frameState(origIdx);
+    if (!fs) return false;
+    const direction = fs.state.includes("_") ? fs.state.slice(0, fs.state.indexOf("_")) : fs.state;
+    const rowId = params?.rowGenerationIds?.[fs.state];
+    return pinned[direction]?.generationId === rowId && pinned[direction]?.index === fs.col;
+  }
+
   // ⑤ 보정본 저장 — adjustedFrames 를 원본 시트 치수(cols*cellW × rows*cellH)로 재배치한
   // PNG 를 새 generation(kind='spritesheet')으로 저장. 원본 보존(비파괴). params 보존.
   async function saveCorrected() {
@@ -1133,7 +1239,7 @@ export function SpriteCanvas({
         <div className="shrink-0 space-y-2 rounded-lg border border-border bg-bg-card p-2 text-xs">
           <div className="flex items-center justify-between">
             <span className="text-text-muted">
-              분할 결과 ({excludedFrames.size > 0
+              {isPlanDriven && params?.states ? `분할 결과 · ${params.states.join(" / ")} (` : "분할 결과 ("}{excludedFrames.size > 0
                 ? `${thumbs.length - excludedFrames.size}/${thumbs.length}`
                 : thumbs.length}프레임)
             </span>
@@ -1340,6 +1446,25 @@ export function SpriteCanvas({
                     }}
                   >
                     ✏️
+                  </button>
+                  )}
+                  {/* 앵커 핀(좌하단) — 플랜 구동 시트에서만. 이 프레임을 그 방향의 identity 로 지정.
+                      지정이 없으면 앵커 행의 큐레이션 시퀀스 첫 인스턴스가 앵커다(index 0 아님). */}
+                  {isPlanDriven && !reorderMode && (
+                  <button
+                    className={`absolute bottom-0.5 left-0.5 z-10 flex h-4 w-4 items-center justify-center rounded-full border text-[9px] transition-opacity ${
+                      isPinnedFrame(origIdx)
+                        ? "border-[color:var(--accent)] bg-[color:var(--accent)] text-white opacity-100"
+                        : "border-white/30 bg-black/50 text-white opacity-0 hover:bg-[color:var(--accent)] group-hover:opacity-100"
+                    }`}
+                    title={isPinnedFrame(origIdx) ? "앵커 지정 해제" : "이 프레임을 방향 앵커로 지정"}
+                    onMouseDown={e => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      void toggleAnchorPin(origIdx);
+                    }}
+                  >
+                    ⚓
                   </button>
                   )}
                   {/* 진행 중 스피너 오버레이. */}
@@ -1613,6 +1738,27 @@ export function SpriteCanvas({
         </div>
         {/* 하단 고정 — 보정본 저장(주 액션, 현재 오프셋 반영한 전체 시트를 새 generation 으로). */}
         <div className="flex-none border-t border-border p-3">
+          {/* 플랜 구동 시트 전용: 큐레이션은 **비파괴 사이드카**라 시트를 다시 굽지 않는다.
+              제외·재정렬한 재생 시퀀스를 기록해 다음 생성의 앵커 해석에 쓰인다. */}
+          {isPlanDriven && (
+            <>
+              <button
+                onClick={() => void saveCurationSidecar()}
+                disabled={curationBusy}
+                className="mb-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[color:var(--accent)] text-sm font-medium text-[color:var(--accent)] disabled:opacity-40"
+                title="제외·재정렬한 재생 시퀀스를 저장합니다. 원본 프레임은 그대로 둡니다."
+              >
+                <Save size={14} /> {curationBusy ? "저장 중…" : "큐레이션 저장"}
+              </button>
+              {curationMsg && (
+                <span
+                  className={`mb-2 block text-center text-xs ${curationMsg.includes("실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}
+                >
+                  {curationMsg}
+                </span>
+              )}
+            </>
+          )}
           <button
             onClick={saveCorrected}
             disabled={frames.length === 0 || saving}
