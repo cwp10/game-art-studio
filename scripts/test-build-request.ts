@@ -220,6 +220,27 @@ void (async () => {
     check("keyThreshold 96", request.chroma.keyThreshold === 96);
   }
 
+  console.log("=== 모션 페이즈 가이드 자동 켜기 ===");
+  {
+    // 정본은 CLI 플래그로 사람이 켜고 기본 false 다. 우리는 그 플래그를 켤 자리가
+    // 없어 위상이 실제로 나오는 경우(로코모션 8프레임)에만 자동으로 켠다.
+    // 켜지 않아 걷기 8프레임의 다리가 거의 교차하지 않았다(2026-08-16 실측).
+    const walk8 = await buildSpriteRequest({ ...base, frames: 8, actionPrompt: "걷기 보행 사이클" });
+    check("걷기 8프레임은 자동으로 켜진다", walk8.request.motionPhaseGuides === true);
+    const walk4 = await buildSpriteRequest({ ...base, frames: 4, actionPrompt: "걷기" });
+    check(
+      "걷기 4프레임은 켜지 않는다 (위상 주기가 8단계다)",
+      walk4.request.motionPhaseGuides === undefined,
+      String(walk4.request.motionPhaseGuides),
+    );
+    const attack = await buildSpriteRequest({ ...base, frames: 8, actionPrompt: "칼을 휘두르는 공격" });
+    check(
+      "로코모션이 아니면 켜지 않는다",
+      attack.request.motionPhaseGuides === undefined,
+      String(attack.request.motionPhaseGuides),
+    );
+  }
+
   console.log("=== 프레임 수 경고 ===");
   {
     const { warnings } = await buildSpriteRequest({ ...base, frames: 12 });

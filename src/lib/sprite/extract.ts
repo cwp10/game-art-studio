@@ -26,6 +26,7 @@ import sharp from "sharp";
 import { removeChromaBackground, type ChromaCleanOptions, type RGB } from "@/lib/sprite/chroma-clean";
 import { decideChromaMode, type ChromaMode, type ChromaModeDecision } from "@/lib/sprite/chroma-mode";
 import { removeChromaBackgroundYcbcr } from "@/lib/sprite/chroma-ycbcr";
+import { inspectFrames, type FrameQaResult } from "@/lib/sprite/frame-qa";
 import type { CellSpec } from "@/lib/sprite/request";
 
 export type RawImage = { data: Buffer; width: number; height: number };
@@ -310,6 +311,8 @@ export type ExtractResult = {
   chroma?: ChromaModeDecision;
   /** ycbcr 자가 진단이 선언 키로 재매팅했을 때의 사유. 조용한 폴백은 없다. */
   chromaWarnings?: string[];
+  /** 프레임별 QA (정본 `inspect_frames`) — 에러는 행을 차단한다. */
+  frameQa?: FrameQaResult;
 };
 
 /**
@@ -331,6 +334,8 @@ export async function extractRowFrames(opts: {
    */
   chromaMode?: ChromaMode | "auto";
   allowSlotFallback?: boolean;
+  /** 프레임 QA 에러로 차단하지 않는다 — 진단용. 경고·기록은 그대로 돌려준다. */
+  allowFrameQaErrors?: boolean;
 }): Promise<ExtractResult> {
   const { data, info } = await sharp(opts.sheetPath)
     .ensureAlpha()
@@ -362,7 +367,14 @@ export async function extractRowFrames(opts: {
   if (grouped) {
     const frames: RawImage[] = [];
     for (const image of grouped.images) frames.push(await fitToCell(image, opts.cell));
-    return { frames, method: "components", dropped: grouped.dropped, ...extra };
+    // 프레임별 QA — 정본은 여기서 멈춘다. 에러(빈 프레임·크로마 잔류)는 그 행을
+    // 그대로 쓰면 안 된다는 뜻이고, 폐루프(inspect/score)는 이 뒤의 관계 신호라
+    // 프레임 하나가 뭉개진 것을 못 잡는다(실측: 그런 시트가 100점을 받았다).
+    const frameQa = inspectFrames(frames, opts.chromaKey);
+    if (frameQa.errors.length > 0 && !opts.allowFrameQaErrors) {
+      throw new ExtractionFailed(frameQa.errors.join("; "));
+    }
+    return { frames, method: "components", dropped: grouped.dropped, frameQa, ...extra };
   }
 
   if (!opts.allowSlotFallback) {

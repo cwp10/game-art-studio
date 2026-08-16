@@ -23,6 +23,7 @@ import {
   type StateSpec,
 } from "@/lib/sprite/request";
 import { inferActionHint } from "@/lib/sprite/state-name";
+import { stateMotionPhases } from "@/lib/sprite/motion-phase";
 
 export type PanelInput = {
   characterId: string;
@@ -136,7 +137,20 @@ export async function buildSpriteRequest(
       chroma: DEFAULT_CHROMA_TUNABLES,
       states,
       ...(directions ? { directions } : {}),
-      ...(input.motionPhaseGuides ? { motionPhaseGuides: true } : {}),
+      // 로코모션 8프레임이면 **자동으로 켠다**. 정본은 이걸 CLI 플래그
+      // (`--motion-phase-guides`)로 사람이 켜고 기본은 false 인데, 우리 앱에는 그
+      // 플래그를 켤 자리가 없다 — ycbcr·앵커 면제와 같은 상황이라 같은 방식으로 푼다.
+      //
+      // 조건을 `stateMotionPhases` 자신에게 묻는 이유: 그 함수가 위상을 내는 조건과
+      // 정확히 같아야 한다. 위상이 빈 배열인데 켜면 "가이드의 스틱 힌트를 따르라" 는
+      // 지시만 붙고 가이드에는 아무것도 안 그려져, 없는 것을 가리키는 프롬프트가 된다.
+      //
+      // 이걸 켜지 않아 실제로 걷기 8프레임의 다리가 거의 교차하지 않았다(2026-08-16).
+      // 그런데 우리 검사 신호 넷 중 어느 것도 "다리가 교차하는가" 를 보지 않아
+      // 100점이 나왔다 — 가이드를 켜는 것과 별개로 남는 공백이다.
+      ...(input.motionPhaseGuides || stateMotionPhases(bare, input.frames).length > 0
+        ? { motionPhaseGuides: true }
+        : {}),
     },
     warnings,
   };

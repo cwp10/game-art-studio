@@ -63,41 +63,9 @@ export type PlanDrivenInput = {
   correctFrom?: string;
 };
 
-/**
- * 이 경로를 쓸 수 있는가. 정본의 component-row 엔진 적용 범위와 같다.
- * 하나라도 어긋나면 기존 경로가 처리한다.
- */
-export function canUsePlanDrivenPath(opts: {
-  subjectType: string;
-  directions: number | null;
-  refId: string | null;
-}): boolean {
-  return planDrivenBlocker(opts) === null;
-}
-
-/**
- * 플랜 구동 경로를 쓸 수 **없는** 이유. 쓸 수 있으면 null.
- *
- * 이유를 문자열로 돌려주는 목적은 하나다 — 구 격자 경로로 떨어진 사실이 **조용하지
- * 않게** 하는 것. 정본이 base 잠금을 BLOCKING 으로 둔 이유가 "약한 base 가 모든 행을
- * 오염시킨다" 인데, 우리 쪽 조용한 폴백은 그 게이트를 통째로 건너뛰게 만든다.
- */
-export function planDrivenBlocker(opts: {
-  subjectType: string;
-  directions: number | null;
-  refId: string | null;
-}): string | null {
-  if (opts.subjectType !== "character") {
-    return `피사체가 '${opts.subjectType}' — component-row 엔진은 캐릭터 상태 행을 위한 것이라 이펙트·오브젝트는 격자 경로가 맞습니다`;
-  }
-  if (opts.directions !== null && opts.directions > 1) {
-    return `다방향(${opts.directions}) 시트 — 아직 플랜 구동 경로가 단일 방향만 받습니다`;
-  }
-  if (!opts.refId) {
-    return "참조 이미지가 없습니다 — base 를 먼저 만들고 잠그면 component-row 엔진(방향 앵커 체인 · 컴포넌트 추출 · 큐레이션)을 씁니다";
-  }
-  return null;
-}
+// 판정은 `plan-driven-gate.ts` 가 소유한다 — 패널도 같은 함수를 써야 해서 순수
+// 모듈로 뺐다. 기존 import 경로를 깨지 않도록 여기서 다시 내보낸다.
+export { canUsePlanDrivenPath, planDrivenBlocker } from "@/lib/sprite/plan-driven-gate";
 
 export async function runPlanDrivenSpritesheet(
   input: PlanDrivenInput,
