@@ -33,7 +33,7 @@ export type BackgroundInfo =
   | { mode: "transparent"; opaqueBorderFraction: number }
   | { mode: "heterogeneous"; opaqueBorderFraction: number; borderCoverage: number };
 
-function colorDistance(
+export function colorDistance(
   a: readonly [number, number, number],
   b: readonly [number, number, number],
 ): number {
