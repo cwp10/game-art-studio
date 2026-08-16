@@ -1,6 +1,6 @@
 # 스프라이트 파이프라인을 sprite-gen 구조로 재구성
 
-> 상태: 설계 승인됨 (2026-08-16). **⓪①② 구현 완료 (배선은 ④, §8 참조).**
+> 상태: 설계 승인됨 (2026-08-16). **⓪①②③ 구현 완료 (배선은 ④, §8 참조).**
 > 2차 — 정본 계약(`SKILL.md`) 대조 후 순서 교정. 3차 — leaf 문서 전체 대조 후 기본/옵트인 정정.
 > 4차 — `directional-anchor-workflow.md` 대조 후 6단계로 재편(앵커 체인을 ③ 으로 독립).
 > 5차 — `states-and-frames.md` 대조 후 프레임 대역·상태 등급 추가(§6.1.1), ② 구현 실측으로
@@ -676,6 +676,10 @@ src/lib/sprite/
 | ② | `normalizeCell` (비례 margin 포함) | Python `normalize_cell()` 에 같은 입력 투입 | **기하 필드 동일** — 정사각·동일 margin 일 때만 붙는 레거시 `size`·`safe_margin` 키는 이식하지 않는다(읽는 쪽이 없다). **실측 완료** |
 | ② | 크로마 키 자동 선택 | Python `choose_chroma_key()` 와 같은 PNG 로 대조 | 승자·`score`·`min_subject_distance`·후보 4종 전부 동일. **실측 완료** |
 | ② | row 프롬프트 | Python `row_prompt()` 출력과 `diff` | Prompt Contract 7항목 누락 없음. **실측 결과 공백 1줄 외 완전 일치** (그 1줄은 이식하지 않은 `motion_phase_guides` 슬롯) |
+| ③ | 방향 정규화·앵커 합성 | Python `normalize_directions`/`ensure_direction_anchors` 와 대조 | 키 순서·`action` 문자열 완전 일치. **실측 완료** |
+| ③ | 생성 플랜 | Python `build_generation_plan` 과 구조 대조 | stage 순서·상태명·방향·미러 일치 (refs 인코딩은 의도적으로 다름). **실측 완료** |
+| ③ | 방향 프롬프트 | Python `row_prompt()` 와 `diff` (방향 상태 4종) | 공백 외 완전 일치. **실측 완료** |
+| ③ | 앵커 콘텐츠 크롭 | 실제 codex PNG 투입 | **알파 없는 raw 생성물에서는 bbox 가 셀 전체 — 크롭 무의미.** `sourceHasAlpha` 로 드러냄. 알파 부여 후 ①의 `subjectBBox` 와 좌표 일치 |
 | 전체 | 회귀 | 기존 경로가 깨지지 않는지 | `pnpm test` 통과 |
 
 **②의 미검증 항목 1건**: §6.5 의 "셀 치수 검증 실패(`frames × cellW` 가 codex 캔버스 한계
@@ -719,21 +723,35 @@ Python 기준 출력 생성은 sprite-gen 의 `.venv` 를 그대로 쓴다(구�
 
 ## 8. 후속 단계 개요
 
-### ①②는 아직 배선되지 않았다
+### ①②③은 아직 배선되지 않았다 — ④가 통합 단계다
 
-`base-gate.ts`(①)와 `request.ts`·`chroma-key.ts`·`layout-guide.ts`·`row-prompt.ts`(②)는
-만들어져 있고 테스트를 통과하지만 **호출부에 연결되어 있지 않다.** ③앵커 체인·④row 생성이
-생성 흐름 자체를 교체하므로 지금 `spritesheet-handler.ts` 에 배선하면 ④에서 다시 뜯는다.
+`base-gate.ts`(①), `request.ts`·`chroma-key.ts`·`layout-guide.ts`·`row-prompt.ts`(②),
+`directions.ts`·`generation-plan.ts`·`anchor.ts`·`anchor-image.ts`(③)는 만들어져 있고
+테스트를 통과하지만 **호출부에 연결되어 있지 않다.** ④가 생성 흐름 자체를 교체하므로
+지금 `spritesheet-handler.ts` 에 배선하면 ④에서 다시 뜯는다.
 
-같은 이유로 ②는 다음 셋도 건드리지 않았다 — 전부 ④의 몫이다:
+같은 이유로 다음 넷도 건드리지 않았다 — 전부 ④의 몫이다:
 
 - 기존 `buildSpritePrompt` 의 거대 지시문(`walkCycleRule` 등) 제거 — 지금 지우면 현재
   생성 경로가 즉시 깨진다
 - `generateGridTemplate` → 레이아웃 가이드 대체 (호출부가 함께 이동해야 한다)
 - 패널 기본값 8프레임 → 4 조정 (§6.1.1, §3.3)
+- `SpriteCanvas` 의 `frameOrder`/`excludedFrames` 를 `saveCuration` 으로 영속 (아래 참조)
 
 **이 결정의 리스크**: 미배선 코드가 ①②③에 걸쳐 누적되어 ④⑤ 전까지 사용자에게 보이는 변화가
-없다. ④ 통합 시점에 인터페이스 불일치가 드러날 수 있다.
+없다. ④ 통합 시점에 인터페이스 불일치가 한꺼번에 드러날 수 있다.
+
+**④는 순수 모듈 추가 단계가 아니다.** 첫 Task 가 반드시 다음이어야 한다:
+
+1. `SpriteCanvas` 가 `frameOrder`/`excludedFrames` 를 `saveCuration` 으로 영속
+2. 앵커 지정 UI(프레임 카드의 핀) → `pinAnchorFrame`
+3. `spritesheet-handler` 가 `buildGenerationPlan` 순서대로 생성 (stage 1 → stage 2)
+4. 액션 행 refs 에 base 가 없음을 런타임 검증 (`PlanRef.kind` 로 기계 확인)
+5. codex 실왕복 1회 — 방향 앵커 1장 + 액션 행 1개
+6. **상태 앵커 게이트**(정본 체크리스트 3번) — 비로코모션 상태마다 대표 포즈 앵커를
+   행 생성 전에 만든다. ③ 범위에 넣지 않았으므로 ④에서 놓치지 말 것.
+   로코모션에는 단일 피크 포즈 앵커를 **넣지 않는다** — 모든 프레임이 같은 다리 위상으로
+   고정된다. 양쪽 접지가 다 보이는 contact sheet/선택 사이클/레이아웃 페이즈 가이드가 필요하다.
 
 ### ③ stage 1 — 방향 앵커 체인
 
@@ -761,6 +779,7 @@ base 1장 (down/정면)
 - 핀의 행이 재생성됐어도 **하드 에러**다(`pick-stale-generation`). 같은 index 가 다른 이미지가
   되므로, 사람이 본 적 없는 프레임이 방향의 identity 가 되는 것을 막는다. 핀은 재스탬프도
   드롭도 하지 않고 stale 로 표시해 한 번의 재선택으로 풀게 한다
+  (**우리 구현에서는 이 두 오류가 하나로 합쳐진다** — 아래 구현 결과 참조)
 
 **앵커 파일은 파생 캐시다.** 큐레이션 뷰가 보여주는 그대로(픽셀 편집 → 변형 → 재양자화) 굽고,
 **매 생성 직전에 다시 굽는다** — 뷰에서의 나중 편집이 파일을 조용히 무효화한다. 근거: 승인된
@@ -771,8 +790,56 @@ identity 는 사람이 화면에서 승인한 것이고, 편집 전 raw 에서 �
 계약으로 기록된다. 미러가 부족해 재생성할 때만 반대편 행을 timing/scale 참조로**만** 붙이고
 대상 방향 앵커를 새로 뽑는다. 미러는 관측 가능한 파생이지 조용한 폴백이 아니다.
 
-우리 대응: `SpriteCanvas` 에 프레임 제외·재정렬이 이미 있으므로 "curated sequence head" 개념이
-그대로 적용된다. 핀 UI 와 stale 판정이 신규다.
+#### 구현 결과 (2026-08-16)
+
+`directions.ts`·`generation-plan.ts`·`anchor.ts`·`anchor-image.ts` 로 구현했다.
+Python 대조 결과: 방향 정규화·앵커 합성 action 문자열 완전 일치, 생성 플랜 구조 일치,
+방향 프롬프트 4종(`down_idle`·`down_walk`·`running-front-right`·`running-front-left`)
+공백 외 완전 일치.
+
+**우리 UI 에 이미 같은 사고가 있다.** [SpriteCanvas.tsx:319](../../../src/components/editor/SpriteCanvas.tsx)
+가 `frameOrder`(재정렬) + `excludedFrames`(제외)로 정확히 큐레이션 시퀀스를 계산하고
+재생·GIF·ZIP 이 전부 그것을 따른다. 즉 "index 0 을 앵커로 쓰면 된다"는 **우리 UI 에서도
+틀린다.**
+
+**그런데 그 큐레이션이 영속되지 않는다 — ④의 전제 조건이다.**
+
+| 항목 | 현재 상태 |
+|---|---|
+| `frameOrder` | React state. `saveCorrected()` 가 시트 PNG 자체를 재배열해 파괴적으로 반영 |
+| `excludedFrames` | React state. **영속되지 않는다** — 미리보기·내보내기 전용 |
+| 앵커 지정(핀) | **없다** |
+
+③은 DB 계약(`saveCuration`/`getCuration`/`pinAnchorFrame`/`clearAnchorPick`/`getAnchorPicks`)
+만 만들었고 **쓰는 쪽이 없다.** ①의 `lockBaseGeneration` 과 같은 상태다.
+
+**핀이 원본보다 단순하다(의도적 축소).** 원본 핀은 `{state, index}` + `state_revision` 이라
+행 재생성 시 같은 index 가 다른 이미지가 되고, 그래서 `pick-stale-generation`·
+`pick-unverifiable` 두 오류가 필요하다. **우리 핀은 `{generationId, index}`** 라 행을 다시
+생성하면 새 id 가 나오고 낡은 핀은 정의상 존재하지 않는 행을 가리킨다 — 두 오류가
+`pick-unknown-generation` 하나로 합쳐진다. *pending*(`no-anchor-row`·`row-not-generated`)과
+*broken*(나머지) 구분은 그대로 유지했다.
+
+**저장 위치**: 큐레이션은 그 행의 `params.curation`, 핀은 **잠긴 base 의**
+`params.anchorPicks[direction]`. ①이 "base 는 스코프당 딱 1장"을 강제하므로 run 스코프
+메타데이터를 걸 유일하게 안정적인 자리다. `sprite_runs` 테이블 신설은 마이그레이션 3중
+동기화 비용 때문에 미뤘다 — ④에서 run 이 실체를 가지면 옮긴다.
+
+**콘텐츠 크롭이 raw 생성물에서 무의미하다(실측).** codex PNG 는 `channels: 3,
+hasAlpha: false` 라 `ensureAlpha()` 가 전 픽셀을 255 로 채우고, 1254×1254 사과에서
+`contentBBox` 가 **정확히 셀 전체**를 돌려줬다. ①의 AA 검사와 같은 함정이라 조용히
+통과시키지 않고 `BakeResult.sourceHasAlpha` 로 드러낸다. 알파를 만든 뒤에는 정상 동작하며,
+①의 `subjectBBox` 와 좌표가 정확히 일치했다((203,125)-(1050,1086)).
+
+**`×8` 확대는 셀 크기 프레임을 전제한다.** 256px 셀 → 2048px 로 image_gen 이 읽을 수 있게
+키우는 값이다. 1254px 급 raw 생성물에 그대로 걸면 1만 픽셀이 된다 — ④에서 추출된 프레임을
+입력으로 쓰면 자연히 해소된다.
+
+**방향 계약 런에서는 `STATE_REQUIREMENTS` 가 붙지 않는다(원본과 동일).** 키가 맨 상태명
+(`walk`·`run`)인데 방향 계약 런의 상태는 `down_walk` 이라 매칭되지 않는다. 실측 확인:
+`down_walk` → `STATE_REQ=0, suffix=0`. 즉 로코모션 anti-bobbing 지시("제자리 흔들림 대신
+읽히는 사이클")가 **방향 런에서는 사라진다.** 원본의 동작이므로 그대로 뒀지만, 사용자의
+원래 불만이 걷기·달리기 품질이었으므로 ④에서 실제 결과를 보고 판단할 항목이다.
 
 ### ④ stage 2 — action rows
 
