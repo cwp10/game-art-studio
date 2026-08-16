@@ -31,6 +31,22 @@ type SheetParams = {
   rowGenerationIds?: Record<string, string>;
 };
 
+/** /api/sprite/qa 응답 — 모션 QA 산출물 목록. */
+type QaData = {
+  ok: boolean;
+  allContact: string | null;
+  states: Array<{
+    state: string;
+    ok: boolean;
+    note?: string;
+    frames?: number;
+    fps?: number;
+    loop?: boolean;
+    contact: string | null;
+    gif: string | null;
+  }>;
+};
+
 type Props = {
   parentGenerationId: string;
   imageUrl: string;
@@ -874,6 +890,23 @@ export function SpriteCanvas({
       if (!res.ok) return;
       const d = (await res.json()) as { picks?: Record<string, { generationId: string; index: number }> };
       setPinned(d.picks ?? {});
+    })();
+  }, [isPlanDriven, sheetGenerationId]);
+
+  // 모션 QA 산출물(접촉 시트 + GIF). 정본은 모션 연속성을 BLOCKING 으로 규정한다 —
+  // 프레임 수·알파·정체성이 다 맞아도 애니메이션이 쓰레기일 수 있어서, 모션을
+  // **모션으로** 봐야 한다(qa-motion.md). 큐레이션 이전 프레임 전체가 판정 입력이다.
+  const [qa, setQa] = useState<QaData | null>(null);
+  const [qaOpen, setQaOpen] = useState(false);
+  useEffect(() => {
+    if (!isPlanDriven || !sheetGenerationId) return;
+    void (async () => {
+      const res = await fetch(`/api/sprite/qa?atlasGenerationId=${sheetGenerationId}`);
+      if (!res.ok) {
+        setQa(null);
+        return;
+      }
+      setQa((await res.json()) as QaData);
     })();
   }, [isPlanDriven, sheetGenerationId]);
 
@@ -1754,15 +1787,70 @@ export function SpriteCanvas({
         </div>
         {/* 하단 고정 — 보정본 저장(주 액션, 현재 오프셋 반영한 전체 시트를 새 generation 으로). */}
         <div className="flex-none border-t border-border p-3">
-          {/* 플랜 구동 시트 전용: 큐레이션은 **비파괴 사이드카**라 시트를 다시 굽지 않는다.
-              제외·재정렬한 재생 시퀀스를 기록해 다음 생성의 앵커 해석에 쓰인다. */}
+          {/* 플랜 구동 시트 전용: 큐레이션은 **비파괴 사이드카**다 — 원본 프레임 PNG 는
+              그대로 두고 선택만 기록한다. 저장하면 아틀라스가 그 선택으로 다시 구워지고
+              (Output Contract), 다음 생성의 앵커 해석도 그 시퀀스를 따른다. */}
           {isPlanDriven && (
             <>
+              {qa && qa.states.length > 0 && (
+                <div className="mb-2 rounded-lg border border-border">
+                  <button
+                    onClick={() => setQaOpen(o => !o)}
+                    className="flex h-9 w-full items-center justify-between px-2.5 text-sm text-text-primary"
+                    title="모션 연속성 판정용 접촉 시트와 GIF. 큐레이션 이전 추출 프레임 전체입니다."
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Film size={14} /> 모션 QA
+                    </span>
+                    <span className="text-xs text-text-muted">
+                      {qa.ok ? `${qa.states.length}개 행` : "일부 실패"}
+                    </span>
+                  </button>
+                  {qaOpen && (
+                    <div className="space-y-2.5 border-t border-border p-2.5">
+                      <p className="text-[11px] leading-snug text-text-muted">
+                        큐레이션 <b>이전</b> 프레임 전체입니다. 루프 이음매·발 접지·해부 파손을
+                        보고 뺄 프레임을 정하세요. 걷기·달리기는 정본에서 experimental 등급입니다.
+                      </p>
+                      {qa.states.map(s => (
+                        <div key={s.state} className="space-y-1">
+                          <div className="flex items-baseline justify-between text-xs">
+                            <span className="text-text-primary">{s.state}</span>
+                            <span className="text-text-muted">
+                              {s.ok
+                                ? `${s.frames}f · ${s.fps}fps · ${s.loop ? "루프" : "비루프"}`
+                                : (s.note ?? "실패")}
+                            </span>
+                          </div>
+                          {s.gif && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={s.gif}
+                              alt={`${s.state} 모션 프리뷰`}
+                              className="mx-auto max-h-32 bg-[repeating-conic-gradient(#d2d2d2_0_25%,#ebebeb_0_50%)] bg-[length:16px_16px]"
+                            />
+                          )}
+                          {s.contact && (
+                            <a
+                              href={s.contact}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="block text-center text-[11px] text-[color:var(--accent)] underline"
+                            >
+                              접촉 시트 열기
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <button
                 onClick={() => void saveCurationSidecar()}
                 disabled={curationBusy}
                 className="mb-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[color:var(--accent)] text-sm font-medium text-[color:var(--accent)] disabled:opacity-40"
-                title="제외·재정렬한 재생 시퀀스를 저장합니다. 원본 프레임은 그대로 둡니다."
+                title="제외·재정렬한 재생 시퀀스를 저장하고 시트를 그 선택으로 다시 굽습니다. 원본 프레임은 그대로 둡니다."
               >
                 <Save size={14} /> {curationBusy ? "저장 중…" : "큐레이션 저장"}
               </button>

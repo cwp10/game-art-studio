@@ -7,7 +7,9 @@
  *
  *   pnpm tsx scripts/test-recompose.ts
  */
-import { unlink } from "node:fs/promises";
+import { rm, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import sharp from "sharp";
 import {
   createGeneration,
@@ -211,6 +213,74 @@ void (async () => {
       }
       check("플랜 구동이 아니면 던진다", threw.includes("request"), threw);
       deleteGeneration(badId);
+    }
+
+    console.log("=== 모션 QA 라우트 ===");
+    {
+      const { buildPreviews } = await import("../src/lib/sprite/preview");
+      const { GET } = await import("../src/app/api/sprite/qa/route");
+      const { NextRequest } = await import("next/server");
+
+      const qaDir = join(tmpdir(), `qa-route-${Date.now()}`);
+      const cellFrame = (tag: number) => {
+        const data = Buffer.alloc(64 * 64 * 4);
+        for (let i = 0; i < 64 * 64; i++) {
+          data[i * 4] = tag;
+          data[i * 4 + 3] = 255;
+        }
+        return { data, width: 64, height: 64 };
+      };
+      const preview = await buildPreviews({
+        request,
+        framesByState: { down_idle: [cellFrame(10), cellFrame(20)] },
+        qaDir,
+      });
+
+      const db = (await import("../src/lib/db/client")).getDb();
+      const gen = getGeneration(atlasId)!;
+      db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
+        JSON.stringify({
+          ...gen.params,
+          motionQa: {
+            ok: preview.ok,
+            qaDir: preview.qaDir,
+            allContact: preview.allContactPath,
+            states: preview.states,
+          },
+        }),
+        atlasId,
+      );
+
+      const call = async (qs: string): Promise<Response> =>
+        GET(new NextRequest(`http://localhost/api/sprite/qa?${qs}`));
+
+      const listRes = await call(`atlasGenerationId=${atlasId}`);
+      const list = (await listRes.json()) as {
+        ok: boolean;
+        allContact: string | null;
+        states: Array<{ state: string; contact: string | null; gif: string | null; frames?: number }>;
+      };
+      check("목록 200", listRes.status === 200);
+      check("상태 1개", list.states.length === 1, JSON.stringify(list.states));
+      check("프레임 수가 실린다", list.states[0].frames === 2);
+      check("contact URL", !!list.states[0].contact);
+      check("gif URL", !!list.states[0].gif);
+      check("all-contact URL", !!list.allContact);
+
+      const gifName = new URL(`http://x${list.states[0].gif}`).searchParams.get("file")!;
+      const fileRes = await call(`atlasGenerationId=${atlasId}&file=${encodeURIComponent(gifName)}`);
+      check("GIF 200", fileRes.status === 200);
+      check("Content-Type image/gif", fileRes.headers.get("Content-Type") === "image/gif");
+      const bytes = Buffer.from(await fileRes.arrayBuffer());
+      check("GIF89a 바이트", bytes.toString("ascii", 0, 6) === "GIF89a");
+
+      // 화이트리스트 — params 에 기록되지 않은 이름은 읽지 않는다.
+      const badRes = await call(`atlasGenerationId=${atlasId}&file=${encodeURIComponent("../../app.db")}`);
+      check("기록에 없는 경로는 404", badRes.status === 404, String(badRes.status));
+      const bad2 = await call(`atlasGenerationId=${atlasId}&file=other.png`);
+      check("임의 파일명도 404", bad2.status === 404);
+
+      await rm(qaDir, { recursive: true, force: true });
     }
   } finally {
     // 개발 DB 를 공유하므로 만든 것은 치운다.
