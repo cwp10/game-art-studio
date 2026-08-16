@@ -19,7 +19,15 @@ import {
   axisRefine,
   detectPixelPitch,
   detectPixelGrid,
+  gridEdges,
+  gridRows,
+  gridRowSplits,
+  gridScoreEdges,
+  gridUniformity,
+  bestPhase,
+  resolveFramePitch,
   type RawImage,
+  type Pitch,
 } from "../src/lib/sprite/pixel-grid";
 
 const PY = "/Users/wonpyoung/Developer/workspace/sprite-gen/.venv/bin/python";
@@ -192,6 +200,128 @@ console.log("\n=== 격자가 없으면 스냅하지 않는다 ===");
     eq(g.pitch[0], ref.pitch[0]) && eq(g.pitch[1], ref.pitch[1]),
     `${JSON.stringify(g.pitch)} vs ${JSON.stringify(ref.pitch)}`);
   console.log(`  (참고) 그라디언트 피치 ${JSON.stringify(g.pitch)} — 1.0 이면 스냅 안 함`);
+}
+
+console.log("\n=== ②단계: 격자선 확정 (gridEdges) ===");
+{
+  const cases: Array<[number, number, number]> = [
+    [100, 8, 0], [100, 8, 2], [100, 8, 4], [100, 8, 6],
+    [849, 30.92, 0], [849, 30.92, 12.3],
+    [64, 16, 0], [64, 16.0, 15.9], [63, 16, 0],
+    [100, 1, 0], [100, 0.5, 0], [7, 8, 0],
+    [256, 17.24, 3.1], [256, 17.24, 0],
+    [120, 6.0, 5.99], [120, 6.0, 0.01],
+  ];
+  const refs = JSON.parse(execFileSync(PY, ["-c", `
+import sys, json
+sys.path.insert(0, ${JSON.stringify(SG)})
+from sprite_gen.extract import _grid_edges
+cases = json.loads(sys.stdin.read())
+print(json.dumps([_grid_edges(l, p, o) for l, p, o in cases]))
+`], { encoding: "utf8", input: JSON.stringify(cases) })) as number[][];
+  cases.forEach(([l, p, o], i) => {
+    const ours = gridEdges(l, p, o);
+    check(`gridEdges(${l}, ${p}, ${o})`, JSON.stringify(ours) === JSON.stringify(refs[i]),
+      `${JSON.stringify(ours)} vs ${JSON.stringify(refs[i])}`);
+  });
+}
+
+console.log("\n=== ②단계: 셀 균일도·위상 실측 (실제 컴포넌트) ===");
+{
+  // 격자가 실제로 있는 이미지로 재야 의미가 있다 — base 는 피치 8 이다.
+  const src = "data/images/euaom92zbh0jrchz.png";
+  if (!existsSync(src)) {
+    check("base 이미지 없음", false, src);
+  } else {
+    // 너무 크면 위상 스캔이 오래 걸린다 — 위쪽 일부만 잘라 쓴다.
+    const cropPath = join(dir, "base-crop.png");
+    await sharp(src).extract({ left: 300, top: 200, width: 240, height: 240 }).png().toFile(cropPath);
+    const img = await load(cropPath);
+
+    const ref = JSON.parse(execFileSync(PY, ["-c", `
+import sys, json
+sys.path.insert(0, ${JSON.stringify(SG)})
+from PIL import Image
+from sprite_gen.extract import _grid_rows, _grid_row_splits, _grid_score_edges, _grid_uniformity, _best_phase, _grid_edges, resolve_frame_pitch
+im = Image.open(${JSON.stringify(cropPath)}).convert("RGBA")
+w, h = im.size
+rows = _grid_rows(im)
+xs = _grid_edges(w, 8.0, 0.0); ys = _grid_edges(h, 8.0, 0.0)
+print(json.dumps({
+  "row_counts": [len(p) for p in rows[0][:8]],
+  "splits_head": _grid_row_splits(rows[0], xs, w)[:3],
+  "score_8_0": _grid_score_edges(rows, w, h, xs, ys),
+  "uniformity_8": _grid_uniformity(im, (8.0, 8.0), (0.0, 0.0)),
+  "uniformity_6": _grid_uniformity(im, (6.0, 6.0), (0.0, 0.0)),
+  "best_phase_8": list(_best_phase(im, (8.0, 8.0))),
+  "best_phase_6": list(_best_phase(im, (6.0, 6.0))),
+  "rfp": [
+    [list(resolve_frame_pitch((12.5, 12.5), (13.0, 13.0))[0]), resolve_frame_pitch((12.5, 12.5), (13.0, 13.0))[1]],
+    [list(resolve_frame_pitch((3.0, 3.0), (7.0, 8.86))[0]), resolve_frame_pitch((3.0, 3.0), (7.0, 8.86))[1]],
+    [list(resolve_frame_pitch((8.0, 8.0), (1.0, 1.0))[0]), resolve_frame_pitch((8.0, 8.0), (1.0, 1.0))[1]],
+    [list(resolve_frame_pitch((8.0, 8.0), (8.86, 8.86))[0]), resolve_frame_pitch((8.0, 8.0), (8.86, 8.86))[1]],
+  ],
+}))
+`], { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 })) as {
+      row_counts: number[]; splits_head: number[][]; score_8_0: number;
+      uniformity_8: number; uniformity_6: number;
+      best_phase_8: number[]; best_phase_6: number[]; rfp: Array<[number[], boolean]>;
+    };
+
+    const rows = gridRows(img);
+    check("행별 불투명 픽셀 수",
+      ref.row_counts.every((v, i) => rows.rowPos[i].length === v),
+      `${rows.rowPos.slice(0, 8).map(p => p.length)} vs ${ref.row_counts}`);
+    const xs = gridEdges(img.width, 8.0, 0.0);
+    const ys = gridEdges(img.height, 8.0, 0.0);
+    const splits = gridRowSplits(rows.rowPos, xs, img.width);
+    check("행 분할 색인",
+      JSON.stringify(splits.slice(0, 3)) === JSON.stringify(ref.splits_head),
+      `${JSON.stringify(splits.slice(0, 3))} vs ${JSON.stringify(ref.splits_head)}`);
+    check("셀 균일도 코어 (정수 정확 산술)",
+      eq(gridScoreEdges(rows, img.width, img.height, xs, ys), ref.score_8_0, 1e-12),
+      `${gridScoreEdges(rows, img.width, img.height, xs, ys)} vs ${ref.score_8_0}`);
+    check("gridUniformity 피치 8", eq(gridUniformity(img, [8, 8], [0, 0]), ref.uniformity_8, 1e-12));
+    check("gridUniformity 피치 6", eq(gridUniformity(img, [6, 6], [0, 0]), ref.uniformity_6, 1e-12));
+
+    const bp8 = bestPhase(img, [8, 8]);
+    check("bestPhase 피치 8 (argmin 동일)",
+      eq(bp8[0], ref.best_phase_8[0]) && eq(bp8[1], ref.best_phase_8[1]),
+      `${JSON.stringify(bp8)} vs ${JSON.stringify(ref.best_phase_8)}`);
+    const bp6 = bestPhase(img, [6, 6]);
+    check("bestPhase 피치 6 (argmin 동일)",
+      eq(bp6[0], ref.best_phase_6[0]) && eq(bp6[1], ref.best_phase_6[1]),
+      `${JSON.stringify(bp6)} vs ${JSON.stringify(ref.best_phase_6)}`);
+    console.log(`  (참고) 240x240 크롭 위상 8: ${JSON.stringify(bp8)}, 균일도 ${ref.uniformity_8.toFixed(1)}`);
+  }
+}
+
+console.log("\n=== ②단계: 피치 패밀리 판정 ===");
+{
+  const cases: Array<[Pitch, Pitch]> = [
+    [[12.5, 12.5], [13.0, 13.0]],   // 4% — own 채택 (눈 반쪽 실사고)
+    [[3.0, 3.0], [7.0, 8.86]],      // 붕괴 — 합의 채택
+    [[8.0, 8.0], [1.0, 1.0]],       // 합의가 확신 없음 — own
+    [[8.0, 8.0], [8.86, 8.86]],     // 10.75% — 패밀리 밖
+  ];
+  const refJson = execFileSync(PY, ["-c", `
+import sys, json
+sys.path.insert(0, ${JSON.stringify(SG)})
+from sprite_gen.extract import resolve_frame_pitch
+cases = json.loads(sys.stdin.read())
+out = []
+for own, con in cases:
+    p, o = resolve_frame_pitch(tuple(own), tuple(con))
+    out.append([list(p), o])
+print(json.dumps(out))
+`], { encoding: "utf8", input: JSON.stringify(cases) });
+  const refs = JSON.parse(refJson) as Array<[number[], boolean]>;
+  cases.forEach(([own, con], i) => {
+    const [p, outlier] = resolveFramePitch(own, con);
+    check(`resolveFramePitch(${JSON.stringify(own)}, ${JSON.stringify(con)})`,
+      JSON.stringify(p) === JSON.stringify(refs[i][0]) && outlier === refs[i][1],
+      `${JSON.stringify([p, outlier])} vs ${JSON.stringify(refs[i])}`);
+  });
 }
 
 void readdirSync;
