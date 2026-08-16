@@ -180,3 +180,65 @@ data/sprite-runs/aurora3-*/frames-down_idle/*.png    추출 프레임 4개
 data/sprite-runs/aurora3-*/frames-down_action/*.png  추출 프레임 4개
 data/sprite-runs/aurora3-*/anchor-down-x8.png        앵커 (content 162x208 → 1296x1664)
 ```
+
+
+## 원본 sprite-gen 과 머리대머리 (2026-08-16)
+
+애니메이션이 약한 것이 **우리 이식 탓인지 image_gen 의 한계인지**를 가르려고, 같은 base·
+같은 동작 문구로 sprite-gen 자체를 돌렸다.
+
+```bash
+prepare_sprite_run.py --out-dir <run> --character-id aurora \
+  --base-image <같은 base> --cell-size 256 --chroma-key auto \
+  --request-json '{"states":{"idle":{"frames":4,"fps":4,"loop":true,"action":"<같은 문구>"}}}'
+sprite-gen gen --provider codex --prompt-file prompts/idle.txt \
+  --ref base-source.png --ref references/layout-guides/idle.png --out raw/idle.png
+extract_sprite_row_frames.py --run-dir <run>
+```
+
+### 프롬프트가 사실상 동일하다
+
+`prompts/idle.txt` 와 우리 `buildRowPrompt` 출력을 diff 한 결과 **차이는 한 곳뿐**이다 —
+`character.base_image` 가 있을 때 앞에 붙는 pre-idle 조항. 이식하지 않기로 한 분기이고,
+우리 쪽 대응은 REF(방향 계약 없음) 경로다.
+
+### 결과
+
+| 지표 | 우리 (신 경로) | 원본 sprite-gen |
+|---|---|---|
+| raw 캔버스 | 1774×887 | **1774×887** |
+| `--chroma-key auto` 선택 | cyan `#00FFFF` | **cyan `#00FFFF`** |
+| 프레임 bbox | 159~162 × 208 | 158~163 × 208 |
+| 피사체 높이 σ | 0.0px | 0.0px |
+| 바닥선 σ | 0.0px | 0.0px |
+| 중심 x σ | 0.4px | 0.9px |
+| 크로마 잔여 | 0~1px | 0~4px |
+| 인접 프레임 평균 절대차 | 6.3, 4.2, 6.1 | 10.8, 8.8, 6.2 |
+| 실루엣 변화 | 9.1 / 6.2 / 6.7% | 10.7 / 7.8 / 7.7% |
+
+생성기가 비결정적이고 n=1 이므로 **우리가 더 낫다고 주장하지 않는다.** 읽을 것은
+"두 경로가 같은 자리에 있다"는 것이다.
+
+### 변화 맵도 같은 모양이다
+
+원본의 프레임 간 차분도 **실루엣 윤곽 전체**에 고르게 퍼진다. 어깨만 뭉쳐서 움직이는
+국소 변화가 아니라, 프레임마다 같은 포즈를 조금씩 다시 그린 형태다.
+
+> **결론: 애니메이션이 약한 것은 우리 이식의 결함이 아니라 image_gen 의 성질이다.**
+> raw 캔버스 치수, 크로마 키 자동 선택, 정렬 통계, 차분 패턴이 전부 원본과 같은 자리다.
+
+이것은 정본 자신의 서술과도 일치한다:
+
+> Do not frame the default path as game-ready humanoid locomotion. The current Codex/image-gen
+> path is good at **short readable pose changes**, identity-preserving rows, chroma cleanup,
+> atlas composition, and QA.
+
+> For precise humanoid running today, the most reliable path is **candidate generation plus
+> human frame picking.**
+
+### 그래서 남은 축의 답
+
+애니메이션 질은 **생성기를 더 조여서** 풀 문제가 아니라 **사람이 프레임을 고르는 경로**로
+푸는 문제다. 그 경로가 `SpriteCanvas` 의 프레임 제외·재정렬을 `saveCuration` 으로 영속시키는
+④b 다. 정본이 "가장 신뢰할 만한 경로"라 부른 것을 우리는 이미 UI 로 갖고 있고, 영속만
+안 돼 있다.
