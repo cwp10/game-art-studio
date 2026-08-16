@@ -281,7 +281,7 @@ export function unlockBaseScope(sessionId: string | null): void {
  */
 export function saveCuration(
   generationId: string,
-  curation: { selected: number[]; order?: number[] },
+  curation: { selected: number[]; order?: number[]; breathe?: unknown },
 ): void {
   const db = getDb();
   const row = db.prepare("SELECT params FROM generations WHERE id = ?").get(generationId) as
@@ -292,6 +292,9 @@ export function saveCuration(
   params.curation = {
     selected: curation.selected,
     ...(curation.order ? { order: curation.order } : {}),
+    // 호흡은 프레임 선택과 직교하는 변조 레이어다 — 검증 전 원시값 그대로 싣고,
+    // 읽는 쪽(`stateBreathe`)이 범위·정수성을 조용히 고치지 않고 판정한다.
+    ...(curation.breathe !== undefined ? { breathe: curation.breathe } : {}),
   };
   db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
     JSON.stringify(params),
@@ -301,11 +304,17 @@ export function saveCuration(
 
 export function getCuration(
   generationId: string,
-): { selected: number[]; order?: number[] } | null {
+): { selected: number[]; order?: number[]; breathe?: unknown } | null {
   const gen = getGeneration(generationId);
-  const c = gen?.params?.curation as { selected?: number[]; order?: number[] } | undefined;
+  const c = gen?.params?.curation as
+    | { selected?: number[]; order?: number[]; breathe?: unknown }
+    | undefined;
   if (!c || !Array.isArray(c.selected)) return null;
-  return { selected: c.selected, ...(Array.isArray(c.order) ? { order: c.order } : {}) };
+  return {
+    selected: c.selected,
+    ...(Array.isArray(c.order) ? { order: c.order } : {}),
+    ...(c.breathe !== undefined ? { breathe: c.breathe } : {}),
+  };
 }
 
 /**

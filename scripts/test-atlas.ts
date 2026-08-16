@@ -2,6 +2,8 @@
  * ⑥ 최소판 — 아틀라스 합성과 런타임 매니페스트 테스트.
  * sprite_gen/compose_atlas.py 의 배치·계약과 맞는지 본다.
  */
+import sharp from "sharp";
+import { existsSync } from "node:fs";
 import { composeAtlas, DEFAULT_MIN_USED_PIXELS } from "../src/lib/sprite/atlas";
 import type { RawImage } from "../src/lib/sprite/extract";
 import {
@@ -226,5 +228,76 @@ console.log("=== 큐레이션 반영 — Output Contract 경계 ===");
   check("a 행의 남는 칸은 투명", r.atlas.data[(0 * r.atlas.width + 128) * 4 + 3] === 0);
 }
 
-console.log(`\n${passed} passed / ${failed} failed`);
-if (failed > 0) process.exit(1);
+void (async () => {
+
+  // ── 호흡 레이어 (정본 compose_atlas 의 breathe 굽기) ──────────────────
+  //
+  // 실제 프레임으로 본다 — 합성 블록은 해부가 성립하지 않아 계약을 못 잰다.
+  {
+    const src = "data/sprite-runs/sprite-1786909158013/frames-left_idle/frame-0.png";
+    if (!existsSync(src)) {
+      check("호흡 검증용 실제 프레임 없음", false, src);
+    } else {
+      const { data, info } = await sharp(src).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const real = (): RawImage => ({ data: Buffer.from(data), width: info.width, height: info.height });
+      const bigCell = normalizeCell({ size: info.width });
+      const bigReq = (states: Record<string, StateSpec>): SpriteRequest => ({
+        ...req(states),
+        cell: bigCell,
+      });
+      const seq = [real(), real(), real(), real()];
+
+      // 대조군: 호흡이 꺼진 행은 예전과 **바이트 동일**이어야 한다.
+      const off = composeAtlas({
+        request: bigReq({ a: S(4, 6, true) }),
+        framesByState: { a: seq },
+        curationByState: { a: { selected: [0, 1, 2, 3] } },
+      });
+      check("호흡이 꺼지면 매니페스트에 breathe 키가 없다", !("breathe" in off.manifest.animation.rows.a));
+
+      const on = composeAtlas({
+        request: bigReq({ a: S(4, 6, true) }),
+        framesByState: { a: seq },
+        curationByState: { a: { selected: [0, 1, 2, 3], breathe: { depth: 0.06, breaths: 1 } } },
+      });
+      check("호흡을 켜도 칸 수·크기는 그대로", on.atlas.width === off.atlas.width && on.atlas.height === off.atlas.height);
+      check("호흡을 켜면 시트가 달라진다", !on.atlas.data.equals(off.atlas.data));
+
+      const cellAt = (r: { atlas: RawImage }, col: number): Buffer => {
+        const out = Buffer.alloc(bigCell.width * bigCell.height * 4);
+        for (let y = 0; y < bigCell.height; y++) {
+          const s0 = (y * r.atlas.width + col * bigCell.width) * 4;
+          r.atlas.data.copy(out, y * bigCell.width * 4, s0, s0 + bigCell.width * 4);
+        }
+        return out;
+      };
+      // 같은 프레임 4장이지만 위상이 달라 칸마다 그림이 다르다.
+      const cells = [0, 1, 2, 3].map(c => cellAt(on, c));
+      const uniq = new Set(cells.map(c => c.toString("base64"))).size;
+      check("위상이 다르면 칸도 다르다", uniq === 4, `유니크 ${uniq}/4`);
+      // **위상 0 도 굽는다** — lag 때문에 t=0 도 항등이 아니다. 건너뛰면 이 칸만
+      // 원본이 되어 매 루프 시작에서 튄다 (정본이 실측으로 못박은 지점).
+      check("위상 0 칸도 원본과 다르다", !cells[0].equals(cellAt(off, 0)));
+
+      // 굽기가 실제로 쓴 해부가 매니페스트에 남는다.
+      const rep = on.manifest.animation.rows.a.breathe;
+      check("해부 보고가 실린다", !!rep?.anatomy, JSON.stringify(rep));
+      check("사이드카 캐시가 없으면 drift 없음", rep?.matches_sidecar === true && rep?.sidecar_drift === null);
+
+      // 잘못된 설정은 조용히 꺼지지 않고 던진다.
+      let threw = "";
+      try {
+        composeAtlas({
+          request: bigReq({ a: S(4, 6, true) }),
+          framesByState: { a: seq },
+          curationByState: { a: { selected: [0, 1, 2, 3], breathe: { breaths: 12 } } },
+        });
+      } catch (e) { threw = String(e); }
+      check("범위 밖 breaths 는 fail-loud", threw.includes("범위") && threw.includes("12"), threw);
+    }
+  }
+
+
+  console.log(`\n${passed} passed / ${failed} failed`);
+  if (failed > 0) process.exit(1);
+})();

@@ -23,6 +23,16 @@
  */
 import sharp from "sharp";
 import { curatedSequence, type CurationRecord } from "@/lib/sprite/anchor";
+import type { Anatomy } from "@/lib/sprite/anatomy";
+import {
+  anatomyReport,
+  fitBreathePattern,
+  phaseFrame,
+  resolveAnatomy,
+  type AnatomyReport,
+  type BreatheConfig,
+} from "@/lib/sprite/breathe";
+import { stateBreathe } from "@/lib/sprite/curation-breathe";
 import type { RawImage } from "@/lib/sprite/extract";
 import type { CellSpec, SpriteRequest } from "@/lib/sprite/request";
 
@@ -42,6 +52,8 @@ export type AnimationRow = {
   fps: number;
   durations_ms: number[];
   loop: boolean;
+  /** 호흡이 켜진 행에만 있다 — 굽기가 실제로 쓴 해부. 호흡이 꺼졌으면 키가 없다. */
+  breathe?: AnatomyReport | null;
 };
 
 export type Animation = {
@@ -82,7 +94,8 @@ export type ComposeResult = {
 /** 프레임이 이보다 적은 픽셀만 쓰면 빈 프레임으로 본다 (원본 --min-used-pixels 기본). */
 export const DEFAULT_MIN_USED_PIXELS = 64;
 
-function alphaNonzeroCount(img: RawImage): number {
+// 호흡을 구운 프레임은 Uint8Array 를 들고 오므로 Buffer 로 좁히지 않는다.
+function alphaNonzeroCount(img: { data: Uint8Array; width: number; height: number }): number {
   let n = 0;
   for (let i = 0; i < img.width * img.height; i++) if (img.data[i * 4 + 3] !== 0) n++;
   return n;
@@ -113,11 +126,21 @@ export function composeAtlas(opts: {
   // 재생 순서 해석 — 이 배열이 굽는 인스턴스 순서다(정본 curation.state_plan).
   // 범위를 벗어난 인덱스는 curatedSequence 가 던진다(재추출로 인덱스 공간이 바뀐 큐레이션).
   const playOrder: Record<string, number[]> = {};
+  // 호흡 위상 — 재생 시퀀스 길이에 딱 맞춰 breaths 회가 떨어진다(루프 불변).
+  // 호흡이 꺼진 행은 전부 0 이다. 설정이 잘못되면 stateBreathe 가 여기서 던진다 —
+  // 조용히 끄지 않는 게 이 레이어의 계약이다.
+  const breatheByState: Record<string, BreatheConfig | null> = {};
+  const phases: Record<string, number[]> = {};
   let curationApplied = false;
   for (const state of states) {
     const curation = opts.curationByState?.[state] ?? null;
     playOrder[state] = curatedSequence(framesByState[state].length, curation);
     if (curation && curation.selected.length > 0) curationApplied = true;
+    const cfg = stateBreathe(curation, state);
+    breatheByState[state] = cfg;
+    phases[state] = cfg
+      ? fitBreathePattern(playOrder[state].length, cfg)
+      : new Array(playOrder[state].length).fill(0);
   }
 
   const columns = Math.max(1, ...states.map(s => playOrder[s].length));
@@ -143,15 +166,29 @@ export function composeAtlas(opts: {
     const frames = framesByState[state];
     const entry = request.states[state];
     const rects: FrameRect[] = [];
+    const breatheCfg = breatheByState[state];
+    // 해부는 **캐릭터 속성이라 줄 전체가 한 벌을 쓴다.** 프레임마다 다시 재면 경계가
+    // 흔들려 강체 구간이 프레임 간 같은 구간이 아니게 된다.
+    let rowAnatomy: Anatomy | undefined;
+    const rowSourceFrames: RawImage[] = []; // 호흡 적용 **직전** 프레임 (관측용)
 
     // 재생 순서대로 굽는다 — col 은 아틀라스 칸이고 srcIndex 는 추출 프레임이다.
     playOrder[state].forEach((srcIndex, col) => {
-      const frame = frames[srcIndex];
-      if (frame.width !== cell.width || frame.height !== cell.height) {
+      const source = frames[srcIndex];
+      if (source.width !== cell.width || source.height !== cell.height) {
         errors.push(
-          `${state} frame ${srcIndex} is ${frame.width}x${frame.height}; expected ${cell.width}x${cell.height}`,
+          `${state} frame ${srcIndex} is ${source.width}x${source.height}; expected ${cell.width}x${cell.height}`,
         );
         return;
+      }
+      let frame: { data: Uint8Array; width: number; height: number } = source;
+      if (breatheCfg) {
+        rowSourceFrames.push(source);
+        rowAnatomy ??= resolveAnatomy(source, breatheCfg);
+        // **위상 0 도 굽는다.** 진행파 지연(lag) 때문에 t=0 에서도 윗행은
+        // wave(-lag·u) 만큼 변형된다. 건너뛰면 그 칸만 원본이 되어 아틀라스가 매 루프
+        // 시작에서 튀고 GIF 굽기와 그림이 갈린다.
+        frame = phaseFrame(source, breatheCfg, phases[state][col], rowAnatomy);
       }
       const used = alphaNonzeroCount(frame);
       if (used < minUsed) {
@@ -162,7 +199,7 @@ export function composeAtlas(opts: {
       for (let y = 0; y < cell.height; y++) {
         const src = y * cell.width * 4;
         const dst = ((top + y) * sheetWidth + left) * 4;
-        frame.data.copy(atlasData, dst, src, src + cell.width * 4);
+        atlasData.set(frame.data.subarray(src, src + cell.width * 4), dst);
       }
       rects.push({ x: left, y: top, w: cell.width, h: cell.height });
     });
@@ -176,6 +213,10 @@ export function composeAtlas(opts: {
       fps,
       durations_ms: new Array(rects.length).fill(durationMs),
       loop: entry?.loop ?? true,
+      // 굽기가 실제로 쓴 해부를 남긴다 — 사이드카 캐시와 다른 값을 구웠는지 보이게.
+      ...(breatheCfg
+        ? { breathe: rowSourceFrames.length > 0 ? anatomyReport(rowSourceFrames, breatheCfg) : null }
+        : {}),
     };
   });
 

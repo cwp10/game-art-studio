@@ -36,6 +36,14 @@ export type CurationRecord = {
   selected: number[];
   /** 표시 전용. 해석은 무시한다. */
   order?: number[];
+  /**
+   * 호흡 후처리 레이어 (정본 `states.<state>.breathe`). 프레임 선택과 **직교**한다 —
+   * 합성이 재생 시퀀스 위에 결정론으로 굽고 디스크 프레임은 불변이다.
+   *
+   * 검증 전 원시값이다. 읽는 쪽은 반드시 `stateBreathe` 를 통과시켜야 한다 —
+   * 그 함수가 범위·정수성·폐기 키를 **조용히 고치지 않고** 거부한다.
+   */
+  breathe?: unknown;
 };
 
 /**

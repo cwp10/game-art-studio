@@ -29,7 +29,10 @@ export const runtime = "nodejs";
 
 type Body = {
   atlasGenerationId?: string;
-  curationByState?: Record<string, { selected?: number[]; order?: number[] }>;
+  curationByState?: Record<
+    string,
+    { selected?: number[]; order?: number[]; breathe?: unknown }
+  >;
 };
 
 export async function POST(req: NextRequest) {
@@ -48,13 +51,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const saved: Record<string, { selected: number[]; order?: number[] }> = {};
+  const saved: Record<string, { selected: number[]; order?: number[]; breathe?: unknown }> = {};
   for (const [state, curation] of Object.entries(body.curationByState ?? {})) {
     const rowId = rowIds[state];
     if (!rowId) continue;
     const selected = Array.isArray(curation.selected) ? curation.selected : [];
     const order = Array.isArray(curation.order) ? curation.order : undefined;
-    saveCuration(rowId, { selected, ...(order ? { order } : {}) });
+    // 호흡 설정은 검증하지 않고 그대로 싣는다 — 판정은 굽는 쪽(`stateBreathe`)이
+    // 한 곳에서만 한다. 여기서 한 번 더 깎으면 진실이 둘이 된다.
+    saveCuration(rowId, {
+      selected,
+      ...(order ? { order } : {}),
+      ...(curation.breathe !== undefined ? { breathe: curation.breathe } : {}),
+    });
     saved[state] = getCuration(rowId) ?? { selected };
   }
 
@@ -83,7 +92,10 @@ export async function GET(req: NextRequest) {
   const atlas = getGeneration(atlasId);
   if (!atlas) return Response.json({ error: `generation ${atlasId} 없음` }, { status: 404 });
   const rowIds = (atlas.params?.rowGenerationIds as Record<string, string> | undefined) ?? {};
-  const out: Record<string, { selected: number[]; order?: number[] } | null> = {};
+  const out: Record<
+    string,
+    { selected: number[]; order?: number[]; breathe?: unknown } | null
+  > = {};
   for (const [state, rowId] of Object.entries(rowIds)) out[state] = getCuration(rowId);
   return Response.json({ ok: true, curation: out });
 }
