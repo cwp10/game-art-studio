@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { analyze } from "../src/lib/sprite/anatomy";
 import {
   breatheCycle,
+  envelope as envelopeFn,
   warp,
   wave as waveFn,
   smoothstep as smoothstepFn,
@@ -96,6 +97,75 @@ except SystemExit as e:
     check(`${src.split("/").slice(-2).join("/")} t=${t}`, diff === 0, `${diff}B 차이 / ${ref.length}`);
   }
 }
+console.log("\n=== 강체 구간은 비트 동일 (불변식 1) ===");
+{
+  // 정본이 핵심 계약으로 못박은 것: env=0 인 행은 g=0 이라 가로 사상이 원본 좌표
+  // 그대로이고 sy=1 이라 행 복제/삭제가 없다. 눈·입이 몇 도트뿐인 픽셀아트에서
+  // 3% 세로 신장도 표정을 뭉개므로 근사가 아니라 **동일**이어야 한다.
+  //
+  // 비교는 **콘텐츠 상단 기준**이다. 머리는 강체여도 아래 몸통이 늘면 통째로
+  // 위아래로 이동한다 — 그게 호흡이다. 캔버스 절대 좌표로 재면 당연히 다르다.
+  const { data, info } = await sharp(srcs[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const base = { data: new Uint8Array(data), width: info.width, height: info.height };
+  const anat = analyze(base);
+  const cyc = breatheCycle(base, { frames: 6, breaths: 1 });
+
+  const topOf = (f: { data: Uint8Array; width: number; height: number }): number => {
+    for (let y = 0; y < f.height; y++)
+      for (let x = 0; x < f.width; x++)
+        if (f.data[(y * f.width + x) * 4 + 3] >= 128) return y;
+    return -1;
+  };
+  const tops = cyc.map(topOf);
+  check("모든 위상에 콘텐츠가 있다", tops.every(t => t >= 0), JSON.stringify(tops));
+
+  // 강체 = **env(u) === 0 인 행**이다. rigid_row 바로 위는 테이퍼 구간이라 부분
+  // 변형되므로 rigid_row 를 그대로 경계로 쓰면 안 된다 — 봉투에 직접 묻는다.
+  const { env } = envelopeFn(anat);
+  const rigidRows: number[] = [];
+  for (let j = 0; j < anat.height; j++) {
+    if (env(1.0 - j / Math.max(1, anat.height - 1)) === 0) rigidRows.push(j);
+    else break; // 정수리부터 연속인 구간만
+  }
+  let diff = 0;
+  let compared = 0;
+  for (let i = 1; i < cyc.length; i++) {
+    for (const j of rigidRows) {
+      const y0 = tops[0] + j;
+      const yi = tops[i] + j;
+      if (y0 >= base.height || yi >= base.height) continue;
+      for (let x = 0; x < base.width; x++) {
+        const o0 = (y0 * base.width + x) * 4;
+        const oi = (yi * base.width + x) * 4;
+        for (let c = 0; c < 4; c++) {
+          compared++;
+          if (cyc[0].data[o0 + c] !== cyc[i].data[oi + c]) diff++;
+        }
+      }
+    }
+  }
+  check(
+    `강체 구간(정수리부터 ${rigidRows.length}행, rigid_row=${anat.rigid_row})이 위상 간 비트 동일`,
+    diff === 0,
+    `${diff}B 차이 / ${compared}B 비교`,
+  );
+  check("비교가 실제로 이뤄졌다", compared > 0, `${compared}B`);
+
+  // 반대 방향 확인 — 변형 구간은 실제로 달라져야 한다(검사가 무의미하지 않다는 증거).
+  let bodyDiff = 0;
+  for (let j = rigidRows.length; j < anat.height; j++) {
+    const y0 = tops[0] + j;
+    const y3 = tops[3] + j;
+    if (y0 >= base.height || y3 >= base.height) continue;
+    for (let x = 0; x < base.width; x++) {
+      const o0 = (y0 * base.width + x) * 4;
+      const o3 = (y3 * base.width + x) * 4;
+      for (let c = 0; c < 4; c++) if (cyc[0].data[o0 + c] !== cyc[3].data[o3 + c]) bodyDiff++;
+    }
+  }
+  check("변형 구간은 위상마다 달라진다", bodyDiff > 0, `${bodyDiff}B`);
+}
+
 console.log("\n=== 루프 길이 불변 (불변식 5) ===");
 {
   const { data, info } = await sharp(srcs[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
