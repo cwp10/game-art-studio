@@ -15,14 +15,33 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyze } from "../src/lib/sprite/anatomy";
 import {
-  breatheCycle,
+  bakeBreatheSequence,
+  fitBreathePattern,
+  fittedBreathCount,
+  recommendedBreatheFrames,
+  breatheReadsSmoothly,
+  phaseFrame,
   envelope as envelopeFn,
   warp,
   wave as waveFn,
   smoothstep as smoothstepFn,
   DEFAULT_DEPTH,
   DEFAULT_LAG,
+  type BreatheConfig,
 } from "../src/lib/sprite/breathe";
+
+/** 정본 `state_breathe` 가 낸 것과 같은 모양의 기본 설정. */
+const cfg = (over: Partial<BreatheConfig> = {}): BreatheConfig => ({
+  depth: DEFAULT_DEPTH,
+  depth_x: null,
+  breaths: 1,
+  lag: DEFAULT_LAG,
+  rigid_row: null,
+  axis_x: null,
+  torso_half: null,
+  anatomy: null,
+  ...over,
+});
 
 const PY = "/Users/wonpyoung/Developer/workspace/sprite-gen/.venv/bin/python";
 const dir = mkdtempSync(join(tmpdir(), "breathe-"));
@@ -108,7 +127,8 @@ console.log("\n=== 강체 구간은 비트 동일 (불변식 1) ===");
   const { data, info } = await sharp(srcs[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const base = { data: new Uint8Array(data), width: info.width, height: info.height };
   const anat = analyze(base);
-  const cyc = breatheCycle(base, { frames: 6, breaths: 1 });
+  // 정지 1컷 + 링크 복제 레시피 — 같은 프레임 6장에 호흡을 굽는다.
+  const cyc = bakeBreatheSequence(Array.from({ length: 6 }, () => base), cfg()).frames;
 
   const topOf = (f: { data: Uint8Array; width: number; height: number }): number => {
     for (let y = 0; y < f.height; y++)
@@ -171,13 +191,95 @@ console.log("\n=== 루프 길이 불변 (불변식 5) ===");
   const { data, info } = await sharp(srcs[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const f = { data: new Uint8Array(data), width: info.width, height: info.height };
   for (const n of [4, 6, 8]) {
-    check(`${n}프레임 요청 → ${n}프레임 출력`, breatheCycle(f, { frames: n }).length === n);
+    const seq = Array.from({ length: n }, () => f);
+    check(`${n}프레임 입력 → ${n}프레임 출력`, bakeBreatheSequence(seq, cfg()).frames.length === n);
   }
-  const cyc = breatheCycle(f, { frames: 6 });
+  const cyc = bakeBreatheSequence(Array.from({ length: 6 }, () => f), cfg()).frames;
   check(
     "캔버스 크기가 변하지 않는다",
     cyc.every(c => c.width === info.width && c.height === info.height),
   );
+}
+
+console.log("\n=== 정본 대조: 위상 시퀀스 (fit_breathe_pattern) ===");
+{
+  const combos: Array<[number, number]> = [
+    [6, 1], [6, 2], [6, 3], [18, 3], [12, 5], [8, 3], [4, 2], [1, 1], [0, 1], [7, 8],
+  ];
+  const refs = JSON.parse(
+    execFileSync(PY, ["-c", `
+import sys, json
+sys.path.insert(0, "/Users/wonpyoung/Developer/workspace/sprite-gen")
+from sprite_gen.breathe import fit_breathe_pattern, fitted_breath_count, recommended_breathe_frames, breathe_reads_smoothly
+combos = ${JSON.stringify(combos)}
+print(json.dumps([{
+    "pattern": fit_breathe_pattern(n, {"breaths": b}),
+    "count": fitted_breath_count(n, {"breaths": b}),
+    "recommended": recommended_breathe_frames({"breaths": b}),
+    "smooth": breathe_reads_smoothly(n, {"breaths": b}),
+} for n, b in combos]))
+`], { encoding: "utf8" }),
+  ) as Array<{ pattern: number[]; count: number; recommended: number; smooth: boolean }>;
+
+  combos.forEach(([n, b], i) => {
+    const c = cfg({ breaths: b });
+    const ours = fitBreathePattern(n, c);
+    const ref = refs[i];
+    // 비트 동일이어야 한다 — 근사가 아니다. 아틀라스 칸 재사용이 이 동일성 위에 선다.
+    const same = ours.length === ref.pattern.length && ours.every((v, k) => v === ref.pattern[k]);
+    check(`seq=${n} breaths=${b} 위상 배열 비트 동일`, same, `${JSON.stringify(ours)} vs ${JSON.stringify(ref.pattern)}`);
+    check(`seq=${n} breaths=${b} 부수 관측 3종 일치`,
+      fittedBreathCount(n, c) === ref.count &&
+      recommendedBreatheFrames(c) === ref.recommended &&
+      breatheReadsSmoothly(n, c) === ref.smooth);
+  });
+
+  // 정본이 주석에 남긴 실측: 나머지를 나중에 취하면 유니크 6 → 14 로 늘어난다.
+  const uniq = new Set(fitBreathePattern(18, cfg({ breaths: 3 }))).size;
+  check("18슬롯 3호흡 유니크 위상 = 6 (칸 재사용이 성립한다)", uniq === 6, String(uniq));
+  const naive = new Set(Array.from({ length: 18 }, (_, i) => ((i * 3) / 18) % 1.0)).size;
+  check("나머지를 나중에 취하면 깨진다 (대조군)", naive > 6, String(naive));
+}
+
+console.log("\n=== 정본 대조: 시퀀스 굽기 (bake_breathe_sequence) ===");
+for (const src of srcs.slice(0, 2)) {
+  const { data, info } = await sharp(src).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const f = { data: new Uint8Array(data), width: info.width, height: info.height };
+  for (const [n, b] of [[6, 1], [6, 2], [4, 1]] as Array<[number, number]>) {
+    const ours = bakeBreatheSequence(Array.from({ length: n }, () => f), cfg({ breaths: b }));
+    const outBin = join(dir, `bake-${n}-${b}.bin`);
+    const refPhases = JSON.parse(execFileSync(PY, ["-c", `
+import sys, json, numpy as np
+sys.path.insert(0, "/Users/wonpyoung/Developer/workspace/sprite-gen")
+from PIL import Image
+from sprite_gen.breathe import bake_breathe_sequence
+im = Image.open(${JSON.stringify(join(process.cwd(), src))}).convert("RGBA")
+frames, phases = bake_breathe_sequence([im] * ${n}, {"breaths": ${b}})
+np.concatenate([np.array(x).ravel() for x in frames]).tofile(${JSON.stringify(outBin)})
+print(json.dumps(phases))
+`], { encoding: "utf8" })) as number[];
+    const ref = new Uint8Array(readFileSync(outBin));
+    const mine = new Uint8Array(ours.frames.length * f.data.length);
+    ours.frames.forEach((fr, i) => mine.set(fr.data, i * f.data.length));
+    const bytesSame = ref.length === mine.length && ref.every((v, i) => v === mine[i]);
+    check(`${src.split("/").pop()} seq=${n} breaths=${b} 굽기 픽셀 동일`, bytesSame,
+      `${mine.length}B vs ${ref.length}B`);
+    check(`${src.split("/").pop()} seq=${n} breaths=${b} 위상 동일`,
+      ours.phases.length === refPhases.length && ours.phases.every((v, i) => v === refPhases[i]));
+  }
+}
+
+console.log("\n=== 위상별 strain 검사는 축마다 따로다 ===");
+{
+  const { data, info } = await sharp(srcs[0]).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const f = { data: new Uint8Array(data), width: info.width, height: info.height };
+  // depth 는 통과하지만 depth_x 가 상한을 넘으면 depth_x 이름으로 멈춰야 한다.
+  let msg = "";
+  try { phaseFrame(f, cfg({ depth_x: 5.0 }), 0.25); } catch (e) { msg = (e as Error).message; }
+  check("depth_x 초과는 depth_x 이름으로 거부", msg.includes("depth_x") && msg.includes("조용히 깎지 않는다"), msg);
+  let ok = true;
+  try { phaseFrame(f, cfg({ depth_x: 0 }), 0.25); } catch { ok = false; }
+  check("depth_x = 0 은 유효하다 (가로만 끄기)", ok);
 }
 
 console.log(`\n${pass} passed / ${fail} failed`);

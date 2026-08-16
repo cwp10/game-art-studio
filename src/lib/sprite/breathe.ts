@@ -52,6 +52,25 @@ export const SMOOTH_CYCLE_FRAMES = 6;
 
 export class BreatheFailed extends Error {}
 
+/**
+ * 정규화된 호흡 설정 — 큐레이션 사이드카에서 읽어 검증을 마친 형태.
+ *
+ * 정본 `curation.state_breathe` 의 반환 계약 그대로다. `depth_x` 는 가로 독립
+ * 진폭이고 `null` 이면 depth 를 따른다(레거시), `0` 은 가로 항등이라 유효한 값이다.
+ * `rigid_row`/`axis_x`/`torso_half` 는 **사람의 의도(입력)** 이고 `anatomy` 는
+ * 거기서 파생된 **캐시**다 — 굽기는 캐시를 쓰지 않고 매번 다시 잰다.
+ */
+export type BreatheConfig = {
+  depth: number;
+  depth_x: number | null;
+  breaths: number;
+  lag: number;
+  rigid_row: number | null;
+  axis_x: number | null;
+  torso_half: number | null;
+  anatomy: Partial<Anatomy> | null;
+};
+
 /** 한 호흡의 기본 파형. 2차 하모닉을 살짝 섞어 정점이 뾰족해진다(들숨의 어택). */
 export function wave(t: number): number {
   return 0.86 * Math.sin(2 * Math.PI * t) + 0.14 * Math.sin(4 * Math.PI * t);
@@ -438,38 +457,161 @@ export function warp(
   return out;
 }
 
+// ── 해부 확정 / 자가 복구 ────────────────────────────────────────────
+
 /**
- * 한 프레임에서 호흡 사이클을 굽는다.
+ * **줄 전체가 공유하는 한 벌**을 기준 프레임에서 확정한다.
  *
- * 위상은 `breaths / frames` 간격으로 균등하다 — 출력 프레임 수가 입력과 같고
- * 호흡이 그 안에서 `breaths` 회 딱 떨어진다(불변식 5).
+ * 해부는 **캐릭터의 속성이지 프레임의 속성이 아니다.** 깜빡임 프레임이라고 목이
+ * 옮겨가지 않는다. 프레임마다 다시 재면 검출 지터로 `rigid_row` 가 흔들리고(정본
+ * 실측 2↔3), 그러면 "강체 구간" 이 프레임 간 **같은 구간이 아니게 된다** — 이
+ * 모듈의 핵심 계약이 프레임별 재검출 때문에 깨진다.
+ *
+ * **굽기는 얼린 해부를 쓰지 않는다 — 매번 자기 기준 프레임에서 다시 잰다.** 굽기는
+ * 진짜 프레임을 손에 들고 있으니 재는 게 언제나 옳고, `cfg.anatomy` 는 미리보기가
+ * 들고 있는 **캐시**일 뿐이다. `rigid_row` 는 사람의 의도(입력)이고 `anatomy` 는
+ * 거기서 파생된 캐시라, 얼린 값을 그대로 쓰면 사람이 고친 숫자가 조용히 버려진다.
  */
-export function breatheCycle(
-  frame: Frame,
-  opts: {
-    frames: number;
-    breaths?: number;
-    depth?: number;
-    depthX?: number;
-    lag?: number;
-    anat?: Anatomy;
-  },
-): Frame[] {
-  const frames = opts.frames;
-  if (frames < 1) throw new BreatheFailed("breathe: 프레임 수는 1 이상이어야 한다");
-  const breaths = opts.breaths ?? 1;
-  const depth = opts.depth ?? DEFAULT_DEPTH;
-  const lag = opts.lag ?? DEFAULT_LAG;
-  const anat = opts.anat ?? analyze(frame);
-  const strain = rowStrain(anat, depth);
-  if (strain > MAX_ROW_STRAIN) {
-    throw new BreatheFailed(
-      `breathe: 행당 변형 ${strain.toFixed(3)} 이 상한 ${MAX_ROW_STRAIN} 을 넘는다 — depth 를 낮춰라`,
-    );
+export function resolveAnatomy(reference: Frame, cfg: BreatheConfig): Anatomy {
+  return analyze(reference, {
+    rigidRow: cfg.rigid_row ?? undefined,
+    axisX: cfg.axis_x ?? undefined,
+    torsoHalf: cfg.torso_half ?? undefined,
+  });
+}
+
+export type AnatomyReport = {
+  anatomy: Anatomy | null;
+  matches_sidecar: boolean;
+  sidecar_drift: Record<string, [unknown, unknown]> | null;
+  warnings: string[];
+};
+
+/**
+ * 굽기가 실제로 쓴 해부를 매니페스트에 실을 형태로 — 자가 복구를 관측 가능하게.
+ *
+ * 줄 전체가 **한 벌**을 쓰므로 보고도 한 벌이다. 지문 비교가 아니라 값 비교인 게
+ * 핵심이다 — 여기서 궁금한 건 "캐시 숫자와 다른 그림을 구웠나" 다.
+ */
+export function anatomyReport(images: Frame[], cfg: BreatheConfig): AnatomyReport {
+  if (images.length === 0) {
+    return { anatomy: null, matches_sidecar: true, sidecar_drift: null, warnings: [] };
   }
-  const out: Frame[] = [];
-  for (let i = 0; i < frames; i++) {
-    out.push(warp(frame, anat, depth, lag, (breaths * i) / frames, opts.depthX));
+  const anat = resolveAnatomy(images[0], cfg);
+  const frozen = cfg.anatomy;
+  let stale: Record<string, [unknown, unknown]> | null = null;
+  if (frozen) {
+    const drift: Record<string, [unknown, unknown]> = {};
+    for (const [k, v] of Object.entries(anat) as Array<[string, unknown]>) {
+      if (!(k in frozen)) continue;
+      const before = (frozen as Record<string, unknown>)[k];
+      if (JSON.stringify(before) !== JSON.stringify(v)) drift[k] = [before, v];
+    }
+    if (Object.keys(drift).length > 0) stale = drift;
   }
+  return {
+    anatomy: anat,
+    matches_sidecar: stale === null,
+    sidecar_drift: stale,
+    warnings: [...anat.warnings].sort(),
+  };
+}
+
+// ── 재생 시퀀스 계약 (합성/GIF 진입점) ───────────────────────────────
+
+/**
+ * 시퀀스 길이에 딱 맞는 호흡 위상 시퀀스 (길이 == seqLen, 루프 불변).
+ *
+ * 위상은 [0, 1) 의 연속 값이다. breaths 회가 시퀀스 안에서 정확히 반복되므로 루프
+ * 이음매가 없고, 등분 보정도 필요 없다.
+ *
+ * **정수 나머지를 먼저 취한다.** `(i*breaths/seqLen) % 1.0` 로 쓰면 수학적으로 같은
+ * 위상이 서로 다른 double 이 되어(18슬롯 3호흡: 유니크 6 → 14) 아틀라스 칸 재사용이
+ * 표현 노이즈로 깨진다. 분자를 정수로 접고 한 번만 나누면 반복 위상이 비트 동일하다
+ * (정본 검증 2026-07-25: 시트 1344x192 → 576x192).
+ */
+export function fitBreathePattern(seqLen: number, cfg: BreatheConfig): number[] {
+  if (seqLen <= 0) return [];
+  const breaths = Math.max(1, Math.trunc(cfg.breaths ?? 1));
+  const out: number[] = [];
+  for (let i = 0; i < seqLen; i++) out.push(((i * breaths) % seqLen) / seqLen);
   return out;
+}
+
+/** 실제 적용되는 호흡 횟수 — 연속 위상이라 요청값이 그대로 성립한다. */
+export function fittedBreathCount(seqLen: number, cfg: BreatheConfig): number {
+  if (seqLen <= 0) return 0;
+  return Math.max(1, Math.trunc(cfg.breaths ?? 1));
+}
+
+/**
+ * 호흡이 부드럽게 읽히려면 필요한 최소 재생-시퀀스 길이.
+ *
+ * 정지 1컷 + 링크 복제로 프레임을 찍어내는 레시피는 이 값으로 복제 수를 정한다.
+ * 유저가 이미 가진 프레임 수를 줄이거나 호흡 횟수를 바꾸지 않는다 — 오직 프레임을
+ * 새로 만들 때의 목표다.
+ */
+export function recommendedBreatheFrames(
+  cfg: BreatheConfig,
+  perCycle: number = SMOOTH_CYCLE_FRAMES,
+): number {
+  return Math.max(1, Math.trunc(cfg.breaths ?? 1)) * Math.max(2, perCycle);
+}
+
+/** 요청한 호흡 횟수가 이 시퀀스 길이에서 부드럽게 렌더되는가 (관측용). */
+export function breatheReadsSmoothly(
+  seqLen: number,
+  cfg: BreatheConfig,
+  perCycle: number = SMOOTH_CYCLE_FRAMES,
+): boolean {
+  if (seqLen <= 0) return false;
+  return Math.floor(seqLen / Math.max(1, Math.trunc(cfg.breaths ?? 1))) >= Math.max(2, perCycle);
+}
+
+/**
+ * 프레임에 호흡 위상 하나(0 <= phase < 1)를 적용.
+ *
+ * `anat` 를 주면 그것을 쓴다 — 줄 전체가 한 벌을 공유해야 하므로 호출자가 한 번
+ * 확정해 넘기는 게 정석이다. 생략하면 이 프레임을 기준으로 확정한다 (단발 호출용).
+ */
+export function phaseFrame(
+  frame: Frame,
+  cfg: BreatheConfig,
+  phase: number,
+  anat?: Anatomy,
+): Frame {
+  const resolved = anat ?? resolveAnatomy(frame, cfg);
+  const depth = cfg.depth ?? DEFAULT_DEPTH;
+  const depthX = cfg.depth_x ?? null;
+  for (const [axis, d] of [
+    ["depth", depth],
+    ["depth_x", depthX],
+  ] as Array<[string, number | null]>) {
+    if (d === null) continue;
+    const strain = rowStrain(resolved, d);
+    if (strain > MAX_ROW_STRAIN) {
+      throw new BreatheFailed(
+        `breathe: 행당 변형(${axis}) ${strain.toFixed(3)} > 상한 ${MAX_ROW_STRAIN} — 변형 구간이 너무 ` +
+          `좁다 (강체 경계 ${resolved.rigid_row}/${resolved.height}, 정규화 기준 ${resolved.basis_row}). ` +
+          `${axis} 를 낮추거나 rigid_row 를 올려라. 조용히 깎지 않는다.`,
+      );
+    }
+  }
+  return warp(frame, resolved, depth, cfg.lag ?? DEFAULT_LAG, phase, depthX ?? undefined);
+}
+
+/**
+ * 재생 시퀀스에 호흡 레이어를 굽는다 → (프레임들, 적용 위상들).
+ *
+ * 출력 길이 = 입력 길이 (루프 불변 — 루프는 기존 프레임 그대로, 호흡이 그 안에서
+ * breaths 회 딱 떨어진다).
+ */
+export function bakeBreatheSequence(
+  images: Frame[],
+  cfg: BreatheConfig,
+): { frames: Frame[]; phases: number[] } {
+  if (images.length === 0) return { frames: images, phases: [] };
+  const phases = fitBreathePattern(images.length, cfg);
+  const anat = resolveAnatomy(images[0], cfg); // 줄 전체가 한 벌을 공유한다
+  return { frames: images.map((im, i) => phaseFrame(im, cfg, phases[i], anat)), phases };
 }
