@@ -510,10 +510,11 @@ export type SpriteRequest = {
 약한 walk/run 행을 simple MVP 산출물과 **같은 등급으로 조용히 승격하지 않는다.**
 `classifyState`·`frameCountAdvice`(`request.ts`)가 이 판정을 수단으로 제공한다.
 
-**우리 패널 기본값이 이 대역과 어긋난다** — `SpriteGenPanel.tsx` 의 `frames` 초기값은
-8(정본 4), `seamlessLoop` 초기값은 true(정본은 idle 만), 동작 힌트는 걷기·달리기 8f
-loop(정본 experimental) · 공격 6f(정본 4) · 점프 6f(정본 4) · 시전 8f 다. **②에서
-고치지 않는다** — 실제 생성 결과 없이 바꿀 근거가 없으므로 §3.3 UI 체크포인트로 넘긴다.
+~~**우리 패널 기본값이 이 대역과 어긋난다**~~ — **④c 에서 정합했다(2026-08-16).**
+`frames` 8→4, `seamlessLoop` true→false, 공격 6→4, 점프 6→4, 시전 8→6. 걷기·달리기는
+8 을 유지한다(정본이 8 을 "로코모션 행" 대역으로 허용). 힌트 표는 `state-name.ts` 가
+소유하고 패널이 읽는다 — 숫자를 양쪽에 두면 패널과 생성이 갈린다. 정본이 값을 준 상태
+(`DEFAULT_STATES` 의 idle/attack/jump/wave)는 표에 숫자를 다시 쓰지 않고 거기서 읽는다.
 
 **`normalizeStates` 의 `loop` 폴백은 원본 그대로 `true` 다**(`prepare.py:509`).
 `DEFAULT_STATES` 의 `attack`/`jump`/`wave`(`loop: false`)와 어긋나 보이지만, **loop 은
@@ -713,10 +714,22 @@ Python 기준 출력 생성은 sprite-gen 의 `.venv` 를 그대로 쓴다(구�
 
 **실패 시 행을 재생성한다.** 국소 수정(그리기·리타이밍) 금지.
 
-우리 대응: `SpriteCanvas` 의 애니메이션 재생·어니언스킨이 contact sheet/GIF 역할을 일부 하고,
-`scripts/measure-gait-diff.mjs`(인접 프레임 하단 1/3 실루엣 diff)가 "제자리 흔들림"의 정량
-탐지에 해당한다. 판정 기준을 `visual-integration-qa` 스킬에 추가해야 한다 — 현재 그 스킬에는
-모션 판정 항목이 없다.
+우리 대응: **④c 에서 `preview.py`·`gif_utils.py` 를 이식했다(2026-08-16).**
+`src/lib/sprite/preview.ts` 가 상태별 `qa/<state>-contact.png`(체커 배경)·`qa/<state>.gif`·
+`qa/all-contact.png` 를 만들고, 플랜 구동 핸들러가 아틀라스 합성 통과 후 이를 굽는다.
+경로는 아틀라스 generation 의 `params.motionQa` 에 남는다.
+
+GIF 는 Node 에 애니메이션 인코더가 없어(sharp 는 디코드된 버퍼에서 애니메이션 GIF 를 쓰지
+못한다) 양자화·LZW·GIF89a 를 직접 썼다(`src/lib/sprite/gif.ts`). 알고리즘은 Pillow 경로를
+따른다 — `convert("P", ADAPTIVE, 255)` 는 내부에서 `im.quantize()` 로 빠지므로 **디더링 없는
+median cut** 이다(Image.py:1185). 정본 불변식(전용 투명 인덱스·disposal 2·loop 0)은 세 겹으로
+검증했다: 바이트 구조 파싱, sharp(libvips) 디코드 왕복(이전 프레임이 비치지 않음을 실증),
+원본 Pillow `gif_report()` 대조.
+
+`SpriteCanvas` 의 애니메이션 재생·어니언스킨과 `scripts/measure-gait-diff.mjs`(인접 프레임
+하단 1/3 실루엣 diff)도 그대로 남는다. 판정 기준을 `visual-integration-qa` 스킬에 추가해야
+한다 — 현재 그 스킬에는 모션 판정 항목이 없다. **아직 남은 것: 산출된 contact sheet/GIF 를
+UI 에 노출하는 경로**(지금은 `data/sprite-runs/<run>/qa/` 에만 있다).
 
 **기대치 조정**: 우리는 걷기·달리기에 가장 공을 들였고 포즈 가이드도 거기에만 붙어 있다.
 원본은 그 상태들을 실험적으로 분류한다. 이식 후에도 walk/run 이 안정적으로 통과하리라 기대해서는
@@ -874,8 +887,47 @@ hasAlpha: false` 라 `ensureAlpha()` 가 전 픽셀을 255 로 채우고, 1254×
 | | 범위 | 상태 |
 |---|---|---|
 | ④a | 플랜 실행기 + 앵커 베이크 배선 + CLI + 구/신 비교 | **완료** |
-| ④b | `spritesheet-handler` 배선, `SpriteCanvas` 큐레이션 영속, 앵커 핀 UI | 미착수 |
-| ④c | 상태 앵커 게이트, 좌우 쌍 순서, 모션 contact sheet | 미착수 |
+| ④b | `spritesheet-handler` 배선, `SpriteCanvas` 큐레이션 영속, 앵커 핀 UI | **완료** |
+| ④c | 상태 앵커 게이트, 좌우 쌍 순서, 모션 contact sheet | **부분** — 아래 |
+
+#### ④c 정본 대조 — 셋 중 코드가 있는 것은 하나뿐이다 (2026-08-16)
+
+| 항목 | 정본에 코드가 있나 | 우리 상태 |
+|---|---|---|
+| 모션 contact sheet · GIF | **있다** (`preview.py`·`gif_utils.py`) | **완료** — `preview.ts`·`gif.ts` |
+| 상태 앵커 게이트 | 프롬프트 계약만 (`row_prompt` 의 reference_contract·anchor lock) | 계약은 이식됨. 상태 앵커 **생성** 단계는 정본에도 없다 |
+| 좌우 쌍 순서 | 없다 — `build_generation_plan()` 은 stage 1·2 뿐 | 프롬프트 계약만 이식됨. 순서 자체는 미도달 |
+
+`build_generation_plan()` 을 다시 읽어 확인했다. 우리가 이식한 것이 전부이고 상태 앵커와
+좌우 쌍은 정본에서도 **사람이 지키는 문서 게이트**다(`directional-anchor-workflow.md`
+체크리스트 3·6). 코드로 강제하는 것은 이식이 아니라 발명이므로 하지 않았다.
+
+**남긴 것 1 — 모션 페이즈 가이드**(`RUN_PHASE_CYCLE`·`draw_motion_phase`). 정본에 코드가
+있으나 (a) `--motion-phase-guides` 옵트인이고 정본이 "명시적 로코모션 실험에만" 이라 못박으며,
+(b) `frames != 8` 이면 빈 배열이라 패널 기본값 4 에서는 발화하지 않고, (c) PIL 의 두꺼운
+선·타원 래스터화를 픽셀 동일로 재현해야 한다(레이아웃 가이드의 통과 기준이 픽셀 동일이라
+낮출 수 없다). 비용 대비 도달률이 가장 낮아 뒤로 미뤘다.
+
+**남긴 것 2 — 좌우 쌍 순서.** `canUsePlanDrivenPath` 가 단일 방향만 받으므로 현재 UI 에서
+도달 불가다. 다방향을 열 때 함께 다룬다.
+
+#### ④c 에서 드러난 것 — 상태명이 없어 정본 판정이 죽어 있었다 (2026-08-16)
+
+상태명이 늘 `<dir>_action` 이라 `STATE_REQUIREMENTS`·`classifyState`·`isLocomotionState` 가
+**한 번도 발화하지 않았다.** 동작 텍스트에서 정본 어휘를 뽑는 다리(`state-name.ts`)를 놓아
+`<dir>_walk`·`<dir>_attack` 이 되게 했다. 이식이 아니라 우리 UI 를 위한 신규 코드이며 파일
+헤더에 그렇게 적었다.
+
+**그래도 원본과 같게 둔 것**: 방향 계약 런(`down_walk`)에서는 `STATE_REQUIREMENTS` 도
+상태별 fps 도 45도 접미사 요구사항도 걸리지 않는다. 셋 다 **전체 상태명**으로 조회하기
+때문이고, 원본도 같다(실측 확인). 방향 계약 스캐폴딩(2026-07-14)이 그 셋보다 나중에 붙어
+서로 만나지 않는 것이다. 고치려다 되돌렸다 — 원본 내부 불일치를 우리 쪽에서 고치지 않는다.
+
+**부수 발견**: 그 결과 45도 방향(`front-right_*`) 행은 3/4 뷰 잠금 문구를 못 받고
+`facing the front-right direction` 이라는 폴백만 나간다. 원본은 45도를 `--directions down45`
+(방향 토큰) 또는 `running-front-right`(상태명 접미사)로 표현하는데, 우리 `toSpriteGenDirection`
+이 만든 `front-right` 토큰은 둘 다 아니다. **우리가 만든 어휘의 구멍이다** — 다방향을 열 때
+결정할 것.
 
 UI 배선을 첫 항목으로 뒀던 원래 진입 조건에서 **순서를 바꿨다**. ⓪①②③ 네 단계 동안 새
 경로로 codex 를 한 번도 돌리지 않았고, 생성 품질은 Python 대조로 알 수 없기 때문이다.
