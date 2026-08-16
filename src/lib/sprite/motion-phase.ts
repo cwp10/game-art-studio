@@ -57,7 +57,7 @@ export function stateMotionPhases(state: string, frames: number): readonly Motio
  * Python `round()` — 반올림이 아니라 **은행가 반올림**(half to even)이다.
  * 원본 좌표가 전부 이 함수를 거치므로 JS `Math.round`(half up)를 쓰면 어긋난다.
  */
-function pyRound(value: number): number {
+export function pyRound(value: number): number {
   const floor = Math.floor(value);
   const diff = value - floor;
   if (diff > 0.5) return floor + 1;
