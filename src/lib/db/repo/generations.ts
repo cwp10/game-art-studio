@@ -247,6 +247,32 @@ export function lockBaseGeneration(generationId: string, sessionId: string | nul
 }
 
 /**
+ * 이 스코프의 base 표식을 모두 걷어낸다.
+ *
+ * 앱에는 "잠금 해제" 흐름이 없다 — 잠금은 다른 이미지를 잠그는 것으로만 바뀐다.
+ * 이 함수는 개발 DB 를 공유하는 테스트가 "잠긴 base 가 없는" 전제를 스스로 만들고
+ * 되돌리기 위한 것이다.
+ */
+export function unlockBaseScope(sessionId: string | null): void {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, params FROM generations
+        WHERE json_extract(params, '$.spriteRole') = 'base'
+          AND COALESCE(json_extract(params, '$.baseLockedSession'), '') = COALESCE(?, '')`,
+    )
+    .all(sessionId) as Array<{ id: string; params: string | null }>;
+  const stmt = db.prepare("UPDATE generations SET params = ? WHERE id = ?");
+  for (const r of rows) {
+    const p = r.params ? (JSON.parse(r.params) as Record<string, unknown>) : {};
+    delete p.spriteRole;
+    delete p.baseLockedAt;
+    delete p.baseLockedSession;
+    stmt.run(JSON.stringify(p), r.id);
+  }
+}
+
+/**
  * 행의 큐레이션(표시 순서·제외)을 저장한다.
  *
  * 앵커는 사람이 화면에서 승인한 모습이어야 하므로 앵커 해석이 이 기록을 읽는다.

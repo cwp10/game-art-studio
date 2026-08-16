@@ -395,6 +395,12 @@ void (async () => {
       JSON.stringify(curatedSequence(4, c)),
     );
 
+    // 이 검사는 "스코프에 잠긴 base 가 없다"를 전제한다. 개발 DB 를 공유하므로 그
+    // 전제를 스스로 만들어야 한다 — 예전에는 test-base-gate 가 잠금을 걷어낸 덕에
+    // 우연히 성립했고(테스트 실행 순서 의존), 그 테스트가 잠금을 되돌리자 깨졌다.
+    const { getLockedBase, unlockBaseScope } = await import("../src/lib/db/repo/generations");
+    const priorBase = getLockedBase(null)?.id ?? null;
+    unlockBaseScope(null);
     let threw = false;
     try {
       pinAnchorFrame(null, "down", { generationId: rowId, index: 1 });
@@ -430,6 +436,15 @@ void (async () => {
 
     deleteGeneration(rowId);
     deleteGeneration(baseId);
+    // 더미 base 를 잠그면서 걷어낸 실제 잠금을 되돌린다. 더미 행을 지우는 것만으로는
+    // 사람이 게이트에서 잠근 base 가 돌아오지 않는다 — 그러면 다음 생성이 조용히
+    // "base 자동 잠금 (게이트 미검토)" 로 빠진다.
+    if (priorBase) lockBaseGeneration(priorBase, null);
+    check(
+      "테스트 전 잠겨 있던 base 를 되돌렸다",
+      (getLockedBase(null)?.id ?? null) === priorBase,
+      `prior=${priorBase} now=${getLockedBase(null)?.id ?? "null"}`,
+    );
   }
 
   console.log(`\n${passed} passed / ${failed} failed`);

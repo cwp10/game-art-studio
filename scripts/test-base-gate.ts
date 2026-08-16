@@ -287,6 +287,12 @@ void (async () => {
   // 아니라는 것만 본다.
   check("잠금 전에는 이 generation 이 base 가 아니다", getLockedBase(null)?.id !== genId);
 
+  // `lockBaseGeneration` 은 **같은 스코프의 기존 base 표식을 걷어낸다**. 개발 DB 를
+  // 공유하니 이 테스트가 사람이 게이트에서 잠근 base 를 풀어버린다 — 실제로 그래서
+  // 다음 생성이 "base 자동 잠금 (게이트 미검토)" 로 빠졌다(2026-08-16). 테스트가
+  // 남기는 행만 지우는 것으로는 부족하고, 걷어낸 잠금을 되돌려야 한다.
+  const priorBase = getLockedBase(null)?.id ?? null;
+
   lockBaseGeneration(genId, null);
   const locked = getLockedBase(null);
   check("잠금 후 조회됨", locked?.id === genId, locked?.id ?? "null");
@@ -309,10 +315,16 @@ void (async () => {
   lockBaseGeneration(genId2, null);
   check("가장 최근 잠금이 현재 base", getLockedBase(null)?.id === genId2);
 
-  // 정리 — 테스트가 남긴 행을 지운다
+  // 정리 — 테스트가 남긴 행을 지우고, 걷어낸 잠금을 되돌린다.
   const { deleteGeneration } = await import("../src/lib/db/repo/generations");
   deleteGeneration(genId);
   deleteGeneration(genId2);
+  if (priorBase) lockBaseGeneration(priorBase, null);
+  check(
+    "테스트 전 잠겨 있던 base 를 되돌렸다",
+    (getLockedBase(null)?.id ?? null) === priorBase,
+    `prior=${priorBase} now=${getLockedBase(null)?.id ?? "null"}`,
+  );
 
   rmSync(tmp, { recursive: true, force: true });
 
