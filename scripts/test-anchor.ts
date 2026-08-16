@@ -297,40 +297,31 @@ void (async () => {
   {
     const dir = await mkdtemp(join(tmpdir(), "anchor-"));
     try {
-      // 4셀 가로 시트(각 32x32). 셀 2 에만 8x8 콘텐츠를 둔다.
-      const cols = 4;
-      const cw = 32;
-      const ch = 32;
-      const raw = Buffer.alloc(cols * cw * ch * 4);
+      // 입력은 추출된 프레임이다 — 셀 크기, 알파 있음.
+      const cell = 32;
+      const raw = Buffer.alloc(cell * cell * 4);
       for (let y = 12; y < 20; y++) {
-        for (let x = 2 * cw + 10; x < 2 * cw + 18; x++) {
-          const o = (y * cols * cw + x) * 4;
+        for (let x = 10; x < 18; x++) {
+          const o = (y * cell + x) * 4;
           raw[o] = 200;
           raw[o + 1] = 100;
           raw[o + 2] = 50;
           raw[o + 3] = 255;
         }
       }
-      const sheet = join(dir, "row.png");
-      await sharp(raw, { raw: { width: cols * cw, height: ch, channels: 4 } })
+      const frame = join(dir, "frame-0.png");
+      await sharp(raw, { raw: { width: cell, height: cell, channels: 4 } })
         .png()
-        .toFile(sheet);
+        .toFile(frame);
 
       const dest = join(dir, "anchor.png");
-      const r = await bakeAnchorImage({
-        sheetPath: sheet,
-        cell: normalizeCell({ size: 32 }),
-        cols,
-        index: 2,
-        destPath: dest,
-      });
+      const r = await bakeAnchorImage({ framePath: frame, destPath: dest });
       check(
         "콘텐츠 크기 8x8",
         r.contentSize[0] === 8 && r.contentSize[1] === 8,
         JSON.stringify(r.contentSize),
       );
       check("×8 확대 = 64x64", r.width === 64 && r.height === 64);
-      check("알파 있는 원본은 sourceHasAlpha true", r.sourceHasAlpha === true);
       const meta = await sharp(dest).metadata();
       check("파일 치수가 일치", meta.width === 64 && meta.height === 64);
 
@@ -345,42 +336,19 @@ void (async () => {
       }
       check("NEAREST — 보간된 중간색이 없다", interpolated === 0, `${interpolated} px`);
 
-      let threw = false;
-      try {
-        await bakeAnchorImage({
-          sheetPath: sheet,
-          cell: normalizeCell({ size: 32 }),
-          cols,
-          index: 0,
-          destPath: join(dir, "x.png"),
-        });
-      } catch {
-        threw = true;
-      }
-      check("빈 셀은 empty-content 로 실패한다 (조용히 빈 이미지를 내지 않는다)", threw);
-
-      // 알파 없는 원본(= codex raw 생성물)에서는 콘텐츠 크롭이 아무 일도 하지 않는다.
-      // 실측 근거: 1254x1254 codex PNG 는 channels=3, hasAlpha=false 이고 bbox 가
-      // 정확히 셀 전체로 나왔다. 조용히 통과시키지 않고 플래그로 드러낸다.
-      const flat = join(dir, "flat.png");
-      await sharp(raw, { raw: { width: cols * cw, height: ch, channels: 4 } })
-        .removeAlpha()
+      const empty = join(dir, "empty.png");
+      await sharp({
+        create: { width: cell, height: cell, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+      })
         .png()
-        .toFile(flat);
-      const rf = await bakeAnchorImage({
-        sheetPath: flat,
-        cell: normalizeCell({ size: 32 }),
-        cols,
-        index: 2,
-        destPath: join(dir, "flat-anchor.png"),
-        scale: 1,
-      });
-      check("알파 없는 원본은 sourceHasAlpha false", rf.sourceHasAlpha === false);
-      check(
-        "알파가 없으면 콘텐츠 크롭이 셀 전체가 된다 (크롭 무의미)",
-        rf.contentSize[0] === 32 && rf.contentSize[1] === 32,
-        JSON.stringify(rf.contentSize),
-      );
+        .toFile(empty);
+      let threw = "";
+      try {
+        await bakeAnchorImage({ framePath: empty, destPath: join(dir, "x.png") });
+      } catch (e) {
+        threw = e instanceof AnchorUnavailable ? e.kind : String(e);
+      }
+      check("빈 프레임은 empty-content 로 실패한다", threw === "empty-content", threw);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

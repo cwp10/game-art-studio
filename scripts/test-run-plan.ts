@@ -23,17 +23,24 @@ function check(label: string, ok: boolean, detail = ""): void {
   }
 }
 
-/** frames 칸짜리 가로 시트. 각 셀 중앙에 불투명 사각형(알파 있음). */
-async function fakeSheet(dest: string, frames: number, cell: number): Promise<void> {
-  const w = frames * cell;
-  const raw = Buffer.alloc(w * cell * 4);
+/**
+ * frames 개 덩어리가 놓인 마젠타 크로마 시트. 캔버스 치수는 자유롭게 준다 —
+ * 추출이 raw 치수와 무관하다는 것이 이 테스트의 핵심이다.
+ */
+async function fakeSheet(dest: string, frames: number, w: number, h: number): Promise<void> {
+  const raw = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    raw[i * 4] = 255;
+    raw[i * 4 + 1] = 0;
+    raw[i * 4 + 2] = 255;
+    raw[i * 4 + 3] = 255;
+  }
+  const slot = w / frames;
   for (let f = 0; f < frames; f++) {
-    for (let y = Math.floor(cell / 4); y < Math.floor((cell * 3) / 4); y++) {
-      for (
-        let x = f * cell + Math.floor(cell / 4);
-        x < f * cell + Math.floor((cell * 3) / 4);
-        x++
-      ) {
+    const x0 = Math.round(f * slot + slot * 0.25);
+    const x1 = Math.round(f * slot + slot * 0.75);
+    for (let y = Math.floor(h * 0.2); y < Math.floor(h * 0.85); y++) {
+      for (let x = x0; x < x1; x++) {
         const o = (y * w + x) * 4;
         raw[o] = 200;
         raw[o + 1] = 100;
@@ -42,7 +49,7 @@ async function fakeSheet(dest: string, frames: number, cell: number): Promise<vo
       }
     }
   }
-  await sharp(raw, { raw: { width: w, height: cell, channels: 4 } })
+  await sharp(raw, { raw: { width: w, height: h, channels: 4 } })
     .png()
     .toFile(dest);
 }
@@ -61,20 +68,16 @@ void (async () => {
     });
 
     const basePath = join(dir, "base.png");
-    await fakeSheet(basePath, 1, request.cell.width);
+    await fakeSheet(basePath, 1, 512, 512);
 
     const calls: Array<{ state: string; role: string; inputPaths: string[] }> = [];
     const generate: GenerateFn = async spec => {
       calls.push({ state: spec.state, role: spec.role, inputPaths: [...spec.inputPaths] });
       const out = join(dir, `${spec.state}.png`);
       const frames = request.states[spec.state].frames;
-      await fakeSheet(out, frames, request.cell.width);
-      return {
-        generationId: `gen_${spec.state}`,
-        imagePath: out,
-        width: frames * request.cell.width,
-        height: request.cell.height,
-      };
+      // 가이드(1024x256)와 다른 치수로 낸다 — codex 실측 동작과 같다.
+      await fakeSheet(out, frames, 1774, 887);
+      return { generationId: `gen_${spec.state}`, imagePath: out, width: 1774, height: 887 };
     };
 
     const result = await runSpritePlan(request, {
@@ -108,7 +111,9 @@ void (async () => {
 
     console.log("=== 결과 ===");
     check("행 두 개가 기록된다", Object.keys(result.rows).length === 2);
-    check("실측 프레임 수가 기록된다", result.rows.down_action.frameCount === 4);
+    check("프레임 수가 기록된다", result.rows.down_action.frameCount === 4);
+    check("components 로 추출된다", result.rows.down_action.method === "components");
+    check("프레임 파일이 4개", result.rows.down_action.framePaths.length === 4);
     check("앵커가 기록된다", result.anchors.down !== undefined);
     check("앵커 source 는 default", result.anchors.down.source === "default");
     check("앵커 index 는 0 (큐레이션 없음)", result.anchors.down.index === 0);
@@ -117,53 +122,52 @@ void (async () => {
       (await sharp(result.anchors.down.path).metadata()).width !== undefined,
     );
 
-    console.log("=== 가이드 치수를 안 따라도 동작한다 ===");
+    console.log("=== 추출이 raw 치수를 무관하게 만든다 ===");
     {
-      // codex 는 가이드의 픽셀 치수를 따르지 않는다(실측: 1024x256 요청 → 1774x887).
-      // 열 개수는 요청값을 쓰고 셀 폭은 실제 폭을 나눠 구해야 한다.
-      const wide = join(dir, "wide.png");
-      const W = 1774;
-      const H = 887;
-      await sharp({
-        create: { width: W, height: H, channels: 4, background: { r: 0, g: 255, b: 255, alpha: 255 } },
-      })
-        .composite([
-          {
-            input: await sharp({
-              create: { width: 200, height: 400, channels: 4, background: { r: 200, g: 100, b: 50, alpha: 255 } },
-            })
-              .png()
-              .toBuffer(),
-            left: 120,
-            top: 240,
+      // 가이드는 1024x256 인데 출력은 1774x887 이다. 그래도 프레임은 request 셀 규격으로
+      // 나온다 — request.cell 은 추출의 **출력 규격**이지 입력 치수가 아니다.
+      for (const p of result.rows.down_idle.framePaths) {
+        const m = await sharp(p).metadata();
+        check(
+          `프레임이 셀 규격 ${request.cell.width}x${request.cell.height}`,
+          m.width === request.cell.width && m.height === request.cell.height,
+          `${m.width}x${m.height}`,
+        );
+        break;
+      }
+      const anchorMeta = await sharp(result.anchors.down.path).metadata();
+      check(
+        "앵커가 배경 조각이 아니다 (콘텐츠가 셀보다 작다)",
+        (anchorMeta.width ?? 0) < request.cell.width * 8,
+        `${anchorMeta.width}x${anchorMeta.height}`,
+      );
+    }
+
+    console.log("=== 프레임 수를 못 맞추면 행 차단 ===");
+    {
+      let threw = "";
+      let generated = 0;
+      const one = join(dir, "one.png");
+      await fakeSheet(one, 1, 800, 400);
+      try {
+        await runSpritePlan(request, {
+          generate: async () => {
+            generated++;
+            return { generationId: "g", imagePath: one, width: 800, height: 400 };
           },
-        ])
-        .png()
-        .toFile(wide);
-      const r = await runSpritePlan(request, {
-        generate: async () => ({ generationId: "g", imagePath: wide, width: W, height: H }),
-        workDir: dir,
-        lockedBasePath: basePath,
-        log: () => {},
-      });
-      check("열 개수는 요청값 유지", r.rows.down_idle.frameCount === 4);
+          workDir: dir,
+          lockedBasePath: basePath,
+          log: () => {},
+        });
+      } catch (e) {
+        threw = String(e);
+      }
       check(
-        "셀 폭은 실제 폭 / 열 개수",
-        r.rows.down_idle.cell.width === Math.floor(W / 4),
-        `${r.rows.down_idle.cell.width}`,
+        "컴포넌트가 부족하면 차단된다",
+        threw.includes("could not extract 4 sprite components"),
+        threw,
       );
-      check("셀 높이는 실제 높이", r.rows.down_idle.cell.height === H);
-      check(
-        "기하 불일치가 경고로 남는다",
-        r.warnings.some(w => w.includes("가이드는")),
-        r.warnings.join(" | "),
-      );
-      check(
-        "앵커가 첫 셀에서 나온다 (배경 조각이 아니다)",
-        r.anchors.down.index === 0 && r.anchors.down.source === "default",
-      );
-      const am = await sharp(r.anchors.down.path).metadata();
-      check("앵커가 과도하게 커지지 않는다", (am.width ?? 0) <= 4096, `${am.width}x${am.height}`);
+      check("액션 행을 생성하지 않는다", generated === 1, `${generated}`);
     }
 
     console.log("=== 미러는 생성하지 않는다 ===");
@@ -183,7 +187,7 @@ void (async () => {
         generate: async spec => {
           mcalls.push(spec.state);
           const out = join(dir, `m-${spec.state}.png`);
-          await fakeSheet(out, mreq.states[spec.state].frames, mreq.cell.width);
+          await fakeSheet(out, mreq.states[spec.state].frames, 1200, 600);
           return { generationId: `g_${spec.state}`, imagePath: out, width: 1, height: 1 };
         },
         workDir: dir,
@@ -210,7 +214,7 @@ void (async () => {
         generate: async spec => {
           fcalls.push(spec.state);
           const out = join(dir, `f-${spec.state}.png`);
-          await fakeSheet(out, freq.states[spec.state].frames, freq.cell.width);
+          await fakeSheet(out, freq.states[spec.state].frames, 1200, 600);
           return { generationId: `g_${spec.state}`, imagePath: out, width: 1, height: 1 };
         },
         workDir: dir,
@@ -239,42 +243,6 @@ void (async () => {
         threw = String(e);
       }
       check("생성 실패는 전파된다 (조용히 계속하지 않는다)", threw.includes("codex 실패"), threw);
-    }
-    {
-      // 앵커 행이 빈 셀로 나오면 베이크가 실패하고 액션 행을 생성하지 않는다.
-      let threw = "";
-      let generated = 0;
-      const empty = join(dir, "empty.png");
-      await sharp({
-        create: {
-          width: request.cell.width,
-          height: request.cell.height,
-          channels: 4,
-          background: { r: 0, g: 0, b: 0, alpha: 0 },
-        },
-      })
-        .png()
-        .toFile(empty);
-      try {
-        await runSpritePlan(request, {
-          generate: async () => {
-            generated++;
-            return {
-              generationId: "g",
-              imagePath: empty,
-              width: request.cell.width,
-              height: request.cell.height,
-            };
-          },
-          workDir: dir,
-          lockedBasePath: basePath,
-          log: () => {},
-        });
-      } catch (e) {
-        threw = String(e);
-      }
-      check("앵커 베이크 실패가 전파된다", threw.length > 0, threw);
-      check("액션 행을 생성하지 않는다 (앵커 행 1회만)", generated === 1, `${generated}`);
     }
   } finally {
     await rm(dir, { recursive: true, force: true });

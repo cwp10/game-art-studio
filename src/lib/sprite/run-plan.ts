@@ -8,8 +8,8 @@
  * 생성 함수를 주입받으므로 codex 를 모른다. 순서·ref 계약·베이크 시점이 결정론이라
  * 가짜 생성기로 전부 검증된다. 실제 codex 는 scripts/gen-sprite-run.ts 가 주입한다.
  */
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import sharp from "sharp";
 import {
   AnchorUnavailable,
   resolveAnchor,
@@ -17,6 +17,7 @@ import {
   type AnchorRow,
 } from "@/lib/sprite/anchor";
 import { ANCHOR_SCALE, bakeAnchorImage } from "@/lib/sprite/anchor-image";
+import { extractRowFrames, writeRaw } from "@/lib/sprite/extract";
 import {
   buildGenerationPlan,
   type MirroredDirection,
@@ -24,7 +25,7 @@ import {
 } from "@/lib/sprite/generation-plan";
 import { renderLayoutGuide } from "@/lib/sprite/layout-guide";
 import { buildRowPrompt } from "@/lib/sprite/row-prompt";
-import type { CellSpec, SpriteRequest } from "@/lib/sprite/request";
+import type { SpriteRequest } from "@/lib/sprite/request";
 
 export type GenerateFn = (spec: {
   state: string;
@@ -44,11 +45,12 @@ export type RunPlanDeps = {
 
 export type RunPlanRow = {
   generationId: string;
+  /** 생성된 raw 시트 (크로마 배경). */
   imagePath: string;
-  /** 슬라이스에 쓸 열 개수 = 요청 프레임 수. 레이아웃은 모델이 따랐다고 본다. */
   frameCount: number;
-  /** 실제 출력에서 유도한 셀 기하. request.cell 이 아니다 — 아래 measureSheet 주석 참조. */
-  cell: CellSpec;
+  /** 추출된 프레임 PNG 경로들 — 셀 크기, 알파 있음. */
+  framePaths: string[];
+  method: "components" | "slots-explicit";
 };
 
 export type RunPlanResult = {
@@ -57,55 +59,6 @@ export type RunPlanResult = {
   skippedMirrors: MirroredDirection[];
   warnings: string[];
 };
-
-/**
- * 실제 출력에서 셀 기하를 유도한다.
- *
- * **codex 는 레이아웃 가이드의 픽셀 치수를 따르지 않는다**(실측 2026-08-16): 4프레임
- * 256셀 = 1024×256(4:1) 가이드를 붙였는데 출력이 1774×887(2:1)로 나왔다. image_gen 은
- * 고정된 몇 가지 종횡비만 내므로 4:1 스트립 자체가 불가능하다.
- *
- * 따르는 것은 **프레임 개수와 배열**이지 캔버스 치수가 아니다. 그래서 열 개수는 요청값을
- * 쓰고 셀 폭은 실제 폭을 나눠 구한다. 요청 셀 폭(256)으로 나누면 1774/256 = 7 이라는
- * 없는 프레임 수가 나오고, 그 인덱스로 크롭하면 배경 조각이 앵커가 된다 — 실제로 그렇게
- * 되어 액션 행이 정체성을 통째로 재발명했다.
- *
- * 모델이 요청 개수를 실제로 지켰는지는 내용 기반 분할(후속 단계)이 있어야 확인된다.
- */
-export async function measureSheet(
-  sheetPath: string,
-  requestedFrames: number,
-): Promise<{ cell: CellSpec; width: number; height: number }> {
-  const meta = await sharp(sheetPath).metadata();
-  const width = meta.width ?? 0;
-  const height = meta.height ?? 0;
-  const cols = Math.max(1, requestedFrames);
-  const cellWidth = Math.max(1, Math.floor(width / cols));
-  return {
-    cell: {
-      shape: cellWidth === height ? "square" : "rect",
-      width: cellWidth,
-      height,
-      safeMarginX: 0,
-      safeMarginY: 0,
-    },
-    width,
-    height,
-  };
-}
-
-/**
- * 정본의 ANCHOR_SCALE=8 은 256px 셀을 전제한다(256×8 = 2048 — image_gen 이 읽을 수 있는 크기).
- * 우리 셀은 출력에서 유도되므로 443px 같은 값이 나오고, 거기에 ×8 을 걸면 3544px 짜리
- * 레퍼런스가 된다. 확대의 목적은 **작은 셀의 가독성**이지 무조건 8배가 아니므로,
- * 결과가 정본 목표치에 닿도록 배율을 잡고 8 을 넘지 않게 한다.
- */
-const ANCHOR_TARGET_PX = 2048;
-
-export function anchorScaleFor(cellWidth: number): number {
-  if (cellWidth <= 0) return ANCHOR_SCALE;
-  return Math.max(1, Math.min(ANCHOR_SCALE, Math.round(ANCHOR_TARGET_PX / cellWidth)));
-}
 
 /** 액션 행에 base 가 붙었는지 기계적으로 검증한다 — 주석이 아니라 코드로 막는다. */
 function assertNoBase(item: PlanItem, inputPaths: string[], basePath: string | null): void {
@@ -118,27 +71,50 @@ function assertNoBase(item: PlanItem, inputPaths: string[], basePath: string | n
   }
 }
 
+/**
+ * 생성된 raw 시트를 추출해 프레임으로 만들고 기록한다.
+ *
+ * **request 의 cell·safeMargin 이 추출의 출력 규격이다** — raw 치수와 무관하다.
+ * 컴포넌트로 선언된 프레임 수를 못 찾으면 extractRowFrames 가 throw 하고 행이 차단된다.
+ */
 async function recordRow(
   result: RunPlanResult,
+  request: SpriteRequest,
   state: string,
-  requestedFrames: number,
-  requestedCell: CellSpec,
+  frameCount: number,
+  workDir: string,
   gen: Awaited<ReturnType<GenerateFn>>,
 ): Promise<void> {
-  const measured = await measureSheet(gen.imagePath, requestedFrames);
-  const wantW = requestedFrames * requestedCell.width;
-  if (measured.width !== wantW || measured.height !== requestedCell.height) {
+  const extracted = await extractRowFrames({
+    sheetPath: gen.imagePath,
+    frameCount,
+    cell: request.cell,
+    chromaKey: request.chromaKey.rgb,
+    chroma: {
+      keyThreshold: request.chroma.keyThreshold,
+      unmixReach: request.chroma.unmixReach,
+      spillMaxFraction: request.chroma.spillMaxFraction,
+    },
+  });
+  const dir = join(workDir, `frames-${state}`);
+  await mkdir(dir, { recursive: true });
+  const framePaths: string[] = [];
+  for (let i = 0; i < extracted.frames.length; i++) {
+    const p = join(dir, `frame-${i}.png`);
+    await writeRaw(extracted.frames[i], p);
+    framePaths.push(p);
+  }
+  if (extracted.dropped > 0) {
     result.warnings.push(
-      `'${state}': 가이드는 ${wantW}x${requestedCell.height} 인데 출력이 ` +
-        `${measured.width}x${measured.height} 다 — 셀 기하를 실제 출력에서 유도한다 ` +
-        `(${measured.cell.width}x${measured.cell.height})`,
+      `'${state}': 시드 근접 밖의 파편 ${extracted.dropped} 개를 버렸다`,
     );
   }
   result.rows[state] = {
     generationId: gen.generationId,
     imagePath: gen.imagePath,
-    frameCount: requestedFrames,
-    cell: measured.cell,
+    frameCount: extracted.frames.length,
+    framePaths,
+    method: extracted.method,
   };
 }
 
@@ -162,7 +138,7 @@ export async function runSpritePlan(
         inputPaths,
         role: "action-row",
       });
-      await recordRow(result, state, entry.frames, request.cell, gen);
+      await recordRow(result, request, state, entry.frames, deps.workDir, gen);
     }
     result.warnings.push("방향 계약 없는 런 — 앵커 체인을 쓰지 않는다(REF 모드)");
     return result;
@@ -184,7 +160,7 @@ export async function runSpritePlan(
       inputPaths,
       role: item.role,
     });
-    await recordRow(result, item.state, entry.frames, request.cell, gen);
+    await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
   }
 
   // ── stage 2: 액션 행 ────────────────────────────────────────────────────
@@ -214,23 +190,9 @@ export async function runSpritePlan(
       throw e;
     }
     const anchorRow = result.rows[resolved.state];
-    const scale = anchorScaleFor(anchorRow.cell.width);
-    const anchorPath = join(deps.workDir, `anchor-${item.direction}-x${scale}.png`);
-    const baked = await bakeAnchorImage({
-      sheetPath: anchorRow.imagePath,
-      // 요청 셀이 아니라 그 행의 실제 기하다 — codex 가 가이드 치수를 안 따른다.
-      cell: anchorRow.cell,
-      cols: anchorRow.frameCount,
-      index: resolved.index,
-      destPath: anchorPath,
-      scale,
-    });
-    if (!baked.sourceHasAlpha) {
-      result.warnings.push(
-        `앵커 '${item.direction}': 원본에 알파가 없어 콘텐츠 크롭이 셀 전체가 됐다 ` +
-          `(크로마 배경이 남아 있다 — 추출 단계 이후에야 유효하다)`,
-      );
-    }
+    const anchorPath = join(deps.workDir, `anchor-${item.direction}-x${ANCHOR_SCALE}.png`);
+    // 입력은 추출된 프레임이다 — 셀 크기, 알파 있음. 원본 bake_frame 과 같은 위치.
+    await bakeAnchorImage({ framePath: anchorRow.framePaths[resolved.index], destPath: anchorPath });
     result.anchors[item.direction] = {
       path: anchorPath,
       state: resolved.state,
@@ -252,7 +214,7 @@ export async function runSpritePlan(
       inputPaths,
       role: item.role,
     });
-    await recordRow(result, item.state, entry.frames, request.cell, gen);
+    await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
   }
 
   return result;
