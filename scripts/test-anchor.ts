@@ -67,25 +67,33 @@ function ctx(
 }
 
 void (async () => {
-  console.log("=== curatedSequence ===");
+  console.log("=== curatedSequence — selected 가 권위 필드 ===");
   check("큐레이션 없으면 0..n-1", curatedSequence(4, null).join(",") === "0,1,2,3");
+  check("선택을 그대로 따른다", curatedSequence(4, { selected: [2, 3] }).join(",") === "2,3");
+  check("순서도 selected 가 표현한다", curatedSequence(4, { selected: [3, 2, 1, 0] }).join(",") === "3,2,1,0");
   check(
-    "제외를 뺀다",
-    curatedSequence(4, { order: [0, 1, 2, 3], excluded: [0, 1] }).join(",") === "2,3",
+    "빈 selected 는 전체 프레임 (정본: absent/empty → all frames in order)",
+    curatedSequence(4, { selected: [] }).join(",") === "0,1,2,3",
   );
   check(
-    "재정렬을 따른다",
-    curatedSequence(4, { order: [3, 2, 1, 0], excluded: [] }).join(",") === "3,2,1,0",
+    "order 는 표시 전용 — 해석이 무시한다",
+    curatedSequence(4, { selected: [1, 0], order: [3, 2, 1, 0] }).join(",") === "1,0",
   );
   check(
-    "재정렬 + 제외",
-    curatedSequence(4, { order: [3, 2, 1, 0], excluded: [3] }).join(",") === "2,1,0",
+    "프레임 공간이 바뀐 큐레이션은 fail-loud (조용히 필터링하지 않는다)",
+    kindOf(() => curatedSequence(4, { selected: [0, 1, 7] })) === "curation-stale",
   );
   check(
-    "order 길이가 안 맞으면 무시하고 원본 순서",
-    curatedSequence(4, { order: [1, 0], excluded: [] }).join(",") === "0,1,2,3",
+    "curation-stale 은 broken",
+    (() => {
+      try {
+        curatedSequence(4, { selected: [9] });
+        return false;
+      } catch (e) {
+        return e instanceof AnchorUnavailable && e.pending === false;
+      }
+    })(),
   );
-  check("전부 제외면 빈 배열", curatedSequence(2, { order: [0, 1], excluded: [0, 1] }).length === 0);
 
   console.log("=== resolveAnchor — 기본 경로 (큐레이션 시퀀스 헤드) ===");
   {
@@ -103,7 +111,7 @@ void (async () => {
         down_idle: {
           generationId: "g1",
           frameCount: 4,
-          curation: { order: [0, 1, 2, 3], excluded: [0, 1, 2] },
+          curation: { selected: [3] },
         },
       },
     });
@@ -118,7 +126,7 @@ void (async () => {
         down_idle: {
           generationId: "g1",
           frameCount: 4,
-          curation: { order: [2, 0, 1, 3], excluded: [] },
+          curation: { selected: [2, 0, 1, 3] },
         },
       },
     });
@@ -162,16 +170,26 @@ void (async () => {
     }
   }
   {
+    // 빈 selected 는 "전체 프레임"을 뜻하므로(정본) 빈 시퀀스를 만들지 못한다.
+    // empty-sequence 는 행이 프레임 0개로 추출된 경우다.
+    const c = ctx({
+      rows: { down_idle: { generationId: "g1", frameCount: 0, curation: null } },
+    });
+    check(
+      "프레임 0개로 추출된 행은 empty-sequence",
+      kindOf(() => resolveAnchor(c, "down")) === "empty-sequence",
+    );
+  }
+  {
     const c = ctx({
       rows: {
-        down_idle: {
-          generationId: "g1",
-          frameCount: 2,
-          curation: { order: [0, 1], excluded: [0, 1] },
-        },
+        down_idle: { generationId: "g1", frameCount: 2, curation: { selected: [] } },
       },
     });
-    check("전부 제외하면 empty-sequence", kindOf(() => resolveAnchor(c, "down")) === "empty-sequence");
+    check(
+      "빈 selected 는 전체 프레임이므로 앵커는 0",
+      resolveAnchor(c, "down").index === 0,
+    );
   }
 
   console.log("=== resolveAnchor — 지정(pin) ===");
@@ -192,7 +210,7 @@ void (async () => {
         down_idle: {
           generationId: "g1",
           frameCount: 4,
-          curation: { order: [0, 1, 2, 3], excluded: [1] },
+          curation: { selected: [0, 2, 3] },
         },
       },
       picks: { down: { generationId: "g1", index: 1 } },
@@ -394,9 +412,9 @@ void (async () => {
     });
 
     check("저장 전에는 큐레이션 없음", getCuration(rowId) === null);
-    saveCuration(rowId, { order: [2, 0, 1, 3], excluded: [0] });
+    saveCuration(rowId, { selected: [2, 1, 3], order: [2, 0, 1, 3] });
     const c = getCuration(rowId);
-    check("큐레이션 왕복", c?.order.join(",") === "2,0,1,3" && c?.excluded.join(",") === "0");
+    check("큐레이션 왕복", c?.selected.join(",") === "2,1,3" && c?.order?.join(",") === "2,0,1,3");
     const { getGeneration } = await import("../src/lib/db/repo/generations");
     check(
       "큐레이션 저장이 기존 params 를 보존한다",

@@ -255,7 +255,7 @@ export function lockBaseGeneration(generationId: string, sessionId: string | nul
  */
 export function saveCuration(
   generationId: string,
-  curation: { order: number[]; excluded: number[] },
+  curation: { selected: number[]; order?: number[] },
 ): void {
   const db = getDb();
   const row = db.prepare("SELECT params FROM generations WHERE id = ?").get(generationId) as
@@ -263,18 +263,23 @@ export function saveCuration(
     | undefined;
   if (!row) throw new Error(`saveCuration: generation ${generationId} 이(가) 없습니다`);
   const params = row.params ? (JSON.parse(row.params) as Record<string, unknown>) : {};
-  params.curation = { order: curation.order, excluded: curation.excluded };
+  params.curation = {
+    selected: curation.selected,
+    ...(curation.order ? { order: curation.order } : {}),
+  };
   db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
     JSON.stringify(params),
     generationId,
   );
 }
 
-export function getCuration(generationId: string): { order: number[]; excluded: number[] } | null {
+export function getCuration(
+  generationId: string,
+): { selected: number[]; order?: number[] } | null {
   const gen = getGeneration(generationId);
-  const c = gen?.params?.curation as { order?: number[]; excluded?: number[] } | undefined;
-  if (!c || !Array.isArray(c.order) || !Array.isArray(c.excluded)) return null;
-  return { order: c.order, excluded: c.excluded };
+  const c = gen?.params?.curation as { selected?: number[]; order?: number[] } | undefined;
+  if (!c || !Array.isArray(c.selected)) return null;
+  return { selected: c.selected, ...(Array.isArray(c.order) ? { order: c.order } : {}) };
 }
 
 /**

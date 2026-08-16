@@ -820,6 +820,28 @@ Python 대조 결과: 방향 정규화·앵커 합성 action 문자열 완전 �
 `pick-unknown-generation` 하나로 합쳐진다. *pending*(`no-anchor-row`·`row-not-generated`)과
 *broken*(나머지) 구분은 그대로 유지했다.
 
+**큐레이션 스키마를 처음에 틀렸다(2026-08-16 정정).** §11 이 `curation.md` 를 ③용으로
+표시했는데 읽지 않고 구현해, `{order, excluded}` 라는 우리 UI state 모양을 그대로 저장했다.
+정본 `curation.json` 은 다르다:
+
+- **`selected`** — 재생 순서의 0-based 인덱스. **이것이 권위 필드다.** 선택과 순서를 한
+  배열이 함께 표현한다. 없거나 비면 전체 프레임을 원래 순서로.
+- `order` — 웹뷰 소유의 표시 배열(시퀀스 줄 + 후보 풀). 정본은 *"compose / state_plan
+  ignore it and key off `selected`"* 라고 못박는다 — 화면 배열이 구운 결과를 바꾸지
+  못하게 하기 위해서다.
+
+`{selected, order?}` 로 고쳤다. `SpriteCanvas` 의 `frameOrder`·`excludedFrames` 에서
+파생한 재생 시퀀스가 곧 `selected` 이므로 ④의 저장 시점에 굽는다.
+
+**같이 드러난 공백**: 정본은 행별 `revision` 스탬프로 프레임 인덱스 공간이 바뀐 큐레이션
+(재추출·리롤)을 걸러낸다. 우리에겐 그 스탬프가 없고 재추출은 `generationId` 를 바꾸지 않는다.
+`selected` 가 프레임 수 범위를 벗어나면 조용히 필터링하지 않고 `curation-stale` 로
+fail-loud 하게 했다 — 필터링하면 사람이 승인한 것과 다른 프레임이 시퀀스 헤드가 된다.
+
+**이식하지 않은 큐레이션 필드**(전부 후속): `clones`(프레임 복제 = 홀드 프레임),
+`transforms`(프레임별 어파인 — 우리 `SpriteCanvas.offsets` 가 dx/dy 부분에 해당),
+`pixel_unfake` 2층 토글, `recolor.picked`, `run_revision`.
+
 **저장 위치**: 큐레이션은 그 행의 `params.curation`, 핀은 **잠긴 base 의**
 `params.anchorPicks[direction]`. ①이 "base 는 스코프당 딱 1장"을 강제하므로 run 스코프
 메타데이터를 걸 유일하게 안정적인 자리다. `sprite_runs` 테이블 신설은 마이그레이션 3중
@@ -973,17 +995,23 @@ sprite-gen 은 Apache-2.0(Copyright 2026 Alex Kim)이다. 이식 시:
 - `docs/directional-anchor-workflow.md` §1~§139 — 앵커 체인, 앵커=1장 규칙, curated head,
   핀 stale 판정, 미러 계약 (4차 재편 근거)
 - `sprite_gen/gen/codex_provider.py`, `gen/base.py` — ⓪ 근거
+- `docs/directional-anchor-workflow.md` §139~318 — 실패 처리, 좌우 게이트, Advanced Gates (③)
+- `docs/states-and-frames.md` — simple/experimental 등급, 프레임 수 대역 (② §6.1.1)
+- `docs/curation.md` — `curation.json` 스키마, 완성 시트 편집 경로. **③ 후에 읽어 스키마
+  오류 1건을 정정했다**(§8 ③ 구현 결과)
+- `docs/locomotion-curation.md` — motion-phase 실험, 수동 selected-cycle, 클린 GIF (④)
+- `docs/gen.md` — provider 계약, codex 플래그, `--transparent` fail-loud (⓪ 사후 확인:
+  우리 codex 인자가 정본과 일치)
 
 **미독**:
 
-- `docs/directional-anchor-workflow.md` §139~318 — 실패 처리 상세, 좌우 게이트, Advanced Gates
-  (**③ 착수 전 필수**)
 - `docs/run-contract.md` §2~§5 — 폴더 계약, 표시 계약, 임포트 규칙 (⑥ 착수 전)
-- `docs/curation.md` — `curation.json` 스키마, 완성 시트 편집 경로 (③⑥)
-- `docs/states-and-frames.md` — simple/experimental 상태 구분, 프레임 수 가이드 (②)
-- `docs/locomotion-curation.md` — selected-cycle 경로 (④)
 - `docs/recolor.md`, `docs/sheet-slicing.md`, `docs/frame-interpolation.md`,
   `docs/static-pose-recipe.md`, `docs/troubleshooting.md` — 범위 밖 또는 후속
 
 1·2차 초안이 정본을 읽지 않아 오류 12건이 났다. 3차에서 leaf 문서를 대조해 추가로 7건을
 바로잡았다. **미독 문서가 남은 단계의 스펙을 쓸 때는 먼저 읽는다.**
+
+이 규칙을 ③에서 한 번 어겼다 — 위 목록이 `curation.md` 를 ③용으로 표시했는데 읽지 않고
+구현해 큐레이션 스키마의 권위 필드를 반대로 잡았다(`{order, excluded}` vs 정본 `selected`).
+④ 착수 전 읽은 뒤 정정했다. **표에 단계가 적힌 문서는 그 단계 착수 전에 읽는다.**

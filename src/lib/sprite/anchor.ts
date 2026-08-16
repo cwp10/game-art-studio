@@ -14,8 +14,24 @@
 import { directionAnchorStates, stateDirection } from "@/lib/sprite/directions";
 import type { SpriteRequest } from "@/lib/sprite/request";
 
-/** 표시 순서와 제외 집합. SpriteCanvas 의 frameOrder/excludedFrames 와 같은 뜻이다. */
-export type CurationRecord = { order: number[]; excluded: number[] };
+/**
+ * 큐레이션 사이드카 — sprite-gen `curation.json` 의 `states.<state>` 부분 이식.
+ *
+ * **`selected` 가 권위 필드다**: 재생 순서의 0-based 프레임 인덱스이며, 선택과 순서를
+ * 한 배열이 함께 표현한다. `order` 는 웹뷰 소유의 표시 배열(시퀀스 줄 + 후보 풀)이고
+ * 정본은 *"compose / state_plan ignore it and key off selected"* 라고 못박는다 —
+ * 화면 배열이 구운 결과를 바꾸지 못하게 하기 위해서다.
+ *
+ * 우리 `SpriteCanvas` 는 `frameOrder`(표시 순서) + `excludedFrames`(제외)를 들고 있고
+ * 그 둘에서 파생된 재생 시퀀스가 곧 `selected` 다. 저장할 때 파생값을 굽고, 표시 복원용
+ * `order` 를 함께 남긴다.
+ */
+export type CurationRecord = {
+  /** 재생 순서의 0-based 프레임 인덱스. 비어 있거나 없으면 전체 프레임을 원래 순서로. */
+  selected: number[];
+  /** 표시 전용. 해석은 무시한다. */
+  order?: number[];
+};
 
 /**
  * 앵커 지정. sprite-gen 은 `{state, index}` + `state_revision` 을 쓰지만 우리는
@@ -69,15 +85,26 @@ export class AnchorUnavailable extends Error {
 }
 
 /**
- * 재생·내보내기가 따르는 그 순서. order 길이가 프레임 수와 다르면 원본 순서로 본다
- * (SpriteCanvas 도 초기화 전에는 같은 판정을 한다).
+ * 재생·내보내기가 따르는 그 순서 = `selected`.
+ *
+ * 범위를 벗어난 인덱스는 조용히 버리지 않고 던진다. 정본은 행별 `revision` 스탬프로
+ * 프레임 인덱스 공간이 바뀐 큐레이션을 걸러내는데(재추출·리롤), 우리에겐 그 스탬프가
+ * 없다. 그대로 필터링하면 사람이 승인한 것과 **다른 프레임이 시퀀스 헤드**가 되고,
+ * 그것이 이 모듈이 존재하는 사고와 같은 형태다.
  */
 export function curatedSequence(frameCount: number, curation: CurationRecord | null): number[] {
   const natural = Array.from({ length: frameCount }, (_, i) => i);
-  if (!curation) return natural;
-  const order = curation.order.length === frameCount ? curation.order : natural;
-  const excluded = new Set(curation.excluded);
-  return order.filter(i => !excluded.has(i));
+  if (!curation || curation.selected.length === 0) return natural;
+  const stale = curation.selected.filter(i => i < 0 || i >= frameCount);
+  if (stale.length > 0) {
+    throw new AnchorUnavailable(
+      "curation-stale",
+      `anchor: curated selection references frames ${stale.join(", ")} but the row has ` +
+        `${frameCount} frames — the curation was made for a different extraction. ` +
+        `Re-curate the row.`,
+    );
+  }
+  return [...curation.selected];
 }
 
 export function resolveAnchor(ctx: AnchorContext, direction: string): ResolvedAnchor {
