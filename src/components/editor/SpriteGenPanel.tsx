@@ -122,6 +122,11 @@ function hintFrameCount(frames: number): FrameCount | null {
   return FRAME_OPTS.find(f => f.value === frames)?.value ?? null;
 }
 
+/** base 후보가 픽셀아트로 만들어졌는가 — 게이트의 픽셀 격자 검사 적용 여부. */
+function isPixelArtPrompt(prompt?: string): boolean {
+  return prompt ? /픽셀아트|픽셀 아트|도트|pixel\s*art|8-?bit|16-?bit/i.test(prompt) : false;
+}
+
 // gpt-image-2 캔버스 하드 제약 — 셀 384px 고정 × 그리드(rows×cols)
 // 실측 built-in tool 한계: 한 변 최대 1536px(CELL_PX=384 × 4). MCP server.ts 검증과 동일.
 const SPRITE_CELL_PX = 384;
@@ -285,9 +290,10 @@ export function SpriteGenPanel({
     if (s === "effect") {
       setSeamlessLoop(false);
       if (!EFFECT_FRAME_OPTS.find(f => f.value === frames)) setFrames(9);
-    } else {
-      setSeamlessLoop(true);
     }
+    // 캐릭터·오브젝트로 돌아올 때 루프를 켜지 않는다. 정본 simple 상태 넷 중 루프인
+    // 것은 idle 뿐이라 초기값이 OFF 인데, 여기서 ON 으로 덮으면 탭을 한 번만 눌러도
+    // 되돌아갔다. 어떤 동작인지는 ACTION_STATE_HINTS 가 동작 텍스트를 보고 정한다.
   }
 
   const exampleKey: ExampleKey = subjectType === "effect" ? "effect" : subjectType;
@@ -358,6 +364,10 @@ export function SpriteGenPanel({
         <BaseLockGate
           generationId={referenceId}
           imageUrl={referenceImageUrl}
+          // 픽셀 격자 검사는 픽셀 런에서만 뜻이 있다. 안 넘기면 픽셀아트 base 인데도
+          // "픽셀아트 런 아님 — 검사 생략" 으로 초록 체크가 떠서, 실제로 재지 않은
+          // 항목이 통과처럼 보인다(2026-08-16 실측).
+          pixelArt={isPixelArtPrompt(referencePrompt)}
           onClose={() => setGateOpen(false)}
           onLocked={id => setBaseLockedId(id)}
         />

@@ -54,11 +54,15 @@ function extractSpriteSubjectMode(args: unknown): "character" | "object" | undef
   if (a.subjectType === "object") return "object";
   if (a.subjectType === "character") return "character";
 
-  // 2. generate_image / edit_image 의 prompt 키워드 추론
+  // 2. generate_image / edit_image 의 prompt 키워드 추론.
+  //    **피사체 지시어를 먼저 본다.** 배경 쪽을 먼저 보면 스프라이트용 base 프롬프트가
+  //    거의 다 오브젝트로 빠진다 — 정본이 base 에 평면 크로마 배경을 요구해서
+  //    "…, 평평한 마젠타 단색 배경" 이 캐릭터 프롬프트에 사실상 항상 붙기 때문이다.
+  //    오분류되면 패널이 오브젝트로 열려 base 잠금 게이트에 도달할 수 없다.
   const p = typeof a.prompt === "string" ? a.prompt.toLowerCase() : "";
   if (!p) return undefined;
-  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
   if (/캐릭터|character|캐릭|인물|전사|마법사|궁수|기사|영웅|hero|warrior|knight|mage|wizard|archer/.test(p)) return "character";
+  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
   return undefined;
 }
 

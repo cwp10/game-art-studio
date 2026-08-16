@@ -51,12 +51,23 @@ function buildVfxOverlayMessage(description: string): string {
   return `이 스프라이트시트에 ${description} 이팩트를 추가해줘. 캐릭터 포즈·프레임 구성은 그대로 유지하고, 이팩트만 얹어줘.`;
 }
 
-/** 사용자 프롬프트에서 캐릭터/오브젝트 모드를 추론 — args 추출이 실패했을 때 2차 fallback. */
+/**
+ * 사용자 프롬프트에서 캐릭터/오브젝트 모드를 추론 — args 추출이 실패했을 때 2차 fallback.
+ *
+ * **피사체 지시어를 먼저 본다.** 배경 쪽 패턴("배경", "숲" …)을 먼저 보면 스프라이트용
+ * base 프롬프트가 거의 다 오브젝트로 빠진다 — 정본은 base 에 평면 크로마 배경을
+ * 요구하므로 "…, 평평한 마젠타 단색 배경" 같은 문구가 캐릭터 프롬프트에 사실상 항상
+ * 붙기 때문이다. 그렇게 오분류되면 패널이 오브젝트로 열리고 base 잠금 배지가 사라져
+ * 게이트에 **도달할 수 없다**(2026-08-16 실측).
+ *
+ * "기사 캐릭터 … 마젠타 배경" 에서 피사체는 기사이고 배경은 그 속성이다. 배경 단어가
+ * 피사체를 가리키는 경우("성 배경 타일셋")는 캐릭터 지시어가 없어 아래 줄로 내려간다.
+ */
 function inferSubjectModeFromPrompt(prompt?: string): "character" | "object" | undefined {
   if (!prompt) return undefined;
   const p = prompt.toLowerCase();
-  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
   if (/캐릭터|character|캐릭|인물|전사|마법사|궁수|기사|영웅|hero|warrior|knight|mage|wizard|archer/.test(p)) return "character";
+  if (/배경|background|tileset|tile\s*set|오브젝트|아이템|item|환경|environment|dungeon|동굴|castle|forest|숲|지형|terrain|맵[^핑]|map/.test(p)) return "object";
   return undefined;
 }
 
