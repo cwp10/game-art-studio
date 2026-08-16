@@ -28,7 +28,7 @@ visual-qa 스폰 여부는 오케스트레이터가 결정한다.
 - sharp 기반 후처리: 정확 배수 리사이즈, chroma-key(greenness feather), 흰 배경 투명화
 - 스프라이트시트 `normalizeSpritesheetCells()` — 글로벌 connected-component 라벨링, cross-cell 캐릭터 보존, 셀 하단·중앙 정렬
 - 그리드 템플릿 생성, 배경 결정 우선순위, seamless loop 지시문
-- 스프라이트 프롬프트 계층: `facing` 결정, `directionLabels/buildDirectionPrompt`, `isLocomotion/buildGaitPrompt`, `inferSubjectType`
+- 스프라이트 프롬프트 계층: `facing` 결정, `directionLabels/buildDirectionPrompt`, `isLocomotion/isRunning`, `inferSubjectType` (gait 지시문 자체는 별도 함수가 아니라 `handlers/shared.ts` 의 인라인 프롬프트 문자열이다)
 
 ## 작업 원칙
 

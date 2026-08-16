@@ -21,7 +21,7 @@ WAL로 같은 DB를 공유하며, 한쪽 enum 변경이 다른 쪽 런타임에�
 
 ## 핵심 역할
 
-- **API 라우트** (`src/app/api/`): chat SSE 오케스트레이션, generations/images/upload/layers/suggest/logs, sessions·presets·prompts REST CRUD
+- **API 라우트** (`src/app/api/`): chat SSE 오케스트레이션, generations/images/upload/layer-suggest/suggest/logs, sessions·presets·prompts REST CRUD
 - **MCP 도구 노출** (`src/lib/mcp/server.ts`의 입력 스키마·`structuredContent` 계약 — 단, 후처리 로직 자체는 pipeline-engineer 담당)
 - **DB** (`src/lib/db/`): schema.sql, repo 모듈, WAL 클라이언트
 - **CLI 통합** (`src/lib/cli/`): claude-cli spawn, progress-tail
@@ -30,7 +30,7 @@ WAL로 같은 DB를 공유하며, 한쪽 enum 변경이 다른 쪽 런타임에�
 
 ## 작업 원칙
 
-- **경계면 정합성이 최우선이다.** 이 프로젝트의 데이터는 React → API → MCP → codex → SQLite를 가로지른다. 한쪽 shape을 바꾸면 반대쪽도 같이 바꾼다. 특히: MCP `structuredContent`{generationId, imagePath, width, height, elapsedMs} ↔ ImageResultCard, generations CHECK enum ↔ upload/layers의 kindHint 회피 패턴, chat stream-json 이벤트 ↔ chat-state items 모델.
+- **경계면 정합성이 최우선이다.** 이 프로젝트의 데이터는 React → API → MCP → codex → SQLite를 가로지른다. 한쪽 shape을 바꾸면 반대쪽도 같이 바꾼다. 특히: MCP `structuredContent`{generationId, imagePath, width, height, elapsedMs} ↔ ImageResultCard, generations CHECK enum(schema.sql) ↔ migrate.ts ↔ `src/types/db.ts` 유니온 3중 동기화, chat stream-json 이벤트 ↔ chat-state items 모델.
 - **SSE/스트림 계약을 깨지 마라.** chat/route의 ChatEvent 매핑과 progress.jsonl tailing은 UI 진행 표시의 생명줄이다.
 - **별도 프로세스·공유 SQLite.** Next와 MCP 서버는 다른 프로세스이며 WAL로 같은 DB를 공유한다. 마이그레이션은 schema.sql의 IF NOT EXISTS 멱등성을 유지한다.
 - CLAUDE.md 단순성·외과적 변경 원칙. 매칭되는 기존 스타일을 따른다.
@@ -43,7 +43,7 @@ WAL로 같은 DB를 공유하며, 한쪽 enum 변경이 다른 쪽 런타임에�
 ## 에러 핸들링
 
 - 런타임 오류는 `data/logs/`와 Next dev 콘솔을 확인한다.
-- DB enum/CHECK 위반은 schema.sql의 generations.kind 제약을 먼저 본다 (upload/layers가 kindHint로 우회하는 이유).
+- DB enum/CHECK 위반은 schema.sql의 generations.kind 제약을 먼저 본다. 신규 DB는 schema.sql, 기존 DB는 migrate.ts를 거치므로 둘의 허용 kind가 갈렸는지 대조한다.
 
 ## 팀 통신 프로토콜
 

@@ -45,14 +45,16 @@ button-states, canvas-edit/[seedId], chat, cleanup, composite, composite-ai, con
 `main.js` — 데스크톱 창 관리·splash·spawn 창 숨김(Windows headless), `preload.js`. 패키징: `pnpm dist:mac` / `dist:win` (electron-builder → `dist/`, lint 제외 대상).
 
 ### DB (`src/lib/db/`)
-`client.ts`(싱글톤 WAL), `schema.sql`(IF NOT EXISTS 멱등), `migrate.ts`(v1~v10), repo 모듈들
+`client.ts`(싱글톤 WAL), `schema.sql`(IF NOT EXISTS 멱등), `migrate.ts`(v1~v11), repo 모듈들
 
 ## 깨지기 쉬운 계약 (한쪽 바꾸면 반대쪽도)
 
 1. **MCP `structuredContent` ↔ ImageResultCard**
    `{generationId, imagePath:"/api/images/{id}", width, height, elapsedMs}` — 원천 타입은 `src/lib/mcp/handlers/shared.ts`의 `ToolResponse`. 필드명/타입을 바꾸면 ImageResultCard와 chat-state 양쪽을 함께 수정.
-2. **generations.kind CHECK enum ↔ upload/layers의 kindHint 우회**
-   schema의 kind는 `text2img/img2img/upscale/remove_bg/inpaint/spritesheet`로 제한. upload(외부 이미지/마스크)·layers(색별 레이어)는 enum에 없는 종류라 `inpaint`/`text2img` + `params.kindHint`로 우회한다. 새 종류 추가 시 enum을 늘릴지 kindHint를 쓸지 일관되게 결정.
+2. **generations.kind CHECK enum ↔ 새 kind 추가**
+   schema.sql 의 kind CHECK 는 20종을 허용한다: `text2img/img2img/upscale/remove_bg/inpaint/spritesheet/mask/layer/external/reskin/resize/emote_sheet/tileset/normal_map/layer_extract/composite/sprite_effect/nine_slice/nine_slice_scaled/button_state`.
+   **새 kind 는 enum 을 늘려서 추가한다.** 과거 `params.kindHint` 로 우회하던 패턴은 `migrate.ts` v1 이 정식 enum(mask/layer/external)으로 정리했으므로 되살리지 않는다 — 현재 `kindHint` 는 migrate.ts 의 과거 데이터 변환 코드에만 남아 있다.
+   SQLite 는 CHECK 를 ALTER 로 못 바꾼다. 새 kind 추가는 `migrate.ts` 에 테이블 재생성 마이그레이션(v2~v11 이 전부 이 패턴)을 더하고, `schema.sql` CHECK 와 `src/types/db.ts` 유니온도 **함께** 고친다. 세 곳 중 하나라도 빠지면 신규 DB 와 기존 DB 의 허용 kind 가 갈린다.
 3. **chat stream-json 이벤트 ↔ chat-state items 모델**
    chat/route가 Claude CLI의 stream-json을 ChatEvent(assistant_text / tool_call_started / tool_call_finished / message_completed)로 매핑하고, chat-state.ts의 단일 `items` 배열이 이를 소비한다. 이벤트를 추가하면 reducer도 함께.
 4. **progress.jsonl ↔ tailProgress()**
@@ -72,7 +74,7 @@ button-states, canvas-edit/[seedId], chat, cleanup, composite, composite-ai, con
 ## React 패턴 (src/components/)
 
 - chat-state.ts의 단일 `items` 배열이 상태 모델의 중심. ChatLayout이 useReducer + 오버레이/핫키 관리.
-- editor(SpriteCanvas/LayerCanvas/MaskCanvas)는 클라이언트 캔버스 작업 — gif.js·JSZip은 브라우저 전용(`/gif.worker.js` postinstall 복사). 서버 후처리와 혼동 금지.
+- editor(CanvasEditor/SpriteCanvas)는 클라이언트 캔버스 작업 — gif.js·JSZip은 브라우저 전용(`/gif.worker.js` postinstall 복사). 서버 후처리와 혼동 금지.
 
 ## 변경 후 필수 절차
 

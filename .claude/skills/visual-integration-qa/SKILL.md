@@ -59,7 +59,7 @@ pnpm build && pnpm lint
 ### 4. 경계면 교차 비교 (핵심)
 "존재 확인"이 아니라 **양쪽을 동시에 읽어 shape 일치**를 본다. 보내는 쪽 필드명·타입 = 받는 쪽 필드명·타입인지:
 - MCP `structuredContent`(handlers/shared.ts의 `ToolResponse`) ↔ ImageResultCard / chat-state
-- generations.kind enum(schema.sql) ↔ upload·layers의 kindHint
+- generations.kind enum: schema.sql CHECK ↔ migrate.ts 최신 마이그레이션 ↔ `src/types/db.ts` 유니온 (셋이 같은 목록인지)
 - chat stream-json 이벤트(chat/route) ↔ chat-state reducer
 - progress.jsonl stage(handlers/shared.ts `runImageTool`) ↔ tailProgress(chat/route)
 
