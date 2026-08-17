@@ -7,6 +7,7 @@ import {
   Edit3,
   Film,
   Grid3x3,
+  ImageOff,
   Link2,
   Loader2,
   RotateCw,
@@ -57,6 +58,14 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
   const [lightbox, setLightbox] = useState(false);
   const [lightboxLoaded, setLightboxLoaded] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  /**
+   * 파일이 사라진 generation — `/api/images/<id>` 가 410 을 준다.
+   *
+   * DB 행은 남고 파일만 정리(cleanup)된 상태다. 서버는 404(행 없음)와 410(파일 없음)을
+   * 구분해 답하는데 UI 가 그걸 무시해서, 사용자에게는 깨진 이미지 아이콘과 alt 텍스트만
+   * 남았다 — 왜 안 보이는지 알 방법이 없었다.
+   */
+  const [fileGone, setFileGone] = useState(false);
 
   // 라이트박스: Esc 닫기
   useEffect(() => {
@@ -118,19 +127,28 @@ export function ImageResultCard({ generationId, imageUrl, width, height, created
     <figure className="rounded-xl border border-border bg-bg-card">
       {/* 카드 1개가 viewport 안에 들어가도록 height cap (60vh).
           가로 긴 비율(스프라이트 시트 등) 도 max-w-full 로 자연 fit. 클릭 시 라이트박스. */}
-      <div
-        className="checkerboard block cursor-zoom-in overflow-hidden rounded-t-xl"
-        onClick={openLightbox}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageUrl}
-          alt={prompt ?? "generated image"}
-          className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full"
-          width={width || undefined}
-          height={height || undefined}
-        />
-      </div>
+      {fileGone ? (
+        <div className="flex flex-col items-center justify-center gap-1 rounded-t-xl border-b border-border bg-bg-panel px-4 py-10 text-center">
+          <ImageOff size={20} className="text-text-muted" />
+          <span className="text-xs text-text-muted">이미지 파일이 정리되어 남아 있지 않습니다</span>
+          <span className="text-[10px] text-text-muted/60">기록은 남아 있지만 이미지는 복구할 수 없습니다</span>
+        </div>
+      ) : (
+        <div
+          className="checkerboard block cursor-zoom-in overflow-hidden rounded-t-xl"
+          onClick={openLightbox}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageUrl}
+            alt={prompt ?? "generated image"}
+            className="mx-auto block h-auto max-h-[60vh] w-auto max-w-full"
+            width={width || undefined}
+            height={height || undefined}
+            onError={() => setFileGone(true)}
+          />
+        </div>
+      )}
       <figcaption className="space-y-2 px-4 py-3 text-xs">
         {prompt && (
           <div className="flex items-start gap-2">
