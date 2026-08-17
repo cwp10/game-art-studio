@@ -96,6 +96,37 @@ function guideCell(request: SpriteRequest, state: string) {
   };
 }
 
+/**
+ * 정본이 확정한 행 생성 동시성.
+ *
+ * SKILL.md: *"여러 행을 뽑는 배치는 4동시로 돌린다 … 1개씩 직렬은 멀티-행 배치에서
+ * 안티패턴"* — codex 실측으로 4병렬까지 스로틀이 없다는 관측에서 나온 값이다. 우리는
+ * 행마다 codex 를 한 번씩 부르므로 같은 값을 쓴다.
+ */
+const ROW_CONCURRENCY = 4;
+
+/**
+ * 최대 `ROW_CONCURRENCY` 개씩 동시에 돌린다. 하나가 던지면 그대로 전파한다 —
+ * 행 하나가 실패한 시트를 성공으로 보고하면 안 된다.
+ *
+ * 결과 배열을 돌려주지 않는다: 호출부가 `result` 를 직접 채우고, 그 쓰기는 서로 다른
+ * 상태 키라 겹치지 않는다.
+ */
+async function mapConcurrent<T>(
+  items: readonly T[],
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from({ length: Math.min(ROW_CONCURRENCY, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+}
+
 /** 액션 행에 base 가 붙었는지 기계적으로 검증한다 — 주석이 아니라 코드로 막는다. */
 function assertNoBase(item: PlanItem, inputPaths: string[], basePath: string | null): void {
   if (item.role !== "action-row" || !basePath) return;
@@ -199,7 +230,7 @@ export async function runSpritePlan(
 
   // 방향 계약이 없으면(REF 런) 단일 행 경로 — base 를 그대로 identity 로 쓴다.
   if (!plan) {
-    for (const [state, entry] of Object.entries(request.states)) {
+    await mapConcurrent(Object.entries(request.states), async ([state, entry]) => {
       const guide = join(deps.workDir, `guide-${state}.png`);
       await renderLayoutGuide(guide, entry.frames, guideCell(request, state));
       const inputPaths = [...(deps.lockedBasePath ? [deps.lockedBasePath] : []), guide];
@@ -209,9 +240,9 @@ export async function runSpritePlan(
         prompt: buildRowPrompt(request, state, entry, deps.correctionHints?.[state] ?? []),
         inputPaths,
         role: "action-row",
-        });
+      });
       await recordRow(result, request, state, entry.frames, deps.workDir, gen);
-    }
+    });
     result.warnings.push("방향 계약 없는 런 — 앵커 체인을 쓰지 않는다(REF 모드)");
     return result;
   }
@@ -220,7 +251,8 @@ export async function runSpritePlan(
   for (const m of plan.mirroredDirections) deps.log(`미러 생략: ${m.direction} ← ${m.mirrorOf}`);
 
   // ── stage 1: 방향 앵커 행 ────────────────────────────────────────────────
-  for (const item of plan.order[0].items) {
+  // stage 안의 행들은 서로를 참조하지 않는다 — 각자 base + 자기 레이아웃 가이드로 굽는다.
+  await mapConcurrent(plan.order[0].items, async item => {
     const existing = deps.existingRows?.[item.state];
     if (existing) {
       result.rows[item.state] = { ...existing, reused: true };
@@ -228,7 +260,7 @@ export async function runSpritePlan(
         `stage1 ${item.state}: 재사용 ${existing.generationId} ` +
           `(큐레이션 ${existing.curation ? "있음" : "없음"})`,
       );
-      continue;
+      return;
     }
     const entry = request.states[item.state];
     const guide = join(deps.workDir, `guide-${item.state}.png`);
@@ -242,22 +274,26 @@ export async function runSpritePlan(
       role: item.role,
     });
     await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
-  }
+  });
 
   // ── stage 2: 액션 행 ────────────────────────────────────────────────────
-  for (const item of plan.order[1].items) {
+  // 앵커 후보는 **stage 2 시작 시점으로 고정**한다. 직렬일 때는 앞 액션 행이 끝나면
+  // result.rows 에 들어가 뒤 행의 해석 입력이 달라졌는데, 병렬에서는 그 타이밍이
+  // 비결정적이다. 액션 행은 서로의 앵커가 아니므로 스냅샷이 옳고, 같은 입력이면 같은
+  // 앵커가 나온다.
+  const anchorRowsSnapshot: Record<string, AnchorRow> = {};
+  for (const [state, row] of Object.entries(result.rows)) {
+    anchorRowsSnapshot[state] = {
+      generationId: row.generationId,
+      frameCount: row.frameCount,
+      curation: row.curation ?? null,
+    };
+  }
+
+  await mapConcurrent(plan.order[1].items, async item => {
     const entry = request.states[item.state];
 
-    // 앵커 ref 는 파생 캐시다 — 매 행 생성 직전에 큐레이션 진실에서 다시 굽는다.
-    const anchorRows: Record<string, AnchorRow> = {};
-    for (const [state, row] of Object.entries(result.rows)) {
-      anchorRows[state] = {
-        generationId: row.generationId,
-        frameCount: row.frameCount,
-        curation: row.curation ?? null,
-      };
-    }
-    const ctx: AnchorContext = { request, picks: deps.picks ?? {}, rows: anchorRows };
+    const ctx: AnchorContext = { request, picks: deps.picks ?? {}, rows: anchorRowsSnapshot };
     let resolved;
     try {
       resolved = resolveAnchor(ctx, item.direction);
@@ -271,7 +307,12 @@ export async function runSpritePlan(
       throw e;
     }
     const anchorRow = result.rows[resolved.state];
-    const anchorPath = join(deps.workDir, `anchor-${item.direction}-x${ANCHOR_SCALE}.png`);
+    // 파일명에 상태를 넣는다 — 같은 방향의 액션 행이 여럿이면 방향별 한 이름으로는 두
+    // 행이 같은 파일에 동시에 쓴다. 앵커 이미지는 파생 캐시라 이름이 갈려도 무방하다.
+    const anchorPath = join(
+      deps.workDir,
+      `anchor-${item.direction}-${item.state}-x${ANCHOR_SCALE}.png`,
+    );
     // 입력은 추출된 프레임이다 — 셀 크기, 알파 있음. 원본 bake_frame 과 같은 위치.
     await bakeAnchorImage({ framePath: anchorRow.framePaths[resolved.index], destPath: anchorPath });
     result.anchors[item.direction] = {
@@ -296,7 +337,7 @@ export async function runSpritePlan(
       role: item.role,
     });
     await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
-  }
+  });
 
   return result;
 }

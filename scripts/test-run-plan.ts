@@ -244,6 +244,43 @@ void (async () => {
       }
       check("생성 실패는 전파된다 (조용히 계속하지 않는다)", threw.includes("codex 실패"), threw);
     }
+
+    // 정본 SKILL.md: 여러 행을 뽑는 배치는 4동시로 돌린다. 1개씩 직렬은 안티패턴이다.
+    // 직렬로 돌아가면 동시 진행 최대치가 1 이라 여기서 잡힌다.
+    console.log("=== 행 생성 동시성 ===");
+    {
+      const { request: creq } = await buildSpriteRequest({
+        characterId: "a",
+        description: "d",
+        baseImagePath: null,
+        uiDirection: "REF",
+        frames: 4,
+        loop: true,
+        actionPrompt: "walk",
+      });
+      // REF 런은 상태가 하나뿐이라 동시성이 드러나지 않는다 — 상태를 늘려서 잰다.
+      for (const extra of ["idle", "attack", "jump", "wave"]) {
+        creq.states[extra] = { ...creq.states.walk, frames: 4 };
+      }
+      let live = 0;
+      let peak = 0;
+      await runSpritePlan(creq, {
+        generate: async spec => {
+          live++;
+          peak = Math.max(peak, live);
+          await new Promise(r => setTimeout(r, 20));
+          const out = join(dir, `c-${spec.state}.png`);
+          await fakeSheet(out, creq.states[spec.state].frames, 1200, 600);
+          live--;
+          return { generationId: `g_${spec.state}`, imagePath: out, width: 1, height: 1 };
+        },
+        workDir: dir,
+        lockedBasePath: basePath,
+        log: () => {},
+      });
+      check("동시에 여러 행을 돌린다 (직렬이 아니다)", peak > 1, `동시 최대 ${peak}`);
+      check("정본 한도 4 를 넘지 않는다", peak <= 4, `동시 최대 ${peak}`);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
