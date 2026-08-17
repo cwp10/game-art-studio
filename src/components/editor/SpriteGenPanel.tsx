@@ -53,6 +53,14 @@ export type SpriteGenState = {
   pixelUnfake?: boolean;
   /** 목표 논리 높이. 셀 높이(256)의 약수여야 한다. 생략 = 1:1. */
   logicalHeight?: number;
+  /**
+   * 프레임 분리 방식 (정본 `fit.segmentation`). 기본은 연결요소.
+   *
+   * `projection` 은 팔·소품이 이웃 프레임과 닿아 포즈가 한 덩어리로 붙을 때만 쓴다 —
+   * 컬럼 알파 질량의 골로 세고, 골이 없으면 DP 최소 절단으로 **기대 개수를 강제 분할**한다.
+   * 프레임 수가 맞다는 전제를 신뢰하므로 틀린 개수를 잡아주지 않는다.
+   */
+  segmentation?: "components" | "projection";
 };
 
 type Props = {
@@ -234,6 +242,7 @@ export function SpriteGenPanel({
   const [seamlessLoop, setSeamlessLoop] = useState(false);
   const [pixelUnfake, setPixelUnfake] = useState(false);
   const [logicalHeight, setLogicalHeight] = useState<number>(0);
+  const [projectionSplit, setProjectionSplit] = useState(false);
   const [effectType, setEffectType] = useState<EffectType>("explosion");
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
@@ -342,6 +351,7 @@ export function SpriteGenPanel({
         seamlessLoop,
         ...(pixelUnfake ? { pixelUnfake: true } : {}),
         ...(pixelUnfake && logicalHeight > 0 ? { logicalHeight } : {}),
+        ...(projectionSplit ? { segmentation: "projection" as const } : {}),
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[]; error?: string };
       if (!res.ok || !data.suggestions?.length) {
@@ -367,6 +377,7 @@ export function SpriteGenPanel({
         seamlessLoop,
         ...(pixelUnfake ? { pixelUnfake: true } : {}),
         ...(pixelUnfake && logicalHeight > 0 ? { logicalHeight } : {}),
+        ...(projectionSplit ? { segmentation: "projection" as const } : {}),
         actionPrompt: actionPrompt.trim(),
         perspective,
         effectType: subjectType === "effect" ? effectType : undefined,
@@ -704,6 +715,23 @@ export function SpriteGenPanel({
                 <div className="mt-1 text-[10px] text-text-muted">
                   참조 이미지가 진짜 도트여야 합니다. 아니면 생성 시 경고만 뜨고 스냅은 건너뜁니다.
                 </div>
+                {/* 분리 모드 — 픽셀 언페이크와 무관한 별개 기능이라 선으로 가른다. */}
+                <div className="mt-2.5 border-t border-border pt-2.5" />
+                <button
+                  type="button"
+                  onClick={() => setProjectionSplit(v => !v)}
+                  className={`flex h-7 w-full items-center justify-center rounded-md border text-xs transition-colors ${
+                    projectionSplit
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-border bg-bg-panel text-text-muted hover:text-text-primary"
+                  }`}
+                  title="팔이나 소품이 옆 프레임과 닿아 포즈가 한 덩어리로 붙을 때 켭니다. 컬럼 알파 질량의 골로 나누고, 골이 없으면 최소 절단으로 프레임 수만큼 강제로 가릅니다. 프레임 수가 맞다는 전제로 동작하니 개수가 틀리면 잘못 갈립니다."
+                >
+                  붙은 포즈 가르기 {projectionSplit ? "ON" : "OFF"}
+                </button>
+                <div className="mt-1 text-[10px] text-text-muted">
+                  프레임이 안 갈릴 때만 켜세요. 평소엔 결과가 달라질 수 있습니다.
+                </div>
               </div>
             )}
           </div>
@@ -969,7 +997,8 @@ export function buildSpriteMessage(
     `${facingClause}${viewpointClause}; seamlessLoop=${state.seamlessLoop}` +
     // 픽셀 언페이크는 켠 경우에만 붙인다 — 안 붙으면 기존 경로 그대로다.
     `${state.pixelUnfake ? `; pixelUnfake=true` : ""}` +
-    `${state.pixelUnfake && state.logicalHeight ? `; logicalHeight=${state.logicalHeight}` : ""}]`;
+    `${state.pixelUnfake && state.logicalHeight ? `; logicalHeight=${state.logicalHeight}` : ""}` +
+    `${state.segmentation === "projection" ? `; segmentation=projection` : ""}]`;
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
