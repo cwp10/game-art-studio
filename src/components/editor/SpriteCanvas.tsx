@@ -915,6 +915,13 @@ export function SpriteCanvas({
   >({});
   const [rerollBusy, setRerollBusy] = useState<string | null>(null);
   const [rerollMsg, setRerollMsg] = useState<string | null>(null);
+  /** 보간 — 두 프레임 사이의 중간 포즈. 결과는 시트에 자동으로 끼우지 않는다. */
+  const [tweenState, setTweenState] = useState<string>("");
+  const [tweenA, setTweenA] = useState(0);
+  const [tweenB, setTweenB] = useState(1);
+  const [tweenBusy, setTweenBusy] = useState(false);
+  const [tweenMsg, setTweenMsg] = useState<string | null>(null);
+  const [tweenResult, setTweenResult] = useState<string | null>(null);
 
   /** 프레임 인덱스 → 그 프레임이 속한 상태와 행 내 열 번호. */
   function frameState(origIdx: number): { state: string; col: number } | null {
@@ -1038,6 +1045,36 @@ export function SpriteCanvas({
       setRerollMsg(`선택 실패: ${(e as Error).message}`);
     } finally {
       setRerollBusy(null);
+    }
+  }
+
+  /** 두 프레임 사이의 중간 포즈를 생성한다 (시트에 자동 반영하지 않음). */
+  async function runInterpolate() {
+    if (!sheetGenerationId || !tweenState) return;
+    if (tweenA === tweenB) {
+      setTweenMsg("서로 다른 두 프레임을 골라주세요");
+      return;
+    }
+    setTweenBusy(true);
+    setTweenMsg(null);
+    setTweenResult(null);
+    try {
+      const res = await jsonFetch("/api/sprite/interpolate", "POST", {
+        atlasGenerationId: sheetGenerationId,
+        state: tweenState,
+        indexA: tweenA,
+        indexB: tweenB,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean; generationId?: string; error?: string;
+      };
+      if (!res.ok || !body.ok) throw new Error(body.error ?? `보간 실패 (${res.status})`);
+      setTweenResult(body.generationId ?? null);
+      setTweenMsg(`${tweenState} ${tweenA}↔${tweenB} 중간 프레임을 만들었습니다`);
+    } catch (e) {
+      setTweenMsg(`보간 실패: ${(e as Error).message}`);
+    } finally {
+      setTweenBusy(false);
     }
   }
 
@@ -2061,6 +2098,73 @@ export function SpriteCanvas({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+              {params?.states && (
+                <div className="mb-2 rounded-lg border border-border p-2">
+                  <div className="mb-1.5 text-[11px] font-medium text-text-muted">
+                    사이 채우기 (두 프레임 중간 포즈를 생성합니다)
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <select
+                      value={tweenState}
+                      onChange={e => setTweenState(e.target.value)}
+                      className="h-6 rounded border border-border bg-bg-panel px-1 text-[10px] text-text-primary"
+                    >
+                      <option value="">상태 선택</option>
+                      {params.states.map(st => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={tweenA}
+                      onChange={e => setTweenA(Number(e.target.value))}
+                      className="h-6 rounded border border-border bg-bg-panel px-1 text-[10px] text-text-primary"
+                    >
+                      {Array.from({ length: cols }, (_, i) => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-text-muted">↔</span>
+                    <select
+                      value={tweenB}
+                      onChange={e => setTweenB(Number(e.target.value))}
+                      className="h-6 rounded border border-border bg-bg-panel px-1 text-[10px] text-text-primary"
+                    >
+                      {Array.from({ length: cols }, (_, i) => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => void runInterpolate()}
+                      disabled={tweenBusy || !tweenState}
+                      className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted disabled:opacity-40"
+                      title="두 프레임을 정합해 참조로 붙이고 중간 포즈를 생성합니다. 결과는 시트에 자동으로 끼우지 않고 이미지로만 남습니다."
+                    >
+                      {tweenBusy ? "생성 중…" : "사이 채우기"}
+                    </button>
+                  </div>
+                  {tweenResult && (
+                    // 생성된 픽셀 이미지라 next/image 최적화가 오히려 해가 된다 —
+                    // 리샘플이 도트를 뭉갠다. 원본을 nearest 로 그대로 띄운다.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`/api/images/${tweenResult}`}
+                      alt="중간 프레임"
+                      className="mt-1.5 max-h-32 rounded border border-border"
+                      style={{ imageRendering: "pixelated" }}
+                    />
+                  )}
+                  {tweenMsg && (
+                    <div
+                      className={`mt-1.5 text-[10px] ${tweenMsg.includes("실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}
+                    >
+                      {tweenMsg}
+                    </div>
+                  )}
+                  <div className="mt-1 text-[10px] text-text-muted">
+                    생성에 1분쯤 걸립니다. 결과는 시트에 자동 반영되지 않고 이미지로만 남습니다.
+                  </div>
                 </div>
               )}
               {params?.states && (
