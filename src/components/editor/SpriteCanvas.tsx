@@ -2321,14 +2321,20 @@ export function SpriteCanvas({
                   </div>
                 </div>
               )}
+              {/* 두 저장 버튼의 차이가 라벨만으로 읽히지 않으면 사용자가 되돌릴 수 없는
+                  쪽을 무심코 누른다. 무엇이 남고 무엇이 새로 생기는지 버튼 아래 한 줄씩. */}
               <button
                 onClick={() => void saveCurationSidecar()}
                 disabled={curationBusy}
-                className="mb-2 flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[color:var(--accent)] text-sm font-medium text-[color:var(--accent)] disabled:opacity-40"
-                title="제외·재정렬한 재생 시퀀스를 저장하고 시트를 그 선택으로 다시 굽습니다. 원본 프레임은 그대로 둡니다."
+                className="flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-[color:var(--accent)] text-sm font-medium text-[color:var(--accent)] disabled:opacity-40"
+                title="제외·순서·위치·호흡을 사이드카에 기록하고 시트를 그대로 다시 굽습니다. 원본 프레임은 건드리지 않아 언제든 되돌릴 수 있습니다."
               >
                 <Save size={14} /> {curationBusy ? "저장 중…" : "큐레이션 저장"}
               </button>
+              <div className="mb-2 mt-1 text-[10px] leading-snug text-text-muted">
+                되돌릴 수 있음 — 제외·순서·위치·호흡을 기록하고 <b>이 시트를</b> 다시 굽습니다.
+                원본 프레임은 그대로입니다.
+              </div>
               {curationMsg && (
                 <span
                   className={`mb-2 block text-center text-xs ${curationMsg.includes("실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}
@@ -2342,9 +2348,14 @@ export function SpriteCanvas({
             onClick={saveCorrected}
             disabled={frames.length === 0 || saving}
             className="flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-[color:var(--accent)] text-sm font-medium text-white disabled:opacity-40"
+            title="지금 화면 상태를 픽셀로 구워 새 generation 을 만듭니다. 이 시트는 그대로 남고, 이후 편집은 새 시트에서 합니다."
           >
             <Save size={14} /> {saving ? "저장 중…" : "보정본 저장"}
           </button>
+          <div className="mt-1 text-[10px] leading-snug text-text-muted">
+            지금 화면을 픽셀로 구워 <b>새 시트</b>를 만듭니다. 이 시트는 그대로 남지만, 구운
+            결과는 사이드카가 아니라 이미지라 다시 나눌 수 없습니다.
+          </div>
           {savedMsg && (
             <span className={`mt-1 block text-center text-xs ${savedMsg.startsWith("저장 실패") ? "text-[color:var(--danger)]" : "text-text-muted"}`}>
               {savedMsg}
