@@ -353,10 +353,47 @@ export function SpriteGenPanel({
     }
   }
 
+  /**
+   * 생성 직전 base 게이트 — **검사가 실패할 때만** 사람을 세운다.
+   *
+   * 정본은 Base Lock Gate 를 BLOCKING 으로 두고 사람이 `y` 를 치기 전에는 1단계를
+   * 시작하지 못하게 한다. 약한 base 가 모든 행의 비율·스타일·정체성을 오염시키기
+   * 때문이다. 우리는 게이트 UI 는 있었지만 생성 버튼이 그것을 **확인하지 않아서**,
+   * 잠그지 않은 base 로도 codex 호출이 그대로 나갔다.
+   *
+   * 전부 통과한 base 까지 매번 승인을 요구하면 반복 생성이 번거로워지므로, 자동 검사가
+   * 실패한 경우에만 게이트를 열어 확인을 받는다. 이미 잠긴 base 는 그대로 통과한다.
+   *
+   * 검사 자체가 실패하면(네트워크·서버 오류) 막지 않는다 — 게이트를 못 재는 것과
+   * base 가 나쁜 것은 다른 사건이고, 전자로 생성을 봉쇄하면 되돌릴 방법이 없다.
+   */
+  async function baseGateBlocks(): Promise<boolean> {
+    if (!planDriven || !referenceId || baseLockedId === referenceId) return false;
+    try {
+      // pixelArt 를 넘겨야 격자 검사가 실제로 돈다 — 안 넘기면 픽셀아트 base 인데도
+      // "픽셀아트 런 아님 — 검사 생략" 으로 통과 처리된다(게이트 UI 와 같은 인자).
+      const qs = new URLSearchParams({
+        generationId: referenceId,
+        pixelArt: String(isPixelArtPrompt(referencePrompt)),
+      });
+      const res = await fetch(`/api/sprite/base-gate?${qs}`);
+      if (!res.ok) return false;
+      const d = (await res.json()) as { inspection?: { autoPass?: boolean } };
+      if (d.inspection?.autoPass === false) {
+        setGateOpen(true);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
     try {
+      if (await baseGateBlocks()) return;
         const state: SpriteGenState = {
         subjectType,
         direction,
