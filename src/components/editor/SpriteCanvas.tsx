@@ -962,11 +962,26 @@ export function SpriteCanvas({
   const [tweenResult, setTweenResult] = useState<string | null>(null);
 
   /** 프레임 인덱스 → 그 프레임이 속한 상태와 행 내 열 번호. */
+  /**
+   * 시트 칸 → {상태, 그 행에서의 인덱스}. **빈 칸이면 null.**
+   *
+   * 아틀라스 폭은 `columns = max(상태별 프레임)` 이라 짧은 상태의 행에는 뒤쪽에 빈 칸이
+   * 남는다(idle 4 · running 8 이면 idle 행의 4칸이 빈다). 캔버스는 rows×cols 로 자르므로
+   * 그 빈 칸도 프레임처럼 잡히는데, 그것을 `selected` 에 담으면 행의 인덱스 공간을 넘겨
+   * 재합성이 거부한다 — "curated selection references frames 4,5,6,7 but the row has
+   * 4 frames". 실제로 그렇게 실패했다.
+   *
+   * 행의 실제 칸 수는 아틀라스가 구울 때 기록한 매니페스트가 SSoT 다.
+   */
   function frameState(origIdx: number): { state: string; col: number } | null {
     if (!isPlanDriven || !params?.states) return null;
     const r = Math.floor(origIdx / cols);
     const state = params.states[r];
-    return state ? { state, col: origIdx % cols } : null;
+    if (!state) return null;
+    const col = origIdx % cols;
+    const rowFrames = params.manifest?.animation?.rows?.[state]?.frames;
+    if (typeof rowFrames === "number" && col >= rowFrames) return null;
+    return { state, col };
   }
 
   useEffect(() => {
@@ -1116,7 +1131,7 @@ export function SpriteCanvas({
     }
   }
 
-  /** 현재 표시 순서·제외를 상태별 selected 로 굽어 저장한다. */
+  /** 현재 표시 순서·제외·프레임 위치를 상태별 사이드카로 굽어 저장한다. */
   async function saveCurationSidecar() {
     if (!isPlanDriven || !sheetGenerationId || !params?.states) return;
     setCurationBusy(true);
@@ -1128,12 +1143,18 @@ export function SpriteCanvas({
           : Array.from({ length: rows * cols }, (_, i) => i);
       const byState: Record<
         string,
-        { selected: number[]; order: number[]; breathe?: { depth: number; breaths: number } }
+        {
+          selected: number[];
+          order: number[];
+          breathe?: { depth: number; breaths: number };
+          transforms: Record<string, { dx: number; dy: number }>;
+        }
       > = {};
       for (const state of params.states) {
         byState[state] = {
           selected: [],
           order: [],
+          transforms: {},
           // 껐으면 키를 아예 안 보낸다 — 저장 쪽이 그때 사이드카에서 지운다.
           // 값은 정본 기본값 그대로다(몸통 높이 6%, 시퀀스당 1회).
           ...(breatheOn.has(state) ? { breathe: { depth: 0.06, breaths: 1 } } : {}),
@@ -1145,6 +1166,13 @@ export function SpriteCanvas({
         if (!fs) continue;
         byState[fs.state].order.push(fs.col);
         if (!excludedFrames.has(origIdx)) byState[fs.state].selected.push(fs.col);
+        // 드래그로 맞춘 위치를 정본 변형(dx/dy)으로 싣는다. 이게 없으면 재합성이 raw 에서
+        // 프레임을 다시 뽑는 순간 정렬이 사라진다 — 저장을 눌렀는데 조용히 잃는 것.
+        // 0 은 담지 않는다: identity 를 저장하면 합성이 의미 없는 리샘플을 한 번 더 돈다.
+        const off = offsets[origIdx];
+        if (off && (off.x !== 0 || off.y !== 0)) {
+          byState[fs.state].transforms[String(fs.col)] = { dx: off.x, dy: off.y };
+        }
       }
       const res = await jsonFetch("/api/sprite/curation", "POST", {
         atlasGenerationId: sheetGenerationId,

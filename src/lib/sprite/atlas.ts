@@ -33,6 +33,7 @@ import {
   type BreatheConfig,
 } from "@/lib/sprite/breathe";
 import { stateBreathe } from "@/lib/sprite/curation-breathe";
+import { applyTransform, stateTransforms, type Transform } from "@/lib/sprite/curation-transform";
 import type { RawImage } from "@/lib/sprite/extract";
 import type { CellSpec, SpriteRequest } from "@/lib/sprite/request";
 
@@ -131,11 +132,17 @@ export function composeAtlas(opts: {
   // 조용히 끄지 않는 게 이 레이어의 계약이다.
   const breatheByState: Record<string, BreatheConfig | null> = {};
   const phases: Record<string, number[]> = {};
+  // 프레임별 변형 — 사이드카가 진실이고 원본 프레임은 불변이다. 합성할 때마다 다시 얹는다.
+  const transformsByState: Record<string, Record<number, Transform>> = {};
   let curationApplied = false;
   for (const state of states) {
     const curation = opts.curationByState?.[state] ?? null;
     playOrder[state] = curatedSequence(framesByState[state].length, curation);
+    transformsByState[state] = stateTransforms(curation?.transforms);
     if (curation && curation.selected.length > 0) curationApplied = true;
+    // 선택을 안 바꾸고 위치만 맞춘 큐레이션도 "적용됨" 이다 — 아니면 재합성이
+    // 사람 손을 반영했는데도 리포트가 손대지 않은 시트라고 말한다.
+    if (Object.keys(transformsByState[state]).length > 0) curationApplied = true;
     const cfg = stateBreathe(curation, state);
     breatheByState[state] = cfg;
     phases[state] = cfg
@@ -181,10 +188,15 @@ export function composeAtlas(opts: {
         );
         return;
       }
-      let frame: { data: Uint8Array; width: number; height: number } = source;
+      // 사람이 맞춘 변형을 먼저 얹는다 — 정본 순서가 변형 → 호흡이고, 해부도 변형 **후**
+      // 프레임에서 잰다. 옮겨 놓은 프레임의 해부를 원본 위치에서 재면 강체 구간이 어긋난다.
+      let frame: { data: Uint8Array; width: number; height: number } =
+        transformsByState[state][srcIndex]
+          ? applyTransform(source, transformsByState[state][srcIndex], cell)
+          : source;
       if (breatheCfg) {
-        rowSourceFrames.push(source);
-        rowAnatomy ??= resolveAnatomy(source, breatheCfg);
+        rowSourceFrames.push(frame as RawImage);
+        rowAnatomy ??= resolveAnatomy(frame, breatheCfg);
         // **위상 0 도 굽는다.** 진행파 지연(lag) 때문에 t=0 에서도 윗행은
         // wave(-lag·u) 만큼 변형된다. 건너뛰면 그 칸만 원본이 되어 아틀라스가 매 루프
         // 시작에서 튀고 GIF 굽기와 그림이 갈린다.

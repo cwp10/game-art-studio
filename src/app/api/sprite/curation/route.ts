@@ -31,7 +31,7 @@ type Body = {
   atlasGenerationId?: string;
   curationByState?: Record<
     string,
-    { selected?: number[]; order?: number[]; breathe?: unknown }
+    { selected?: number[]; order?: number[]; breathe?: unknown; transforms?: unknown }
   >;
 };
 
@@ -59,10 +59,16 @@ export async function POST(req: NextRequest) {
     const order = Array.isArray(curation.order) ? curation.order : undefined;
     // 호흡 설정은 검증하지 않고 그대로 싣는다 — 판정은 굽는 쪽(`stateBreathe`)이
     // 한 곳에서만 한다. 여기서 한 번 더 깎으면 진실이 둘이 된다.
+    // 변형도 같다: `stateTransforms` 가 굽기 직전에 정규화하고 identity 를 걸러낸다.
+    const transforms =
+      curation.transforms && typeof curation.transforms === "object"
+        ? (curation.transforms as Record<string, unknown>)
+        : undefined;
     saveCuration(rowId, {
       selected,
       ...(order ? { order } : {}),
       ...(curation.breathe !== undefined ? { breathe: curation.breathe } : {}),
+      ...(transforms ? { transforms } : {}),
     });
     saved[state] = getCuration(rowId) ?? { selected };
   }

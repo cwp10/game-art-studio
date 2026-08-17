@@ -44,6 +44,13 @@ export type CurationRecord = {
    * 그 함수가 범위·정수성·폐기 키를 **조용히 고치지 않고** 거부한다.
    */
   breathe?: unknown;
+  /**
+   * 프레임별 비파괴 변형 (정본 `states.<state>.transforms`) — {프레임 인덱스: 변형}.
+   *
+   * breathe 와 마찬가지로 검증 전 원시값이다. 읽는 쪽이 `stateTransforms` 를 통과시켜
+   * 전체 필드를 채우고 identity 를 걸러낸다.
+   */
+  transforms?: Record<string, unknown>;
 };
 
 /**

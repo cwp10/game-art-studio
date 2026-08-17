@@ -281,7 +281,12 @@ export function unlockBaseScope(sessionId: string | null): void {
  */
 export function saveCuration(
   generationId: string,
-  curation: { selected: number[]; order?: number[]; breathe?: unknown },
+  curation: {
+    selected: number[];
+    order?: number[];
+    breathe?: unknown;
+    transforms?: Record<string, unknown>;
+  },
 ): void {
   const db = getDb();
   const row = db.prepare("SELECT params FROM generations WHERE id = ?").get(generationId) as
@@ -295,6 +300,11 @@ export function saveCuration(
     // 호흡은 프레임 선택과 직교하는 변조 레이어다 — 검증 전 원시값 그대로 싣고,
     // 읽는 쪽(`stateBreathe`)이 범위·정수성을 조용히 고치지 않고 판정한다.
     ...(curation.breathe !== undefined ? { breathe: curation.breathe } : {}),
+    // 프레임별 변형도 같은 취급이다 — 원시값을 싣고 `stateTransforms` 가 읽을 때
+    // 정규화한다. 빈 맵이면 키를 지운다(정렬을 되돌린 것이 남아 있으면 안 된다).
+    ...(curation.transforms && Object.keys(curation.transforms).length > 0
+      ? { transforms: curation.transforms }
+      : {}),
   };
   db.prepare("UPDATE generations SET params = ? WHERE id = ?").run(
     JSON.stringify(params),
@@ -304,16 +314,27 @@ export function saveCuration(
 
 export function getCuration(
   generationId: string,
-): { selected: number[]; order?: number[]; breathe?: unknown } | null {
+): {
+  selected: number[];
+  order?: number[];
+  breathe?: unknown;
+  transforms?: Record<string, unknown>;
+} | null {
   const gen = getGeneration(generationId);
   const c = gen?.params?.curation as
-    | { selected?: number[]; order?: number[]; breathe?: unknown }
+    | {
+        selected?: number[];
+        order?: number[];
+        breathe?: unknown;
+        transforms?: Record<string, unknown>;
+      }
     | undefined;
   if (!c || !Array.isArray(c.selected)) return null;
   return {
     selected: c.selected,
     ...(Array.isArray(c.order) ? { order: c.order } : {}),
     ...(c.breathe !== undefined ? { breathe: c.breathe } : {}),
+    ...(c.transforms && typeof c.transforms === "object" ? { transforms: c.transforms } : {}),
   };
 }
 
