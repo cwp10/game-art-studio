@@ -23,6 +23,8 @@ import { scoreInspection, type ScoreReport } from "@/lib/sprite/score";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
 import { generateChunkedRow } from "@/lib/sprite/chunk-generate";
 import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
+import { detectPixelGrid } from "@/lib/sprite/pixel-grid";
+import type { FitSpec } from "@/lib/sprite/request";
 import { selectImageBackend } from "@/lib/image-backend";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
@@ -64,6 +66,13 @@ export type PlanDrivenInput = {
    * 쥔다. 우리도 같다: 이 필드가 있을 때만 이전 힌트를 얹어 다시 굽는다.
    */
   correctFrom?: string;
+  /**
+   * 추출 튜닝 (정본 `fit`). 픽셀 언페이크·분리 모드를 켤 때만 온다.
+   *
+   * **켜기 전에 base 를 재서 경고한다** — 격자가 없거나 논리 해상도가 높으면 스냅이
+   * 통째로 건너뛰어지는데, 그 사실을 생성비를 쓰기 전에 알아야 한다.
+   */
+  fit?: FitSpec;
 };
 
 // 판정은 `plan-driven-gate.ts` 가 소유한다 — 패널도 같은 함수를 써야 해서 순수
@@ -113,6 +122,42 @@ export async function runPlanDrivenSpritesheet(
     for (const w of gateWarnings) log(`plan-driven 경고: ${w}`);
   }
 
+  // 픽셀 언페이크를 켰으면 **base 부터 진짜 도트인지 잰다.** 정본 게이트가 못박은 지점:
+  // "베이스/앵커가 스타일 SSoT 다 — 도트 런이면 베이스부터 진짜 도트여야 한다.
+  //  프롬프트 문구로 베이스의 스타일을 이기려 하지 마라."
+  // 격자가 없거나 논리 해상도가 높으면 행 생성에서 블록이 붕괴해 스냅이 건너뛰어진다.
+  if (input.fit?.pixel_unfake) {
+    try {
+      const { data, info } = await sharp(basePath).ensureAlpha().raw()
+        .toBuffer({ resolveWithObject: true });
+      const g = detectPixelGrid({
+        data: new Uint8Array(data), width: info.width, height: info.height,
+      });
+      if (g.pitch[0] < 2) {
+        gateWarnings.push(
+          "픽셀 언페이크를 켰지만 base 에서 픽셀 격자가 검출되지 않습니다 (피치 1.0) — " +
+            "행 생성물에도 격자가 없어 스냅이 통째로 건너뛰어집니다. 진짜 도트 base 로 바꾸세요.",
+        );
+      } else {
+        // 블록 크기 = 프레임당 폭 / base 논리 폭. 검출 임계는 블록 4px 근처다(실측).
+        const logicalW = Math.round(info.width / g.pitch[0]);
+        const perFrame = Math.round(1536 / Math.max(1, input.frames));
+        const predicted = perFrame / Math.max(1, logicalW);
+        if (predicted < 4) {
+          gateWarnings.push(
+            `base 논리 해상도가 ~${logicalW}px 입니다 (피치 ${g.pitch[0].toFixed(1)}). ` +
+              `${input.frames}프레임 행에서는 블록이 ~${predicted.toFixed(1)}px 로 예상돼 ` +
+              `격자가 붕괴합니다(임계 4px). 프레임 수를 줄이거나 논리 ${Math.floor(perFrame / 4)}px 이하 ` +
+              `base 를 쓰세요 — 청크 생성이 켜져 있으면 실패한 청크만 다시 뽑습니다.`,
+          );
+        }
+      }
+    } catch (e) {
+      gateWarnings.push(`base 격자 검사 실패: ${(e as Error).message}`);
+    }
+    for (const w of gateWarnings) log(`plan-driven 경고: ${w}`);
+  }
+
   const workDir = path.join(DATA_DIR, "sprite-runs", `${input.characterId}-${Date.now()}`);
   await mkdir(workDir, { recursive: true });
 
@@ -124,6 +169,7 @@ export async function runPlanDrivenSpritesheet(
     frames: input.frames,
     loop: input.loop,
     actionPrompt: input.actionPrompt,
+    ...(input.fit ? { fit: input.fit } : {}),
   });
   for (const w of warnings) log(`plan-driven 경고: ${w}`);
   log(

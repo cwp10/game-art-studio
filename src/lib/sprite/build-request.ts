@@ -21,6 +21,7 @@ import {
   normalizeStates,
   type SpriteRequest,
   type StateSpec,
+  type FitSpec,
 } from "@/lib/sprite/request";
 import { inferActionHint } from "@/lib/sprite/state-name";
 import { stateMotionPhases } from "@/lib/sprite/motion-phase";
@@ -45,6 +46,11 @@ export type PanelInput = {
    * 옵트인이다(정본 `--motion-phase-guides`). 8프레임 로코모션이 아니면 무시된다.
    */
   motionPhaseGuides?: boolean;
+  /**
+   * 추출 튜닝 (정본 `fit`). **지정하지 않으면 request 에 키가 아예 안 실린다** —
+   * 기존 런과 바이트 동일을 지키려면 `undefined` 와 `{}` 가 달라야 한다.
+   */
+  fit?: FitSpec;
 };
 
 const DEFAULT_STATE_NAME = "action";
@@ -137,6 +143,8 @@ export async function buildSpriteRequest(
       chroma: DEFAULT_CHROMA_TUNABLES,
       states,
       ...(directions ? { directions } : {}),
+      // 빈 객체도 싣지 않는다 — 켠 것이 하나도 없으면 없는 것과 같아야 한다.
+      ...(input.fit && Object.keys(input.fit).length > 0 ? { fit: input.fit } : {}),
       // 로코모션 8프레임이면 **자동으로 켠다**. 정본은 이걸 CLI 플래그
       // (`--motion-phase-guides`)로 사람이 켜고 기본은 false 인데, 우리 앱에는 그
       // 플래그를 켤 자리가 없다 — ycbcr·앵커 면제와 같은 상황이라 같은 방식으로 푼다.

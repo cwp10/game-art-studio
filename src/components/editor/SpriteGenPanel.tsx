@@ -44,6 +44,15 @@ export type SpriteGenState = {
   actionPrompt: string;
   perspective?: Perspective;
   effectType?: EffectType;
+  /**
+   * 격자 스냅으로 진짜 픽셀 해상도를 복원한다 (정본 `fit.pixel_unfake`).
+   *
+   * **생성물에 실제 픽셀 블록이 있어야 동작한다.** base 논리 해상도가 높으면 행 생성에서
+   * 블록이 붕괴해 스냅이 통째로 건너뛰어진다 — 서버가 base 를 재서 경고한다.
+   */
+  pixelUnfake?: boolean;
+  /** 목표 논리 높이. 셀 높이(256)의 약수여야 한다. 생략 = 1:1. */
+  logicalHeight?: number;
 };
 
 type Props = {
@@ -223,6 +232,8 @@ export function SpriteGenPanel({
   // 동작 텍스트가 들어오면 ACTION_FRAME_HINTS 가 상태별 값으로 덮는다.
   const [frames, setFrames] = useState<FrameCount>(4);
   const [seamlessLoop, setSeamlessLoop] = useState(false);
+  const [pixelUnfake, setPixelUnfake] = useState(false);
+  const [logicalHeight, setLogicalHeight] = useState<number>(0);
   const [effectType, setEffectType] = useState<EffectType>("explosion");
   const [actionPrompt, setActionPrompt] = useState("");
   const [perspective, setPerspective] = useState<Perspective>("side");
@@ -329,6 +340,8 @@ export function SpriteGenPanel({
         direction: subjectType === "character" && direction !== "REF" ? direction : undefined,
         frames,
         seamlessLoop,
+        ...(pixelUnfake ? { pixelUnfake: true } : {}),
+        ...(pixelUnfake && logicalHeight > 0 ? { logicalHeight } : {}),
       });
       const data = (await res.json()) as { suggestions?: AiSuggestion[]; error?: string };
       if (!res.ok || !data.suggestions?.length) {
@@ -352,6 +365,8 @@ export function SpriteGenPanel({
         direction,
         frames,
         seamlessLoop,
+        ...(pixelUnfake ? { pixelUnfake: true } : {}),
+        ...(pixelUnfake && logicalHeight > 0 ? { logicalHeight } : {}),
         actionPrompt: actionPrompt.trim(),
         perspective,
         effectType: subjectType === "effect" ? effectType : undefined,
@@ -656,6 +671,41 @@ export function SpriteGenPanel({
             >
               루프 {seamlessLoop ? "ON" : "OFF"}
             </button>
+            {/* 픽셀 언페이크 — 캐릭터 경로에서만. 켜면 격자 스냅으로 진짜 해상도를 복원한다. */}
+            {subjectType === "character" && (
+              <div className="mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPixelUnfake(v => !v)}
+                  className={`flex h-7 w-full items-center justify-center rounded-md border text-xs transition-colors ${
+                    pixelUnfake
+                      ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
+                      : "border-border bg-bg-panel text-text-muted hover:text-text-primary"
+                  }`}
+                  title="격자를 검출해 진짜 픽셀 해상도로 접습니다. 참조 이미지에 실제 픽셀 블록이 있어야 동작하며, 없으면 생성 시 경고가 뜨고 그대로 넘어갑니다."
+                >
+                  픽셀 언페이크 {pixelUnfake ? "ON" : "OFF"}
+                </button>
+                {pixelUnfake && (
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className="text-[10px] text-text-muted">논리 높이</span>
+                    <select
+                      value={logicalHeight}
+                      onChange={e => setLogicalHeight(Number(e.target.value))}
+                      className="h-6 flex-1 rounded border border-border bg-bg-panel px-1 text-[10px] text-text-primary"
+                    >
+                      <option value={0}>셀과 1:1 (기본)</option>
+                      <option value={128}>128 · 2배 청키</option>
+                      <option value={64}>64 · 4배 청키</option>
+                      <option value={32}>32 · 8배 청키</option>
+                    </select>
+                  </div>
+                )}
+                <div className="mt-1 text-[10px] text-text-muted">
+                  참조 이미지가 진짜 도트여야 합니다. 아니면 생성 시 경고만 뜨고 스냅은 건너뜁니다.
+                </div>
+              </div>
+            )}
           </div>
           {/* 하단 — 생성하기(생성 중엔 중단). 캔버스 합치기 자리. */}
           <div className="flex-none space-y-2 border-t border-border p-3">
@@ -916,7 +966,10 @@ export function buildSpriteMessage(
   const directive =
     `[spritesheet: subjectType=${state.subjectType}; anchorStrategy=${anchor}; ` +
     `rows=${grid.rows}; cols=${grid.cols}; directions=1` +
-    `${facingClause}${viewpointClause}; seamlessLoop=${state.seamlessLoop}]`;
+    `${facingClause}${viewpointClause}; seamlessLoop=${state.seamlessLoop}` +
+    // 픽셀 언페이크는 켠 경우에만 붙인다 — 안 붙으면 기존 경로 그대로다.
+    `${state.pixelUnfake ? `; pixelUnfake=true` : ""}` +
+    `${state.pixelUnfake && state.logicalHeight ? `; logicalHeight=${state.logicalHeight}` : ""}]`;
 
   const nlParts: string[] = [state.actionPrompt];
   if (stylePresetSuffix) nlParts.push(stylePresetSuffix);
