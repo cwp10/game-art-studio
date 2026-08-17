@@ -256,7 +256,58 @@ void (async () => {
   }
   {
     const { warnings } = await buildSpriteRequest({ ...base, frames: 4 });
-    check("4프레임은 프레임 경고 없음", !warnings.some(w => w.startsWith("frames=")));
+    // 경고는 `<상태>: frames=...` 형태다 — 다상태 요청에서 어느 행 얘기인지 붙는다.
+    check("4프레임은 프레임 경고 없음", !warnings.some(w => w.includes("frames=")));
+  }
+
+  console.log("=== 다상태 요청 ===");
+  {
+    // 정본은 states 맵을 한 요청에 받는다. 상태마다 프레임 수가 달라도 되고, 그때에야
+    // 아틀라스의 columns = max(상태별 프레임) 이 의미를 갖는다.
+    const { request } = await buildSpriteRequest({
+      ...base,
+      uiDirection: "REF",
+      actions: [
+        { actionPrompt: "대기 호흡", frames: 4, loop: true },
+        { actionPrompt: "칼 휘두르기 공격", frames: 6, loop: false },
+      ],
+    });
+    const names = Object.keys(request.states);
+    check("상태가 두 개", names.length === 2, names.join(","));
+    check("동작 텍스트에서 상태명 추론", names.includes("idle") && names.includes("attack"), names.join(","));
+    check("상태별 프레임 수가 다르다", request.states.idle.frames === 4 && request.states.attack.frames === 6);
+    check("상태별 loop 가 따로", request.states.idle.loop === true && request.states.attack.loop === false);
+    // fps 는 넘기지 않고 DEFAULT_STATES 에서 온다 — idle 4, attack 8.
+    check("상태별 fps 는 정본 기본값", request.states.idle.fps === 4 && request.states.attack.fps === 8,
+      `${request.states.idle.fps}/${request.states.attack.fps}`);
+  }
+  {
+    let threw = "";
+    try {
+      await buildSpriteRequest({
+        ...base,
+        uiDirection: "REF",
+        actions: [
+          { actionPrompt: "대기 자세", frames: 4, loop: true },
+          { actionPrompt: "idle 호흡", frames: 6, loop: true },
+        ],
+      });
+    } catch (e) {
+      threw = String(e);
+    }
+    check("같은 상태로 접히면 던진다 (행이 조용히 사라지지 않는다)", threw.includes("두 번 나온다"), threw);
+  }
+  {
+    // 단일 동작 호출부는 그대로여야 한다 — actions 를 안 주면 기존 경로.
+    const single = await buildSpriteRequest({ ...base, frames: 4 });
+    const wrapped = await buildSpriteRequest({
+      ...base,
+      actions: [{ actionPrompt: base.actionPrompt, frames: 4, loop: base.loop }],
+    });
+    check(
+      "actions 하나 = 기존 단일 경로와 같은 request",
+      JSON.stringify(single.request) === JSON.stringify(wrapped.request),
+    );
   }
 
   console.log(`\n${passed} passed / ${failed} failed`);

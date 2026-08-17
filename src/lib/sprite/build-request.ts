@@ -26,6 +26,21 @@ import {
 import { inferActionHint } from "@/lib/sprite/state-name";
 import { stateMotionPhases } from "@/lib/sprite/motion-phase";
 
+/**
+ * 한 동작 = 한 상태 행. 정본 `states` 맵의 항목 하나에 대응한다.
+ *
+ * 정본은 요청 하나에 상태 맵을 통째로 받고, 아틀라스의 `columns = max(상태별 프레임)`
+ * 은 그때에야 의미를 갖는다. 동작마다 요청을 나누면 시트가 매번 1행이라 그 계약이
+ * 발화하지 않는다.
+ */
+export type PanelAction = {
+  actionPrompt: string;
+  frames: number;
+  loop: boolean;
+  /** 상태 이름(방향 접두사 제외). 없으면 동작 텍스트에서 추론하고, 그래도 없으면 "action". */
+  stateName?: string;
+};
+
 export type PanelInput = {
   characterId: string;
   description: string;
@@ -38,6 +53,14 @@ export type PanelInput = {
   actionPrompt: string;
   /** 상태 이름(방향 접두사 제외). 기본 "action". */
   stateName?: string;
+  /**
+   * 여러 동작을 한 요청에. 주면 위의 `frames`/`loop`/`actionPrompt`/`stateName` 대신
+   * 이것을 쓴다 — 단일 동작 호출부는 그대로 두고 다상태만 얹기 위한 옵트인이다.
+   *
+   * 같은 상태명이 두 번 나오면 던진다. 조용히 덮어쓰면 사용자가 요청한 행 하나가
+   * 사라진 채로 시트가 나온다.
+   */
+  actions?: PanelAction[];
   cellSize?: number;
   /** 런타임 미러로 커버할 UI 방향. 생성하지 않고 계약으로만 기록한다. */
   mirrorFrom?: string;
@@ -61,9 +84,6 @@ export async function buildSpriteRequest(
   const warnings: string[] = [];
 
   const direction = toSpriteGenDirection(input.uiDirection);
-  // 동작 텍스트에서 정본 상태 어휘를 뽑는다. 여기가 비면 상태명이 `action` 으로 고정되고
-  // STATE_REQUIREMENTS·상태별 fps·등급 판정이 전부 죽는다 (state-name.ts 참조).
-  const bare = input.stateName ?? inferActionHint(input.actionPrompt)?.state ?? DEFAULT_STATE_NAME;
   // 45도는 좌/우를 **상태명 접미사**가 진다 — 정본이 그렇게 나눈다. `down45_run-front-right`
   // 는 접두사 경로(45도 facing)와 접미사 경로(3/4 뷰 잠금)를 둘 다 발화시킨다.
   const sideSuffix = toSideSuffix(input.uiDirection);
@@ -71,39 +91,74 @@ export async function buildSpriteRequest(
   // 그 형태여야 classifyState 의 `running-`/`walking-` 접두사와 isLocomotionState 의
   // `running-front-` 계열이 걸린다. 4방위 런은 정본대로 `run`/`walk` 그대로 둔다.
   const DIRECTIONAL_VERB: Record<string, string> = { run: "running", walk: "walking" };
-  const stem = sideSuffix ? (DIRECTIONAL_VERB[bare] ?? bare) : bare;
-  // 방향 계약 런은 상태명이 <direction>_<state> 여야 한다 (③ normalizeDirections).
-  const stateName = direction === null ? bare : `${direction}_${stem}${sideSuffix}`;
 
-  const advice = frameCountAdvice(input.frames);
-  if (advice.band === "not-default" || advice.band === "advanced") {
-    warnings.push(`frames=${input.frames} (${advice.band}): ${advice.note}`);
-  }
+  // 단일 동작 호출부는 그대로 둔다 — 하나짜리 배열로 감싸 같은 경로를 태운다.
+  const actions: PanelAction[] = input.actions?.length
+    ? input.actions
+    : [
+        {
+          actionPrompt: input.actionPrompt,
+          frames: input.frames,
+          loop: input.loop,
+          ...(input.stateName ? { stateName: input.stateName } : {}),
+        },
+      ];
 
-  // 정본은 약한 walk/run 행을 simple MVP 산출물과 같은 등급으로 조용히 승격하지 말라고
-  // 못박는다 — 모션 QA 를 통과하기 전에는 experimental 로 **보고**한다.
-  const grade = classifyState(`${stem}${sideSuffix}`);
-  if (grade === "experimental") {
-    warnings.push(
-      `상태 '${bare}' 는 정본 experimental 등급이다 — 모션 QA(qa/${stateName}.gif)를 ` +
-        `통과하기 전에는 pass 로 다루지 않는다`,
-    );
-  } else if (grade === "simple-candidate") {
-    warnings.push(`상태 '${bare}' 는 정본 simple 후보다 — 모션 QA 통과 전에는 pass 가 아니다`);
-  }
-  // 정본 체크리스트 3번. 우리는 아직 로코모션 행에 모션 위상 참조를 붙이지 못한다.
-  if (isLocomotionState(`${stem}${sideSuffix}`)) {
-    warnings.push(
-      `상태 '${bare}' 는 주기적 이동이다 — 정본은 양쪽 접지가 다 보이는 모션 위상 참조` +
-        `(접촉 시트·선택 사이클·레이아웃 페이즈 가이드)를 요구한다. 지금은 방향 idle 앵커만 붙는다`,
-    );
-  }
+  const requested: Record<string, Partial<StateSpec>> = {};
+  // 위상 가이드 플래그는 request 전역이고 가이드 자체는 상태별로 그려진다
+  // (`guideCell` 이 상태마다 motionPhaseState 를 넣는다). 그래서 **하나라도** 위상이
+  // 나오는 동작이 있으면 켠다 — 로코모션 행 하나 때문에 켜도 나머지 상태의 가이드는
+  // 위상이 빈 배열이라 그대로다.
+  let anyMotionPhases = false;
+  for (const action of actions) {
+    // 동작 텍스트에서 정본 상태 어휘를 뽑는다. 여기가 비면 상태명이 `action` 으로 고정되고
+    // STATE_REQUIREMENTS·상태별 fps·등급 판정이 전부 죽는다 (state-name.ts 참조).
+    const bare = action.stateName ?? inferActionHint(action.actionPrompt)?.state ?? DEFAULT_STATE_NAME;
+    const stem = sideSuffix ? (DIRECTIONAL_VERB[bare] ?? bare) : bare;
+    // 방향 계약 런은 상태명이 <direction>_<state> 여야 한다 (③ normalizeDirections).
+    const stateName = direction === null ? bare : `${direction}_${stem}${sideSuffix}`;
 
-  // fps 를 넘기지 않는다 — normalizeStates 가 DEFAULT_STATES 에서 상태별 값을 찾고,
-  // 미지 상태는 6 으로 떨어진다. 프레임 수에서 파생하지 않는 것이 정본 동작이다.
-  const requested: Record<string, Partial<StateSpec>> = {
-    [stateName]: { frames: input.frames, loop: input.loop, action: input.actionPrompt },
-  };
+    // 두 동작이 같은 상태로 접히면 한쪽이 조용히 사라진다 — 요청한 행이 시트에 없다.
+    if (stateName in requested) {
+      throw new Error(
+        `buildSpriteRequest: 상태 '${stateName}' 가 두 번 나온다 — ` +
+          `동작 텍스트가 같은 정본 상태로 추론됐습니다. 한쪽에 다른 이름을 지정하세요`,
+      );
+    }
+
+    const advice = frameCountAdvice(action.frames);
+    if (advice.band === "not-default" || advice.band === "advanced") {
+      warnings.push(`${stateName}: frames=${action.frames} (${advice.band}): ${advice.note}`);
+    }
+
+    // 정본은 약한 walk/run 행을 simple MVP 산출물과 같은 등급으로 조용히 승격하지 말라고
+    // 못박는다 — 모션 QA 를 통과하기 전에는 experimental 로 **보고**한다.
+    const grade = classifyState(`${stem}${sideSuffix}`);
+    if (grade === "experimental") {
+      warnings.push(
+        `상태 '${bare}' 는 정본 experimental 등급이다 — 모션 QA(qa/${stateName}.gif)를 ` +
+          `통과하기 전에는 pass 로 다루지 않는다`,
+      );
+    } else if (grade === "simple-candidate") {
+      warnings.push(`상태 '${bare}' 는 정본 simple 후보다 — 모션 QA 통과 전에는 pass 가 아니다`);
+    }
+    // 정본 체크리스트 3번. 우리는 아직 로코모션 행에 모션 위상 참조를 붙이지 못한다.
+    if (isLocomotionState(`${stem}${sideSuffix}`)) {
+      warnings.push(
+        `상태 '${bare}' 는 주기적 이동이다 — 정본은 양쪽 접지가 다 보이는 모션 위상 참조` +
+          `(접촉 시트·선택 사이클·레이아웃 페이즈 가이드)를 요구한다. 지금은 방향 idle 앵커만 붙는다`,
+      );
+    }
+
+    // fps 를 넘기지 않는다 — normalizeStates 가 DEFAULT_STATES 에서 상태별 값을 찾고,
+    // 미지 상태는 6 으로 떨어진다. 프레임 수에서 파생하지 않는 것이 정본 동작이다.
+    requested[stateName] = {
+      frames: action.frames,
+      loop: action.loop,
+      action: action.actionPrompt,
+    };
+    if (stateMotionPhases(bare, action.frames).length > 0) anyMotionPhases = true;
+  }
 
   let states = normalizeStates(requested);
   let directions: SpriteRequest["directions"];
@@ -156,9 +211,7 @@ export async function buildSpriteRequest(
       // 이걸 켜지 않아 실제로 걷기 8프레임의 다리가 거의 교차하지 않았다(2026-08-16).
       // 그런데 우리 검사 신호 넷 중 어느 것도 "다리가 교차하는가" 를 보지 않아
       // 100점이 나왔다 — 가이드를 켜는 것과 별개로 남는 공백이다.
-      ...(input.motionPhaseGuides || stateMotionPhases(bare, input.frames).length > 0
-        ? { motionPhaseGuides: true }
-        : {}),
+      ...(input.motionPhaseGuides || anyMotionPhases ? { motionPhaseGuides: true } : {}),
     },
     warnings,
   };
