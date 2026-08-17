@@ -19,8 +19,10 @@ import {
   refineEdgesToBoundaries,
   snapByEdges,
   gridSnapDownscale,
+  kcentroidDownscale,
 } from "../src/lib/sprite/pixel-snap";
-import { pixelUnfakeOptions } from "../src/lib/sprite/pixel-unfake";
+import { pixelUnfakeOptions, conformRowLogical } from "../src/lib/sprite/pixel-unfake";
+type RawImageBuf = { data: Buffer; width: number; height: number };
 
 const PY = "/Users/wonpyoung/Developer/workspace/sprite-gen/.venv/bin/python";
 const SG = "/Users/wonpyoung/Developer/workspace/sprite-gen";
@@ -229,6 +231,57 @@ console.log("\n=== 추출 옵션 파생 (배율 식의 소유자는 한 곳) ===
 
   const noBias = pixelUnfakeOptions(mk({ pixel_unfake: true, detail_bias: false }));
   check("detail_bias 명시 false 가 전달된다", noBias.pixelUnfake?.detailBias === false);
+}
+
+console.log("\n=== kCentroid 축소: 정본과 픽셀 동일 ===");
+{
+  const p2 = join(dir, "crop-몸통.png");
+  const img = await load(p2);
+  for (const [tw, th, bias] of [[41, 41, false], [41, 41, true], [24, 24, true], [70, 33, false]] as Array<[number, number, boolean]>) {
+    const outBin = join(dir, `kc-${tw}-${th}-${bias}.bin`);
+    const meta = JSON.parse(execFileSync(PY, ["-c", `
+import sys, json, numpy as np
+sys.path.insert(0, ${JSON.stringify(SG)})
+from PIL import Image
+from sprite_gen.extract import _kcentroid_downscale
+im = Image.open(${JSON.stringify(p2)}).convert("RGBA")
+out = _kcentroid_downscale(im, ${tw}, ${th}, ${bias ? "True" : "False"})
+np.array(out).tofile(${JSON.stringify(outBin)})
+print(json.dumps({"size": list(out.size)}))
+`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })) as { size: number[] };
+    const ours = kcentroidDownscale(img, tw, th, bias);
+    const ref = new Uint8Array(readFileSync(outBin));
+    let diff = 0;
+    for (let i = 0; i < Math.min(ref.length, ours.data.length); i++) if (ref[i] !== ours.data[i]) diff++;
+    check(`kCentroid ${img.width}x${img.height} → ${tw}x${th} bias=${bias} 픽셀 동일`,
+      ours.width === meta.size[0] && ours.height === meta.size[1] &&
+      ref.length === ours.data.length && diff === 0,
+      `${diff}/${ref.length} 바이트 불일치`);
+  }
+}
+
+console.log("\n=== 행 크기 통일 (conformRowLogical) ===");
+{
+  const mk = (w: number, h: number, v: number): RawImageBuf => {
+    const data = Buffer.alloc(w * h * 4);
+    for (let p3 = 0; p3 < w * h; p3++) {
+      data[p3 * 4] = v; data[p3 * 4 + 1] = v; data[p3 * 4 + 2] = v; data[p3 * 4 + 3] = 255;
+    }
+    return { data, width: w, height: h };
+  };
+  // 규격 안이면 축소하지 않는다.
+  const small = conformRowLogical([mk(40, 60, 100), mk(50, 55, 120)], 256, 256);
+  check("규격 안이면 축소 안 함", small.conformed === false && small.scale === 1);
+  check("알파는 이진화된다", small.frames.every(f => f.data[3] === 255));
+
+  // 넘으면 **행에서 가장 큰 프레임 기준 한 배율**을 전부에 건다.
+  const big = conformRowLogical([mk(300, 200, 100), mk(150, 100, 120)], 256, 256);
+  check("규격을 넘으면 축소한다", big.conformed === true);
+  check("배율이 최대 프레임 기준", Math.abs(big.scale - 256 / 300) < 1e-9, String(big.scale));
+  check("두 프레임이 같은 배율로 줄었다",
+    big.frames[0].width <= 256 && big.frames[0].height <= 256 &&
+    Math.abs(big.frames[1].width / 150 - big.frames[0].width / 300) < 0.02,
+    `${big.frames[0].width}x${big.frames[0].height}, ${big.frames[1].width}x${big.frames[1].height}`);
 }
 
 console.log(`\n${pass} passed / ${fail} failed`);

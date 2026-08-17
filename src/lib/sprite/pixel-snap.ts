@@ -238,3 +238,64 @@ function pyRound(x: number): number {
   if (diff < 0.5) return floor;
   return floor % 2 === 0 ? floor : floor + 1;
 }
+
+/**
+ * kCentroid 스타일 픽셀아트 다운스케일 — 출력 픽셀마다 소스 블록의 **지배 클러스터
+ * 중심색**을 취한다.
+ *
+ * 어두운 1px 아웃라인이 살아남는다: LANCZOS 는 평균에 먹혀 흐려지고, NEAREST 는 타깃
+ * 격자가 원본 픽셀 격자와 안 맞을 때 임의 샘플이 되어 아웃라인을 통째로 떨군다.
+ *
+ * 논리 프레임이 셀 규격을 넘을 때만 쓰인다 — 정본도 "계약으로의 conform 축소는 칸을
+ * 병합해 디테일을 갈아먹는다" 며 경계하고 **물리 한계에서만** 건다.
+ */
+export function kcentroidDownscale(
+  sprite: RawImage,
+  targetWidth: number,
+  targetHeight: number,
+  detailBias = false,
+): RawImage {
+  const { data, width: sw, height: sh } = sprite;
+  const out: RawImage = {
+    data: new Uint8Array(targetWidth * targetHeight * 4),
+    width: targetWidth,
+    height: targetHeight,
+  };
+  for (let oy = 0; oy < targetHeight; oy++) {
+    const y0 = Math.floor((oy * sh) / targetHeight);
+    const y1 = Math.max(y0 + 1, Math.floor(((oy + 1) * sh) / targetHeight));
+    for (let ox = 0; ox < targetWidth; ox++) {
+      const x0 = Math.floor((ox * sw) / targetWidth);
+      const x1 = Math.max(x0 + 1, Math.floor(((ox + 1) * sw) / targetWidth));
+      let total = 0;
+      const opaque: RGB[] = [];
+      let alphaSum = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          total++;
+          const s = (y * sw + x) * 4;
+          if (data[s + 3] >= ALPHA_SOLID) {
+            opaque.push([data[s], data[s + 1], data[s + 2]]);
+            alphaSum += data[s + 3];
+          }
+        }
+      }
+      // 블록의 절반 이상이 불투명해야 찍는다 (스냅 다운스케일과 같은 규칙).
+      if (opaque.length * 2 < total) continue;
+      const d = (oy * targetWidth + ox) * 4;
+      if (opaque.length === 1) {
+        out.data[d] = opaque[0][0];
+        out.data[d + 1] = opaque[0][1];
+        out.data[d + 2] = opaque[0][2];
+        out.data[d + 3] = alphaSum;
+        continue;
+      }
+      const c = dominantBlockColor(opaque, detailBias);
+      out.data[d] = c[0];
+      out.data[d + 1] = c[1];
+      out.data[d + 2] = c[2];
+      out.data[d + 3] = Math.floor(alphaSum / opaque.length);
+    }
+  }
+  return out;
+}

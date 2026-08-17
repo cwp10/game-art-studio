@@ -26,8 +26,9 @@
  *   않으므로 뺐다.
  * - **런 전체 공유 팔레트**: 정본은 배치의 모든 행이 팔레트 하나를 나눠 써 프레임 간
  *   색 흔들림을 없앤다. 우리는 행이 독립 generation 이라 "런 전체" 라는 단위가 없다.
- * - **kCentroid 축소**: 논리 프레임이 셀보다 클 때만 쓰인다. 그 경로에 들어가면 조용히
- *   다른 알고리즘으로 축소하지 않고 **던진다**.
+ * kCentroid 축소는 **물리 한계에서만** 건다. 정본도 "계약으로의 conform 축소는 칸을
+ * 병합해 디테일을 갈아먹는다" 며 경계한다 — 논리 프레임이 셀 규격을 넘을 때만이고,
+ * 그때도 행에서 가장 큰 프레임 기준 **한 배율**을 전 프레임에 똑같이 건다.
  */
 
 import {
@@ -37,7 +38,7 @@ import {
   resolveFramePitch,
   type Pitch,
 } from "@/lib/sprite/pixel-grid";
-import { refineEdgesToBoundaries, snapByEdges } from "@/lib/sprite/pixel-snap";
+import { kcentroidDownscale, refineEdgesToBoundaries, snapByEdges } from "@/lib/sprite/pixel-snap";
 import type { CellSpec, SpriteRequest } from "@/lib/sprite/request";
 
 export type RawImage = { data: Buffer; width: number; height: number };
@@ -128,21 +129,37 @@ export function conformRowLogical(
   images: RawImage[],
   logicalWidth: number,
   logicalHeight: number,
-): RawImage[] {
+  detailBias = true,
+): { frames: RawImage[]; conformed: boolean; scale: number } {
   const snapped = images.map(im => {
     const box = alphaBBox(im);
     return box ? cropRaw(im, box) : im;
   });
   const maxW = Math.max(...snapped.map(s => s.width));
   const maxH = Math.max(...snapped.map(s => s.height));
-  if (maxW > logicalWidth || maxH > logicalHeight) {
-    throw new PixelUnfakeFailed(
-      `pixel-unfake: 논리 프레임 ${maxW}x${maxH} 이 규격 ${logicalWidth}x${logicalHeight} 을 넘습니다 — ` +
-        `정본은 kCentroid 로 줄이지만 그 축소기는 이식하지 않았습니다. ` +
-        `fit.logical_height 를 올리거나 셀을 키우세요.`,
-    );
+  if (maxW <= logicalWidth && maxH <= logicalHeight) {
+    return { frames: snapped.map(binarizeAlpha), conformed: false, scale: 1 };
   }
-  return snapped.map(binarizeAlpha);
+  // **행에서 가장 큰 프레임 기준 한 배율**을 전 프레임에 똑같이 건다. 프레임마다 다른
+  // 배율로 줄이면 재생 중 캐릭터 크기가 호흡한다.
+  const scale = Math.min(logicalWidth / maxW, logicalHeight / maxH);
+  const conformed = snapped.map(sprite => {
+    const resized = kcentroidDownscale(
+      { data: new Uint8Array(sprite.data.buffer, sprite.data.byteOffset, sprite.data.byteLength),
+        width: sprite.width, height: sprite.height },
+      Math.max(1, pyRound(sprite.width * scale)),
+      Math.max(1, pyRound(sprite.height * scale)),
+      detailBias,
+    );
+    const asRaw: RawImage = {
+      data: Buffer.from(resized.data.buffer, resized.data.byteOffset, resized.data.byteLength),
+      width: resized.width,
+      height: resized.height,
+    };
+    const box = alphaBBox(asRaw);
+    return box ? cropRaw(asRaw, box) : asRaw;
+  });
+  return { frames: conformed.map(binarizeAlpha), conformed: true, scale };
 }
 
 /**

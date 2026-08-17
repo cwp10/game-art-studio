@@ -45,7 +45,8 @@ files below carry the port, each naming its upstream source in its header:
     src/lib/sprite/pixel-grid.ts     <- sprite_gen/extract.py (pixel unfake
                                         grid detection, cell uniformity, phase)
     src/lib/sprite/pixel-snap.ts     <- sprite_gen/extract.py (pixel unfake
-                                        dominant-color snap downscale)
+                                        dominant-color snap downscale, kCentroid
+                                        pixel-art downscale)
     src/lib/sprite/pixel-unfake.ts   <- sprite_gen/extract.py (_snap_strip,
                                         fit_pixel_unfake, conform_row_logical,
                                         binarize_alpha) and curation.py

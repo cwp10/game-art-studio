@@ -16,7 +16,7 @@
  *
  * 옵트인 경로(전부 원본에서도 옵트인): ycbcr 매팅(`chromaMode`), projection
  * 세그먼테이션(`fit.segmentation`), 픽셀 언페이크(`fit.pixel_unfake` → `pixelUnfake`).
- * 이식 범위에서 뺀 것: kcentroid 리샘플, alpha-centroid 정렬, takes.
+ * 이식 범위에서 뺀 것: alpha-centroid 정렬, takes.
  *
  * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
  * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
@@ -440,8 +440,16 @@ export async function extractRowFrames(opts: {
         registered,
         opts.pixelUnfake.logicalWidth,
         opts.pixelUnfake.logicalHeight,
+        opts.pixelUnfake.detailBias,
       );
-      for (const logical of conformed) {
+      if (conformed.conformed && unfakeReport) {
+        // 축소가 걸렸다는 사실은 조용하면 안 된다 — 칸이 병합돼 디테일이 갈린다.
+        unfakeReport.warnings.push(
+          `${opts.label ?? "row"}: 논리 프레임이 규격을 넘어 kCentroid 로 ` +
+            `${conformed.scale.toFixed(3)}배 줄였습니다 — 격자가 없는 프레임이 섞이면 흔합니다`,
+        );
+      }
+      for (const logical of conformed.frames) {
         frames.push(
           fitPixelUnfake(logical, opts.cell, opts.pixelUnfake.scale, alphaCentroidX),
         );
