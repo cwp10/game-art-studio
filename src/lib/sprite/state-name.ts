@@ -61,3 +61,37 @@ export function inferActionHint(actionPrompt: string): ActionHint | null {
   }
   return null;
 }
+
+/**
+ * 프레임 수의 정본 대역 등급.
+ *
+ * `states-and-frames.md` 의 "Frame Count Guidance" 가 프레임 수마다 다른 판정을 준다.
+ * 그 판정이 UI 에 없으면 4 와 12 가 똑같은 선택지로 보인다 — 정본은 9·12 를 기본
+ * 설정이 **아니라고** 명시하고, 요청받으면 명시적 실험으로 돌려 결과를 그대로 보고하라고
+ * 한다. 캔버스 크기 경고는 이 판정을 대신하지 못한다(픽셀이 남아도 추출이 무너진다).
+ */
+export type FrameBand = {
+  level: "stable" | "advanced" | "experimental";
+  /** 사용자에게 보일 한 줄. `stable` 이면 null. */
+  note: string | null;
+};
+
+export function frameBand(frames: number): FrameBand {
+  if (frames <= 6) return { level: "stable", note: null };
+  if (frames <= 8) {
+    return {
+      level: "advanced",
+      note: "8프레임은 로코모션 행·명시적 실험 대역입니다 — 추출과 모션 QA 를 통과해야 정상 산출물로 볼 수 있습니다.",
+    };
+  }
+  if (frames <= 12) {
+    return {
+      level: "experimental",
+      note: "정본 기본 설정이 아닙니다 — 검증에서 중복 몸통·빈 프레임·슬롯 붕괴·추출 실패가 늘었습니다. 실험으로만 쓰세요.",
+    };
+  }
+  return {
+    level: "experimental",
+    note: "정본 프레임 대역에 없는 값입니다 — 9·12 보다 실패 위험이 큽니다. 실험으로만 쓰세요.",
+  };
+}

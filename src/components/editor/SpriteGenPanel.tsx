@@ -8,7 +8,7 @@ import { BaseLockGate } from "@/components/editor/BaseLockGate";
 import { jsonFetch } from "@/lib/api/client";
 import { useIsCodex } from "@/lib/context/orchestrator-context";
 import { planDrivenBlocker } from "@/lib/sprite/plan-driven-gate";
-import { ACTION_STATE_HINTS } from "@/lib/sprite/state-name";
+import { ACTION_STATE_HINTS, frameBand } from "@/lib/sprite/state-name";
 
 
 /**
@@ -633,18 +633,36 @@ export function SpriteGenPanel({
                   onClick={() => { setFrameOpen(o => !o); setDirOpen(false); }}
                   className="flex h-7 w-full items-center justify-between rounded-md border border-border bg-bg-panel px-2 text-xs text-text-primary hover:border-[color:var(--accent)]/40"
                 >
-                  {frames}프레임 {grid.rows}×{grid.cols}
+                  {frames}프레임 {planDriven ? "· 가로 스트립" : `${grid.rows}×${grid.cols}`}
                 </button>
                 {frameOpen && (
                   <FramePopover
                     selected={frames}
                     opts={subjectType === "effect" ? EFFECT_FRAME_OPTS : undefined}
+                    planDriven={planDriven}
                     onSelect={f => { setFrames(f); setUserSetFrames(true); setFrameOpen(false); }}
                     onClose={() => setFrameOpen(false)}
                   />
                 )}
               </div>
               {(() => {
+                // 정본 프레임 대역 판정 — 캔버스에 픽셀이 남아도 추출이 무너지는 값이 있다.
+                const band = frameBand(frames);
+                if (!band.note) return null;
+                return (
+                  <span
+                    className={`block text-[10px] ${
+                      band.level === "experimental" ? "text-red-400" : "text-orange-400"
+                    }`}
+                  >
+                    ⚠ {band.note}
+                  </span>
+                );
+              })()}
+              {(() => {
+                // 격자 캔버스 한계 경고는 격자 경로에만 해당한다 — component-row 는
+                // rows×cols 캔버스를 만들지 않으므로 여기 수치가 결과와 무관하다.
+                if (planDriven) return null;
                 const info = frameCanvasInfo(grid.rows, grid.cols);
                 if (info.status === "safe") return null;
                 const mpx = (info.totalPx / 1_000_000).toFixed(1);
@@ -791,11 +809,14 @@ function DirectionPopover({
 function FramePopover({
   selected,
   opts = FRAME_OPTS,
+  planDriven = false,
   onSelect,
   onClose,
 }: {
   selected: FrameCount;
   opts?: typeof FRAME_OPTS;
+  /** component-row 경로인가 — 그렇다면 rows×cols 격자도 그 캔버스 크기도 쓰이지 않는다. */
+  planDriven?: boolean;
   onSelect: (f: FrameCount) => void;
   onClose: () => void;
 }) {
@@ -818,34 +839,44 @@ function FramePopover({
               className={`relative rounded-lg border p-3 text-left text-xs ${
                 active
                   ? "border-[color:var(--accent)] bg-[color:var(--accent)]/20 text-text-primary"
-                  : info.status === "over"
+                  : !planDriven && info.status === "over"
                     ? "border-red-500/40 bg-red-500/5 text-text-muted hover:border-red-500/60"
                     : "border-border bg-bg-card text-text-muted hover:border-[color:var(--accent)]/40"
               }`}
             >
               <div className="font-medium text-text-primary">{f.value}프레임</div>
               <div className="text-[11px] text-text-muted/70">
-                {f.rows}×{f.cols}
+                {planDriven ? "가로 스트립" : `${f.rows}×${f.cols}`}
               </div>
-              {/* 캔버스 크기 정보 */}
-              <div className={`mt-1 text-[10px] tabular-nums ${
-                info.status === "over" ? "text-red-400"
-                : info.status === "near" ? "text-orange-400"
-                : "text-text-muted/50"
-              }`}>
-                {info.w}×{info.h} · {mpx}M
-              </div>
-              {/* 상태 뱃지 */}
-              {info.status === "over" && (
+              {/* 캔버스 크기 정보 — 격자 경로 전용. component-row 는 rows×cols 를 읽지
+                  않고 상태마다 가로 스트립 한 장을 뽑으므로 이 수치가 결과와 무관하다. */}
+              {!planDriven && (
+                <div className={`mt-1 text-[10px] tabular-nums ${
+                  info.status === "over" ? "text-red-400"
+                  : info.status === "near" ? "text-orange-400"
+                  : "text-text-muted/50"
+                }`}>
+                  {info.w}×{info.h} · {mpx}M
+                </div>
+              )}
+              {/* 정본 프레임 대역 — 캔버스 한계보다 앞선다. 픽셀이 남아도 추출이 무너진다. */}
+              {frameBand(f.value).level === "experimental" ? (
+                <span className="absolute right-1.5 top-1.5 rounded bg-red-500/20 px-1 py-0.5 text-[9px] font-medium text-red-400">
+                  실험
+                </span>
+              ) : frameBand(f.value).level === "advanced" ? (
+                <span className="absolute right-1.5 top-1.5 rounded bg-orange-500/20 px-1 py-0.5 text-[9px] font-medium text-orange-400">
+                  고급
+                </span>
+              ) : !planDriven && info.status === "over" ? (
                 <span className="absolute right-1.5 top-1.5 rounded bg-red-500/20 px-1 py-0.5 text-[9px] font-medium text-red-400">
                   한계 초과
                 </span>
-              )}
-              {info.status === "near" && (
+              ) : !planDriven && info.status === "near" ? (
                 <span className="absolute right-1.5 top-1.5 rounded bg-orange-500/20 px-1 py-0.5 text-[9px] font-medium text-orange-400">
                   한계 근접
                 </span>
-              )}
+              ) : null}
             </button>
           );
         })}
