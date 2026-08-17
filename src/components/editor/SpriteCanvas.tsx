@@ -324,7 +324,6 @@ export function SpriteCanvas({
     if (!stateRows || dirRow < 0) return;
     const rowFps = params?.manifest?.animation?.rows?.[stateRows[dirRow]]?.fps;
     if (typeof rowFps === "number" && rowFps >= 1 && rowFps <= 30) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFps(rowFps);
     }
   }, [stateRows, dirRow, params]);
@@ -952,6 +951,21 @@ export function SpriteCanvas({
     Record<string, { current: string; takes: Array<{ label: string; generationId: string; frames: number }> }>
   >({});
   const [rerollBusy, setRerollBusy] = useState<string | null>(null);
+  /**
+   * 걷기 프레임 순서 판정 — **제안이지 적용이 아니다.**
+   *
+   * 정본은 자동 프레임 순서 선택을 약속하지 말라고 못박고(`locomotion-curation.md`),
+   * 모션 실패는 재타이밍이 아니라 행 재생성으로 고치라고 한다(`qa-motion.md`). 그래서
+   * 판정이 `regenerate` 면 바꿀 것을 주지 않고 다시 뽑기로 보낸다.
+   */
+  const [gaitBusy, setGaitBusy] = useState<string | null>(null);
+  const [gaitResult, setGaitResult] = useState<
+    Record<
+      string,
+      | { ok: true; verdict: string; order: number[]; drop: number[]; reason: string; applied?: true }
+      | { ok: false; error: string }
+    >
+  >({});
   const [rerollMsg, setRerollMsg] = useState<string | null>(null);
   /** 보간 — 두 프레임 사이의 중간 포즈. 결과는 시트에 자동으로 끼우지 않는다. */
   const [tweenState, setTweenState] = useState<string>("");
@@ -1056,6 +1070,82 @@ export function SpriteCanvas({
       setRowTakes(body.rows ?? {});
     })();
   }, [isPlanDriven, sheetGenerationId]);
+
+  /** 그 행의 프레임 순서를 비전으로 판정받는다. 적용하지 않고 제안만 담는다. */
+  async function judgeGaitOrder(state: string) {
+    if (!sheetGenerationId) return;
+    setGaitBusy(state);
+    setGaitResult(prev => {
+      const next = { ...prev };
+      delete next[state];
+      return next;
+    });
+    try {
+      const res = await jsonFetch("/api/sprite/gait-order", "POST", {
+        atlasGenerationId: sheetGenerationId,
+        state,
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        suggestion?: { verdict: string; order: number[]; drop: number[]; reason: string };
+        error?: string;
+      };
+      if (!res.ok || !body.ok || !body.suggestion) {
+        throw new Error(body.error ?? `판정 실패 (${res.status})`);
+      }
+      const s = body.suggestion;
+      setGaitResult(prev => ({
+        ...prev,
+        [state]: { ok: true, verdict: s.verdict, order: s.order, drop: s.drop, reason: s.reason },
+      }));
+    } catch (e) {
+      setGaitResult(prev => ({ ...prev, [state]: { ok: false, error: (e as Error).message } }));
+    } finally {
+      setGaitBusy(null);
+    }
+  }
+
+  /**
+   * 제안을 **화면에만** 반영한다 — 사이드카에는 쓰지 않는다.
+   *
+   * 미리보기로 확인한 뒤 사람이 [큐레이션 저장]을 눌러야 영속된다. 판정이 바로 저장까지
+   * 가면 "자동 순서 선택" 이 되고, 그건 정본이 닫아 둔 길이다.
+   */
+  function applyGaitOrder(state: string) {
+    const r = gaitResult[state];
+    if (!r?.ok || r.verdict === "regenerate" || !params?.states) return;
+    const rowIndex = params.states.indexOf(state);
+    if (rowIndex < 0) return;
+    const base = rowIndex * cols;
+    const total = rows * cols;
+
+    setFrameOrder(prev => {
+      const cur = prev.length === total ? [...prev] : Array.from({ length: total }, (_, i) => i);
+      // 이 행의 프레임이 놓인 **표시 자리**를 찾아 그 자리들만 다시 채운다. 다른 행의
+      // 순서는 건드리지 않는다 — 판정은 한 행에 대한 것이다.
+      const slots: number[] = [];
+      cur.forEach((orig, at) => {
+        if (orig >= base && orig < base + cols) slots.push(at);
+      });
+      const next = [...cur];
+      // 남길 프레임 먼저, 뺄 프레임은 뒤로. 뺀 것도 자리는 차지해야 인덱스가 어긋나지 않는다.
+      [...r.order, ...r.drop].forEach((col, k) => {
+        if (k < slots.length) next[slots[k]] = base + col;
+      });
+      return next;
+    });
+
+    setExcludedFrames(prev => {
+      const next = new Set(prev);
+      for (const col of r.drop) next.add(base + col);
+      return next;
+    });
+    setPreviewIdx(0);
+    setGaitResult(prev => {
+      const cur = prev[state];
+      return cur?.ok ? { ...prev, [state]: { ...cur, applied: true } } : prev;
+    });
+  }
 
   /** 그 상태의 행을 한 번 더 생성해 후보로 쌓는다 (합성 대상은 그대로). */
   async function rerollRow(state: string) {
@@ -2231,6 +2321,66 @@ export function SpriteCanvas({
                   )}
                   <div className="mt-1 text-[10px] text-text-muted">
                     생성에 1분쯤 걸립니다. 결과는 시트에 자동 반영되지 않고 이미지로만 남습니다.
+                  </div>
+                </div>
+              )}
+              {params?.states && (
+                <div className="mb-2 rounded-lg border border-border p-2">
+                  <div className="mb-1.5 text-[11px] font-medium text-text-muted">
+                    프레임 순서 판정 (걷기·달리기)
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {params.states.map(state => {
+                      const r = gaitResult[state];
+                      return (
+                        <div key={state} className="flex flex-col gap-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="min-w-[92px] text-[11px] text-text-muted">{state}</span>
+                            <button
+                              onClick={() => void judgeGaitOrder(state)}
+                              disabled={gaitBusy !== null}
+                              className="rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted disabled:opacity-40"
+                              title="프레임을 번호 찍은 접촉 시트로 만들어 비전으로 판정합니다. 순서만 틀렸는지, 뺄 프레임이 있는지, 재배열로는 안 되는지 셋 중 하나로 답합니다."
+                            >
+                              {gaitBusy === state ? "판정 중…" : "순서 판정"}
+                            </button>
+                            {r?.ok && r.verdict !== "regenerate" && !r.applied && (
+                              <button
+                                onClick={() => applyGaitOrder(state)}
+                                className="rounded border border-[color:var(--accent)] px-1.5 py-0.5 text-[11px] text-[color:var(--accent)]"
+                                title="화면 순서만 바꿉니다. 미리보기로 확인한 뒤 [큐레이션 저장]을 눌러야 남습니다."
+                              >
+                                이 순서로 바꾸기
+                              </button>
+                            )}
+                            {r?.ok && r.applied && (
+                              <span className="text-[11px] text-text-muted">
+                                적용됨 — 미리보기 확인 후 큐레이션 저장
+                              </span>
+                            )}
+                          </div>
+                          {r && !r.ok && (
+                            <div className="text-[10px] leading-snug text-[color:var(--danger)]">
+                              {r.error}
+                            </div>
+                          )}
+                          {r?.ok && (
+                            <div
+                              className={`text-[10px] leading-snug ${
+                                r.verdict === "regenerate" ? "text-orange-400" : "text-text-muted"
+                              }`}
+                            >
+                              {r.verdict === "regenerate"
+                                ? "재배열로는 안 됩니다 — 아래에서 다시 뽑으세요. "
+                                : r.verdict === "drop-then-reorder"
+                                  ? `${r.drop.length}장을 빼고 재배열: `
+                                  : "순서만 바꾸면 됩니다: "}
+                              {r.reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
