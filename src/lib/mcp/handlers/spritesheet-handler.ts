@@ -92,10 +92,6 @@ export async function handleMakeSpritesheet(
           // 추출 튜닝 — 켠 것이 하나도 없으면 request 에 fit 키가 안 실린다(기존 런 불변).
           ...(() => {
             const fit: Record<string, unknown> = {};
-            if (args.pixelUnfake === true) fit.pixel_unfake = true;
-            if (typeof args.logicalHeight === "number" && args.logicalHeight > 0) {
-              fit.logical_height = Math.trunc(args.logicalHeight);
-            }
             if (args.segmentation === "projection") fit.segmentation = "projection";
             return Object.keys(fit).length > 0 ? { fit } : {};
           })(),

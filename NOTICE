@@ -42,15 +42,6 @@ files below carry the port, each naming its upstream source in its header:
     src/lib/sprite/frame-qa.ts       <- sprite_gen/extract.py (inspect_frames)
     src/lib/sprite/segment.ts        <- sprite_gen/segment.py
     src/lib/sprite/interpolate.ts    <- sprite_gen/interpolate.py
-    src/lib/sprite/pixel-grid.ts     <- sprite_gen/extract.py (pixel unfake
-                                        grid detection, cell uniformity, phase)
-    src/lib/sprite/pixel-snap.ts     <- sprite_gen/extract.py (pixel unfake
-                                        dominant-color snap downscale, kCentroid
-                                        pixel-art downscale)
-    src/lib/sprite/pixel-unfake.ts   <- sprite_gen/extract.py (_snap_strip,
-                                        fit_pixel_unfake, conform_row_logical,
-                                        binarize_alpha) and curation.py
-                                        (pixel_snap_scale)
     src/lib/sprite/selected-cycle.ts <- sprite_gen/compose_cycle.py
     src/lib/sprite/reroll.ts         <- sprite_gen/reroll.py
     src/lib/sprite/atlas.ts          <- sprite_gen/compose_atlas.py
@@ -113,7 +104,8 @@ recovery, is itself a port of the standalone `image-gen` skill
 
 --- not ported ---
 
-These perfectpixel-studio derived parts of sprite-gen are NOT ported here, so
-their notices do not apply to this repository: the `estimate_pixel_grid_runlen`
-pitch estimator. If it is ported later, the corresponding notice from
-sprite-gen's NOTICE must be added above.
+These parts of sprite-gen are NOT ported here: the `fit.pixel_unfake` grid-snap
+pipeline (grid detection, dominant-color snap downscale, kCentroid downscale) and
+the `estimate_pixel_grid_runlen` pitch estimator. The pixel-unfake port was
+removed once measurement showed our codex-generated bases carry a logical
+resolution too high for the grid to survive row generation.

@@ -29,26 +29,12 @@ import {
 import { renderLayoutGuide } from "@/lib/sprite/layout-guide";
 import { buildRowPrompt } from "@/lib/sprite/row-prompt";
 import type { SpriteRequest } from "@/lib/sprite/request";
-import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
 
 export type GenerateFn = (spec: {
   state: string;
   prompt: string;
   inputPaths: string[];
   role: PlanItem["role"];
-  /**
-   * 켜져 있으면 행을 **청크로 나눠 생성해 하나의 스트립으로 잇는다** (`chunk-generate.ts`).
-   *
-   * codex 는 프레임당 해상도가 임계 아래로 떨어지면 픽셀 블록을 안 그린다 —
-   * `fit.pixel_unfake` 를 켠 런은 격자가 있어야 하므로 이 경로가 필요하다. 프레임 수가
-   * 청크마다 다르므로 프롬프트·가이드를 다시 만들어야 하고, 그 방법을 여기서 넘긴다.
-   */
-  chunked?: {
-    frameCount: number;
-    chromaRgb: [number, number, number];
-    promptFor: (frames: number) => string;
-    guideFor: (frames: number, chunkIndex: number) => Promise<string>;
-  };
 }) => Promise<{ generationId: string; imagePath: string; width: number; height: number }>;
 
 export type RunPlanDeps = {
@@ -150,9 +136,6 @@ async function recordRow(
     },
     // 분리 모드 SSoT 는 request `fit` 하나다 — 행마다 다르게 두지 않는다.
     ...(request.fit ? { fit: request.fit } : {}),
-    // 픽셀 언페이크도 같은 SSoT 에서 파생한다 — 이걸 빼면 청크 생성만 돌고
-    // 추출이 일반 경로를 타 논리 프레임이 안 나온다.
-    ...pixelUnfakeOptions(request),
     label: state,
   });
   const dir = join(workDir, `frames-${state}`);
@@ -226,8 +209,7 @@ export async function runSpritePlan(
         prompt: buildRowPrompt(request, state, entry, deps.correctionHints?.[state] ?? []),
         inputPaths,
         role: "action-row",
-        ...chunkedSpec(request, state, entry, deps),
-      });
+        });
       await recordRow(result, request, state, entry.frames, deps.workDir, gen);
     }
     result.warnings.push("방향 계약 없는 런 — 앵커 체인을 쓰지 않는다(REF 모드)");
@@ -258,7 +240,6 @@ export async function runSpritePlan(
       prompt: buildRowPrompt(request, item.state, entry, deps.correctionHints?.[item.state] ?? []),
       inputPaths,
       role: item.role,
-      ...chunkedSpec(request, item.state, entry, deps),
     });
     await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
   }
@@ -313,45 +294,9 @@ export async function runSpritePlan(
       prompt: buildRowPrompt(request, item.state, entry, deps.correctionHints?.[item.state] ?? []),
       inputPaths,
       role: item.role,
-      ...chunkedSpec(request, item.state, entry, deps),
     });
     await recordRow(result, request, item.state, entry.frames, deps.workDir, gen);
   }
 
   return result;
-}
-
-/**
- * `fit.pixel_unfake` 가 켜진 런에만 청크 생성 사양을 붙인다.
- *
- * 꺼져 있으면 `{}` 라 기존 경로가 **바이트 불변**이다. 켜져 있으면 생성기가 프레임을
- * 2장씩 나눠 만들고 격자를 게이트로 건다 — codex 가 프레임당 해상도 임계 아래에서
- * 픽셀 블록을 안 그리기 때문이다(실측: 3프레임부터 붕괴).
- */
-function chunkedSpec(
-  request: SpriteRequest,
-  state: string,
-  entry: { frames: number },
-  deps: RunPlanDeps,
-): { chunked?: NonNullable<Parameters<GenerateFn>[0]["chunked"]> } {
-  if (!request.fit?.pixel_unfake) return {};
-  const stateEntry = request.states[state];
-  return {
-    chunked: {
-      frameCount: entry.frames,
-      chromaRgb: request.chromaKey.rgb,
-      promptFor: (frames: number) =>
-        buildRowPrompt(
-          request,
-          state,
-          { ...stateEntry, frames },
-          deps.correctionHints?.[state] ?? [],
-        ),
-      guideFor: async (frames: number, chunkIndex: number) => {
-        const guide = join(deps.workDir, `guide-${state}-chunk${chunkIndex}.png`);
-        await renderLayoutGuide(guide, frames, guideCell(request, state));
-        return guide;
-      },
-    },
-  };
 }

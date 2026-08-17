@@ -12,7 +12,7 @@
  * base 가 아니라 **앵커**에서 정체성을 받는다.
  */
 import path from "node:path";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { composeAtlas, writeAtlas } from "@/lib/sprite/atlas";
 import { buildPreviews } from "@/lib/sprite/preview";
 import { buildSpriteRequest } from "@/lib/sprite/build-request";
@@ -21,11 +21,7 @@ import { formatHints } from "@/lib/sprite/correction-loop";
 import { inspectStates, type InspectReport } from "@/lib/sprite/inspect";
 import { scoreInspection, type ScoreReport } from "@/lib/sprite/score";
 import { runSpritePlan, type GenerateFn, type RunPlanRow } from "@/lib/sprite/run-plan";
-import { generateChunkedRow } from "@/lib/sprite/chunk-generate";
-import { pixelUnfakeOptions } from "@/lib/sprite/pixel-unfake";
-import { detectPixelGrid } from "@/lib/sprite/pixel-grid";
 import type { FitSpec } from "@/lib/sprite/request";
-import { selectImageBackend } from "@/lib/image-backend";
 import { extractRowFrames, writeRaw, type RawImage } from "@/lib/sprite/extract";
 import sharp from "sharp";
 import {
@@ -66,12 +62,7 @@ export type PlanDrivenInput = {
    * 쥔다. 우리도 같다: 이 필드가 있을 때만 이전 힌트를 얹어 다시 굽는다.
    */
   correctFrom?: string;
-  /**
-   * 추출 튜닝 (정본 `fit`). 픽셀 언페이크·분리 모드를 켤 때만 온다.
-   *
-   * **켜기 전에 base 를 재서 경고한다** — 격자가 없거나 논리 해상도가 높으면 스냅이
-   * 통째로 건너뛰어지는데, 그 사실을 생성비를 쓰기 전에 알아야 한다.
-   */
+  /** 추출 튜닝 (정본 `fit`). 지금은 분리 모드(`segmentation`)만 온다. */
   fit?: FitSpec;
 };
 
@@ -118,42 +109,6 @@ export async function runPlanDrivenSpritesheet(
       }
     } catch (e) {
       gateWarnings.push(`base 자동 검사 실패: ${(e as Error).message}`);
-    }
-    for (const w of gateWarnings) log(`plan-driven 경고: ${w}`);
-  }
-
-  // 픽셀 언페이크를 켰으면 **base 부터 진짜 도트인지 잰다.** 정본 게이트가 못박은 지점:
-  // "베이스/앵커가 스타일 SSoT 다 — 도트 런이면 베이스부터 진짜 도트여야 한다.
-  //  프롬프트 문구로 베이스의 스타일을 이기려 하지 마라."
-  // 격자가 없거나 논리 해상도가 높으면 행 생성에서 블록이 붕괴해 스냅이 건너뛰어진다.
-  if (input.fit?.pixel_unfake) {
-    try {
-      const { data, info } = await sharp(basePath).ensureAlpha().raw()
-        .toBuffer({ resolveWithObject: true });
-      const g = detectPixelGrid({
-        data: new Uint8Array(data), width: info.width, height: info.height,
-      });
-      if (g.pitch[0] < 2) {
-        gateWarnings.push(
-          "픽셀 언페이크를 켰지만 base 에서 픽셀 격자가 검출되지 않습니다 (피치 1.0) — " +
-            "행 생성물에도 격자가 없어 스냅이 통째로 건너뛰어집니다. 진짜 도트 base 로 바꾸세요.",
-        );
-      } else {
-        // 블록 크기 = 프레임당 폭 / base 논리 폭. 검출 임계는 블록 4px 근처다(실측).
-        const logicalW = Math.round(info.width / g.pitch[0]);
-        const perFrame = Math.round(1536 / Math.max(1, input.frames));
-        const predicted = perFrame / Math.max(1, logicalW);
-        if (predicted < 4) {
-          gateWarnings.push(
-            `base 논리 해상도가 ~${logicalW}px 입니다 (피치 ${g.pitch[0].toFixed(1)}). ` +
-              `${input.frames}프레임 행에서는 블록이 ~${predicted.toFixed(1)}px 로 예상돼 ` +
-              `격자가 붕괴합니다(임계 4px). 프레임 수를 줄이거나 논리 ${Math.floor(perFrame / 4)}px 이하 ` +
-              `base 를 쓰세요 — 청크 생성이 켜져 있으면 실패한 청크만 다시 뽑습니다.`,
-          );
-        }
-      }
-    } catch (e) {
-      gateWarnings.push(`base 격자 검사 실패: ${(e as Error).message}`);
     }
     for (const w of gateWarnings) log(`plan-driven 경고: ${w}`);
   }
@@ -249,8 +204,7 @@ export async function runPlanDrivenSpritesheet(
         },
         // 앵커 행 재추출도 같은 설정을 타야 새로 굽는 행과 프레임이 맞는다.
         ...(request.fit ? { fit: request.fit } : {}),
-        ...pixelUnfakeOptions(request),
-        label: state,
+          label: state,
       });
       const dir = path.join(workDir, `frames-${state}`);
       await mkdir(dir, { recursive: true });
@@ -289,93 +243,8 @@ export async function runPlanDrivenSpritesheet(
     log(`plan-driven: 앵커 지정 ${JSON.stringify(picks)}`);
   }
 
-  /**
-   * 청크 생성 — 행을 2프레임씩 나눠 만들고 격자를 게이트로 건 뒤 하나의 스트립으로 잇는다.
-   *
-   * 청크 이미지는 generation 으로 남기지 않는다. 남는 것은 **합성 스트립 하나**라
-   * 하류(추출·큐레이션·합성)가 여느 행과 똑같이 다룬다.
-   */
-  const generateChunked = async (
-    spec: Parameters<GenerateFn>[0],
-    step: number,
-  ): Promise<{ generationId: string; imagePath: string; width: number; height: number }> => {
-    const c = spec.chunked!;
-    const backend = await selectImageBackend();
-    const result = await generateChunkedRow({
-      frameCount: c.frameCount,
-      chromaRgb: c.chromaRgb,
-      label: spec.state,
-      log: message => log(`plan-driven: ${message}`),
-      generateChunk: async (chunkIndex, frames, attempt) => {
-        const guide = await c.guideFor(frames, chunkIndex);
-        const refs = [...spec.inputPaths.filter(p2 => !/guide-.*\.png$/.test(p2)), guide];
-        const tmpId = `chunk_${spec.state}_${chunkIndex}_${attempt}_${Date.now().toString(36)}`;
-        const out = await backend.execute(
-          {
-            id: tmpId,
-            generationId: tmpId,
-            kind: "spritesheet",
-            prompt: c.promptFor(frames),
-            inputImagePaths: refs,
-            params: { rawPrompt: true, state: spec.state, planDriven: true },
-          },
-          (stage, detail) =>
-            log(
-              `plan-driven: ${spec.role} ${step}/${stateOrder.length} ` +
-                `청크 ${chunkIndex + 1} [${stage}]${detail ? ` ${detail}` : ""}`,
-            ),
-        );
-        const { data, info } = await sharp(out.imagePath)
-          .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-        await rm(out.imagePath, { force: true });
-        return { data: Buffer.from(data), width: info.width, height: info.height };
-      },
-    });
-    for (const w of result.warnings) gateWarnings.push(w);
-    log(
-      `plan-driven: ${spec.state} 청크 ${result.attempts.length}개 — ` +
-        result.attempts.map(a => `#${a.index + 1} ${a.attempts}회 피치 ${a.pitch[0].toFixed(1)}`).join(", "),
-    );
-
-    // 합성 스트립을 이 행의 generation 으로 저장한다.
-    const genId = newGenerationId();
-    const outPath = imagePath(genId);
-    await sharp(result.strip.data, {
-      raw: { width: result.strip.width, height: result.strip.height, channels: 4 },
-    }).png().toFile(outPath);
-    createGeneration({
-      id: genId,
-      session_id: sessionId,
-      message_id: null,
-      kind: "spritesheet",
-      prompt: spec.prompt,
-      input_image_ids: [],
-      params: {
-        rawPrompt: true,
-        state: spec.state,
-        role: spec.role,
-        planDriven: true,
-        chunked: result.attempts,
-        curation: { selected: [] },
-      },
-      image_path: toRelative(outPath),
-      width: result.strip.width,
-      height: result.strip.height,
-      backend: "codex_exec",
-    });
-    return {
-      generationId: genId,
-      imagePath: outPath,
-      width: result.strip.width,
-      height: result.strip.height,
-    };
-  };
-
   const generate: GenerateFn = async spec => {
     const step = stateOrder.indexOf(spec.state) + 1;
-    if (spec.chunked) {
-      return generateChunked(spec, step);
-    }
     const res = await runImageTool({
       name: "sprite_row",
       kind: "spritesheet",

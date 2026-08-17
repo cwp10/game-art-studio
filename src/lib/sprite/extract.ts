@@ -15,8 +15,8 @@
  * `slots-explicit` 로 표기된다 — 기본 경로가 아니다.
  *
  * 옵트인 경로(전부 원본에서도 옵트인): ycbcr 매팅(`chromaMode`), projection
- * 세그먼테이션(`fit.segmentation`), 픽셀 언페이크(`fit.pixel_unfake` → `pixelUnfake`).
- * 이식 범위에서 뺀 것: alpha-centroid 정렬, takes.
+ * 세그먼테이션(`fit.segmentation`).
+ * 이식 범위에서 뺀 것: 픽셀 언페이크, alpha-centroid 정렬, takes.
  *
  * Ported from sprite-gen (https://github.com/cwp10/sprite-gen),
  * Copyright 2026 Alex Kim, licensed under the Apache License, Version 2.0.
@@ -35,12 +35,6 @@ import {
   type SegmentationMode,
   type SeparateResult,
 } from "@/lib/sprite/segment";
-import {
-  conformRowLogical,
-  fitPixelUnfake,
-  snapComponents,
-  type SnapReport,
-} from "@/lib/sprite/pixel-unfake";
 
 export type RawImage = { data: Buffer; width: number; height: number };
 
@@ -331,8 +325,6 @@ export type ExtractResult = {
    * 있으면 분리가 기대 개수를 못 내 스트립을 건드리지 않았다는 뜻이다.
    */
   segmentation?: SeparateResult;
-  /** 픽셀 언페이크가 실제로 쓴 프레임별 피치와 합의. 켜졌을 때만 채워진다. */
-  pixelUnfake?: SnapReport;
 };
 
 /**
@@ -362,19 +354,7 @@ export async function extractRowFrames(opts: {
   segmentation?: SegmentationMode;
   /** 분리 보고에 붙는 이름 (보통 상태명). */
   label?: string;
-  /**
-   * 픽셀 언페이크 — 격자를 검출해 논리 해상도로 접는다. 없으면(기본) 일반 경로다.
-   * 배율·논리 규격은 request 에서 파생되므로 호출자가 계산해 넘긴다
-   * (`pixelSnapScale`/`effectiveLogicalHeight`).
-   */
-  pixelUnfake?: {
-    scale: number;
-    logicalWidth: number;
-    logicalHeight: number;
-    detailBias: boolean;
-  };
 }): Promise<ExtractResult> {
-  let unfakeReport: SnapReport | undefined;
   const { data, info } = await sharp(opts.sheetPath)
     .ensureAlpha()
     .raw()
@@ -424,39 +404,7 @@ export async function extractRowFrames(opts: {
   const grouped = extractComponentImages(strip, opts.frameCount);
   if (grouped) {
     const frames: RawImage[] = [];
-    if (opts.pixelUnfake) {
-      // 픽셀 언페이크 경로 — 격자를 검출해 논리 해상도로 접은 뒤 정수배로 셀에 앉힌다.
-      // 일반 경로(fitToCell)의 비정수 리샘플이 한 번도 개입하지 않는다.
-      const tight = tightenComponents(grouped.images);
-      const snapped = snapComponents(
-        tight,
-        strip,
-        opts.pixelUnfake.detailBias,
-        opts.label ?? "strip",
-      );
-      unfakeReport = snapped.report;
-      const registered = registerRowFrames(snapped.frames);
-      const conformed = conformRowLogical(
-        registered,
-        opts.pixelUnfake.logicalWidth,
-        opts.pixelUnfake.logicalHeight,
-        opts.pixelUnfake.detailBias,
-      );
-      if (conformed.conformed && unfakeReport) {
-        // 축소가 걸렸다는 사실은 조용하면 안 된다 — 칸이 병합돼 디테일이 갈린다.
-        unfakeReport.warnings.push(
-          `${opts.label ?? "row"}: 논리 프레임이 규격을 넘어 kCentroid 로 ` +
-            `${conformed.scale.toFixed(3)}배 줄였습니다 — 격자가 없는 프레임이 섞이면 흔합니다`,
-        );
-      }
-      for (const logical of conformed.frames) {
-        frames.push(
-          fitPixelUnfake(logical, opts.cell, opts.pixelUnfake.scale, alphaCentroidX),
-        );
-      }
-    } else {
-      for (const image of grouped.images) frames.push(await fitToCell(image, opts.cell));
-    }
+    for (const image of grouped.images) frames.push(await fitToCell(image, opts.cell));
     // 프레임별 QA — 정본은 여기서 멈춘다. 에러(빈 프레임·크로마 잔류)는 그 행을
     // 그대로 쓰면 안 된다는 뜻이고, 폐루프(inspect/score)는 이 뒤의 관계 신호라
     // 프레임 하나가 뭉개진 것을 못 잡는다(실측: 그런 시트가 100점을 받았다).
@@ -464,8 +412,7 @@ export async function extractRowFrames(opts: {
     if (frameQa.errors.length > 0 && !opts.allowFrameQaErrors) {
       throw new ExtractionFailed(frameQa.errors.join("; "));
     }
-    return { frames, method: "components", dropped: grouped.dropped, frameQa,
-      ...(unfakeReport ? { pixelUnfake: unfakeReport } : {}), ...extra };
+    return { frames, method: "components", dropped: grouped.dropped, frameQa, ...extra };
   }
 
   if (!opts.allowSlotFallback) {

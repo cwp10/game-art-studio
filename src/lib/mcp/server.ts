@@ -153,19 +153,6 @@ const SCHEMAS = {
           "메시지에 [correct: <id>] 마커가 있을 때 그 값을 그대로 전달한다. " +
           "서버가 그 시트의 자동 검사 힌트를 읽어 해당 상태 행의 프롬프트에 얹는다.",
       },
-      pixelUnfake: {
-        type: "boolean",
-        description:
-          "(선택) true 면 격자 스냅 다운스케일로 진짜 픽셀 해상도를 복원한다(정본 fit.pixel_unfake). " +
-          "생성물에 실제 픽셀 블록이 있어야 동작한다 — base 에 격자가 없으면 서버가 경고하고 스냅을 건너뛴다. " +
-          "사용자가 '픽셀아트로', '도트로', '레트로 픽셀' 을 명시했을 때만 전달.",
-      },
-      logicalHeight: {
-        type: "number",
-        description:
-          "(선택) pixelUnfake 와 함께 쓰는 목표 논리 높이. 셀 높이(기본 256)의 정수 약수여야 하고 " +
-          "아니면 배율이 반올림돼 선언이 무효가 된다(64 → 4배 청키). 생략하면 셀 높이와 1:1.",
-      },
       segmentation: {
         type: "string",
         enum: ["components", "projection"],
