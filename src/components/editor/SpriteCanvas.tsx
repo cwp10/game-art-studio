@@ -29,6 +29,18 @@ type SheetParams = {
   states?: string[];
   /** 상태 → 그 행의 raw generation id. 큐레이션·앵커 핀이 여기 붙는다. */
   rowGenerationIds?: Record<string, string>;
+  /**
+   * 아틀라스 매니페스트 — 상태별 fps·loop 의 SSoT.
+   *
+   * 시트 전체 `fps` 는 첫 상태의 값일 뿐이다(핸들러가 `rows[states[0]].fps` 로 채운다).
+   * 상태를 골라 재생할 때는 그 상태의 fps 를 써야 한다 — idle 4, attack 8 처럼 정본
+   * 기본값부터 다르다.
+   */
+  manifest?: {
+    animation?: {
+      rows?: Record<string, { fps?: number; loop?: boolean; frames?: number }>;
+    };
+  };
 };
 
 /** /api/sprite/qa 응답 — 모션 QA 산출물 목록. */
@@ -274,21 +286,48 @@ export function SpriteCanvas({
     params && typeof params.directions === "number" && params.directions > 1
       ? params.directions
       : 0;
-  const dirLabels = useMemo(() => {
+  /**
+   * 플랜 구동 시트의 행 = **상태**다(방향이 아니라).
+   *
+   * 정본 아틀라스 계약이 `rows = 상태 수`, `columns = max(상태별 프레임)` 이고 상태마다
+   * fps·loop 가 다르다(idle 4, attack 8). 행을 고르지 못하면 `down_idle` 과
+   * `down_attack` 이 한 사이클로 이어 재생돼 어느 쪽도 판단할 수 없다 — 정본이 상태별로
+   * GIF 를 따로 굽는 이유가 그것이다.
+   */
+  const stateRows =
+    params?.planDriven === true &&
+    Array.isArray(params.states) &&
+    params.states.length > 1 &&
+    params.states.length === rows
+      ? params.states
+      : null;
+  const rowLabels = useMemo(() => {
+    if (stateRows) return stateRows;
     if (directionCount && [2, 4, 8].includes(directionCount)) {
       return directionLabels(directionCount as Directions);
     }
     // params 에 directions 가 없거나 비표준이면 행 인덱스 라벨.
     return directionCount ? Array.from({ length: rows }, (_, i) => `행 ${i + 1}`) : [];
-  }, [directionCount, rows]);
-  const isDirSheet = directionCount > 0 && order === "row";
-  // 방향 시트가 아니거나 dirRow 가 행 범위를 벗어나면(분할 변경) 전체로 리셋.
+  }, [stateRows, directionCount, rows]);
+  // 행 하나만 재생할 수 있는 시트인가 — 방향 시트이거나 플랜 구동 다상태 시트.
+  const isRowSheet = (directionCount > 0 || stateRows !== null) && order === "row";
+  // 행 시트가 아니거나 dirRow 가 행 범위를 벗어나면(분할 변경) 전체로 리셋.
   useEffect(() => {
-    if (!isDirSheet || dirRow >= rows) {
+    if (!isRowSheet || dirRow >= rows) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setDirRow(-1);
     }
-  }, [isDirSheet, rows, dirRow]);
+  }, [isRowSheet, rows, dirRow]);
+  // 상태 행을 고르면 그 상태의 fps 로 재생한다. 시트 전체 `params.fps` 는 첫 상태의
+  // 값이라, 그것으로 attack 행을 돌리면 정본이 정한 8fps 가 아니라 idle 의 4fps 가 된다.
+  useEffect(() => {
+    if (!stateRows || dirRow < 0) return;
+    const rowFps = params?.manifest?.animation?.rows?.[stateRows[dirRow]]?.fps;
+    if (typeof rowFps === "number" && rowFps >= 1 && rowFps <= 30) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFps(rowFps);
+    }
+  }, [stateRows, dirRow, params]);
 
   const [frames, setFrames] = useState<HTMLCanvasElement[]>([]);
   useEffect(() => {
@@ -389,12 +428,12 @@ export function SpriteCanvas({
     const n = (adjustedFrames.length > 0 ? adjustedFrames : frames).length;
     const ord = frameOrder.length === n ? frameOrder : Array.from({ length: n }, (_, i) => i);
     return ord.filter(origIdx => {
-      if (isDirSheet && dirRow >= 0 && !(origIdx >= dirRow * cols && origIdx < dirRow * cols + cols)) {
+      if (isRowSheet && dirRow >= 0 && !(origIdx >= dirRow * cols && origIdx < dirRow * cols + cols)) {
         return false;
       }
       return !excludedFrames.has(origIdx);
     });
-  }, [adjustedFrames, frames, frameOrder, isDirSheet, dirRow, cols, excludedFrames]);
+  }, [adjustedFrames, frames, frameOrder, isRowSheet, dirRow, cols, excludedFrames]);
 
   // 미리보기 재생 프레임 — adjustedFrames 우선, 없으면 frames. 방향 필터 적용.
   const previewFrames = useMemo(() => {
@@ -753,12 +792,11 @@ export function SpriteCanvas({
   // ⑧ 아틀라스 메타데이터(.json) — 엔진(Unity/Godot/Phaser)에서 바로 슬라이싱.
   // params 우선, 없으면(구버전) 현재 rows/cols/fps 로 최선. anchor 는 셀-로컬 피벗.
   function buildAtlasJson(format: AtlasFormat = "custom"): Record<string, unknown> {
-    const directions =
-      isDirSheet && dirLabels.length === rows
-        ? dirLabels
-        : directionCount && dirLabels.length
-          ? dirLabels
-          : undefined;
+    // 행 이름 — 방향 시트면 방향, 플랜 구동 상태 시트면 상태. 엔진 쪽 애니메이션 이름이 된다.
+    const rowNames = isRowSheet && rowLabels.length === rows ? rowLabels : undefined;
+    // custom 포맷의 `directions` 는 방향 계약 전용 필드다. 상태 이름을 여기 넣으면
+    // 소비자가 `idle`·`attack` 을 방향으로 읽는다.
+    const directions = directionCount ? rowNames : undefined;
 
     if (format === "custom") {
       return {
@@ -801,8 +839,8 @@ export function SpriteCanvas({
         };
       }
       const frameTags =
-        directions && isDirSheet
-          ? directions.map((name, i) => ({
+        rowNames
+          ? rowNames.map((name, i) => ({
               name,
               from: i * cols,
               to: i * cols + cols - 1,
@@ -829,8 +867,8 @@ export function SpriteCanvas({
         return { index: i, region: { x, y, w: cellW, h: cellH } };
       });
       const animations =
-        directions && isDirSheet
-          ? directions.map((name, i) => ({
+        rowNames
+          ? rowNames.map((name, i) => ({
               name,
               fps,
               loop,
@@ -1446,17 +1484,18 @@ export function SpriteCanvas({
               <ArrowDown size={12} /> 세로
             </button>
           </div>
-          {/* 방향 시트(rows=directions>1): 행=방향. 선택 시 미리보기/GIF 가 해당 행만 재생. */}
-          {isDirSheet && (
+          {/* 행 시트: 방향 시트면 행=방향, 플랜 구동 시트면 행=상태. 선택 시 미리보기/GIF 가
+              해당 행만 재생하고, 상태 시트면 그 상태의 fps 까지 따라간다. */}
+          {isRowSheet && (
             <div className="flex items-center gap-2">
-              <span className="w-12 shrink-0 text-text-muted">방향</span>
+              <span className="w-12 shrink-0 text-text-muted">{stateRows ? "상태" : "방향"}</span>
               <select
                 value={dirRow}
                 onChange={e => { setDirRow(Number(e.target.value)); setPreviewIdx(0); }}
                 className="h-7 flex-1 rounded border border-border bg-bg-app px-1 text-text-primary"
               >
-                <option value={-1}>전체 ({rows}방향)</option>
-                {dirLabels.map((label, i) => (
+                <option value={-1}>전체 ({rows}{stateRows ? "상태" : "방향"})</option>
+                {rowLabels.map((label, i) => (
                   <option key={i} value={i}>{label}</option>
                 ))}
               </select>
