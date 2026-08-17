@@ -198,10 +198,18 @@ function messagesToItems(messages: Message[]): ChatItem[] {
       const raw = m.content.find((b): b is Extract<MessageBlock, { type: "text" }> => b.type === "text")?.text ?? "";
       // [reference: <id>] / [mask: <id>] / [extract] 마커 제거 + reference id 수집.
       // route.ts 가 user 본문에 prefix 한 마커를 재로드 시 칩으로 복원하기 위함.
+      // 같은 참조가 본문에 두 번 남은 메시지가 이미 저장돼 있다 — 첨부 칩은 id 를 React
+      // key 로 쓰므로 중복이 그대로 오면 형제 key 가 충돌한다. 표시용 목록이라 중복은
+      // 의미가 없으니 여기서 접는다(생성 쪽 중복은 `/api/sprite/correct` 에서 막았다).
+      const seenAttachments = new Set<string>();
       const attachmentIds: string[] = [];
       const text = raw
         .replace(/\[reference:\s*([^\]]+)\]/g, (_, id: string) => {
-          attachmentIds.push(id.trim());
+          const trimmed = id.trim();
+          if (!seenAttachments.has(trimmed)) {
+            seenAttachments.add(trimmed);
+            attachmentIds.push(trimmed);
+          }
           return "";
         })
         .replace(/\[mask:\s*[^\]]+\]/g, "")

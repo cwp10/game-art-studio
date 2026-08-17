@@ -55,8 +55,11 @@ export async function POST(req: NextRequest) {
   const loop = firstState?.loop === true;
 
   // 패널이 쓰는 것과 같은 지시문 형식. `[correct: id]` 만 추가된다.
+  //
+  // `[reference: ...]` 는 여기서 넣지 않는다 — 마커의 단일 소유자는 `/api/chat` 이고,
+  // 그쪽이 `attachmentGenerationIds` 마다 마커를 붙인다. 양쪽이 다 넣으면 같은 참조가
+  // 본문에 두 번 남아 재로드 시 첨부 칩이 중복 key 로 렌더된다(실제로 그랬다).
   const message =
-    `[reference: ${baseId}]\n` +
     `[spritesheet: subjectType=character; anchorStrategy=feet; rows=${rows}; cols=${cols}; ` +
     `directions=1; facing=REF; seamlessLoop=${loop}]\n` +
     `[correct: ${atlasId}]\n` +
