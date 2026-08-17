@@ -311,13 +311,27 @@ export function SpriteCanvas({
   }, [stateRows, directionCount, rows]);
   // 행 하나만 재생할 수 있는 시트인가 — 방향 시트이거나 플랜 구동 다상태 시트.
   const isRowSheet = (directionCount > 0 || stateRows !== null) && order === "row";
-  // 행 시트가 아니거나 dirRow 가 행 범위를 벗어나면(분할 변경) 전체로 리셋.
+  /**
+   * 행 선택 초기화 — **상태 시트는 첫 상태로 연다.**
+   *
+   * 상태는 서로 다른 동작이다. 전체 재생으로 열면 idle 과 attack 이 한 사이클로 이어져
+   * 어느 쪽도 판단할 수 없다 — 정본이 상태별로 GIF 를 따로 굽는 이유다. 방향 시트는
+   * 반대다: 같은 동작을 여러 각도로 본 것이라 전체를 훑는 게 뜻이 있다.
+   *
+   * "전체" 옵션 자체는 남겨 둔다 — 시트를 통으로 확인하고 싶을 때가 있다.
+   */
   useEffect(() => {
-    if (!isRowSheet || dirRow >= rows) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDirRow(-1);
+    if (!isRowSheet) {
+      if (dirRow !== -1) setDirRow(-1);
+      return;
     }
-  }, [isRowSheet, rows, dirRow]);
+    // 분할을 바꿔 행 범위를 벗어났으면 되돌린다.
+    if (dirRow >= rows) {
+      setDirRow(stateRows ? 0 : -1);
+      return;
+    }
+    if (stateRows && dirRow < 0) setDirRow(0);
+  }, [isRowSheet, rows, dirRow, stateRows]);
   // 상태 행을 고르면 그 상태의 fps 로 재생한다. 시트 전체 `params.fps` 는 첫 상태의
   // 값이라, 그것으로 attack 행을 돌리면 정본이 정한 8fps 가 아니라 idle 의 4fps 가 된다.
   useEffect(() => {
@@ -1074,6 +1088,13 @@ export function SpriteCanvas({
   /** 그 행의 프레임 순서를 비전으로 판정받는다. 적용하지 않고 제안만 담는다. */
   async function judgeGaitOrder(state: string) {
     if (!sheetGenerationId) return;
+    // 판정을 건 행으로 미리보기를 옮긴다 — 다른 상태가 섞여 도는 화면에서는 판정이
+    // 맞는지 눈으로 확인할 수가 없다.
+    const rowIndex = params?.states?.indexOf(state) ?? -1;
+    if (rowIndex >= 0 && isRowSheet) {
+      setDirRow(rowIndex);
+      setPreviewIdx(0);
+    }
     setGaitBusy(state);
     setGaitResult(prev => {
       const next = { ...prev };
@@ -1140,6 +1161,8 @@ export function SpriteCanvas({
       for (const col of r.drop) next.add(base + col);
       return next;
     });
+    // 바꾼 순서를 바로 볼 수 있게 그 행만 재생한다.
+    if (isRowSheet) setDirRow(rowIndex);
     setPreviewIdx(0);
     setGaitResult(prev => {
       const cur = prev[state];
